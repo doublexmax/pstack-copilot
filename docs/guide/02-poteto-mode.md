@@ -2,6 +2,8 @@
 
 `/poteto-mode` is the front door. You give it a goal, it matches one of twenty-three playbooks, copies that playbook's steps into the todo list, and calls the other skills as the steps need them. In this page you learn what a good prompt looks like, and how little of one you actually need.
 
+Once you run the [always-on installer](../../README.md#always-on) you can drop the slash command and just describe the task. Everything below still applies. The command stays useful for naming the mode explicitly, and for re-anchoring it if you skipped the install.
+
 ![A dispatcher pulls a switch lever to route robots on rail handcars toward lit gates, under a /poteto-mode departure board listing BUG FIX, FEATURE, and INVESTIGATION.](./images/router.jpg)
 
 ## What happens to your prompt
@@ -51,7 +53,7 @@ continue
 keep going until done
 ```
 
-Short works because the mode holds across turns and the playbook holds the structure. Your words carry the intent, and the skill carries the rigor. The mode holds because the skill's text stays in context, so in a very long conversation, retyping `/poteto-mode` costs nothing and re-anchors it.
+Short works because the mode holds across turns and the playbook holds the structure. Your words carry the intent, and the skill carries the rigor. With the always-on block installed, the mode holds because it rides in the system prompt and is re-sent with every model request, so it survives a conversation long enough to compact. Without it, the mode holds because the skill's text stays in context, and retyping `/poteto-mode` re-anchors it for free.
 
 ## Switch tasks with "new task"
 

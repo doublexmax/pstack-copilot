@@ -39,6 +39,15 @@ cp ~/.copilot/pstack/agents/*.agent.md ~/.copilot/agents/
 confirm with `copilot skill list`; the pstack skills appear under
 `Custom skills:`. `~/.copilot/agents/` needs no registration.
 
+then turn the mode on by default, so you never have to type the slash command:
+
+```bash
+node ~/.copilot/pstack/scripts/install-always-on.mjs
+```
+
+that writes a short block into `~/.copilot/copilot-instructions.md`. see
+[always-on](#always-on) for what it does and how to take it back out.
+
 the [setup guide](./docs/guide/01-setup.md) covers the one extra step you need
 on windows, where copilot trusts your working directory but not `~/.copilot`.
 
@@ -47,7 +56,10 @@ on windows, where copilot trusts your working directory but not `~/.copilot`.
 two steps:
 
 1. run [`/setup-pstack`](./skills/setup-pstack/SKILL.md) and choose which models you want.
-2. use [`/poteto-mode`](./skills/poteto-mode/SKILL.md) whenever you're doing anything that requires rigor.
+2. describe your task. the mode is already on.
+
+`/poteto-mode` still works if you skipped the always-on step or want to name it
+explicitly.
 
 new here? the [pstack guide](./docs/guide/README.md) walks you through a first real task, from setup and prompting through verification and overnight runs.
 
@@ -270,13 +282,48 @@ copilot already has a great plan mode which works great with pstack. but persona
 
 type [`/automate-me`](./skills/automate-me/SKILL.md). it mines your recent transcripts, drafts a `<your-name>-mode` skill from how you've actually worked, and routes through pstack underneath. you keep pstack as the base and end up with your own routing skill alongside `poteto-mode`.
 
-models are configurable too. type [`/setup-pstack`](./skills/setup-pstack/SKILL.md). it detects the models you have access to and writes `~/.copilot/pstack-models.md`, a small override file mapping each role (code, judgment, the review panels) to a model. copilot has no user-global always-applied rule, so nothing injects that file for you; every skill that delegates opens it by path and falls back to sensible defaults when a line is absent, so you override only what you want.
+models are configurable too. type [`/setup-pstack`](./skills/setup-pstack/SKILL.md). it detects the models you have access to and writes `~/.copilot/pstack-models.md`, a small override file mapping each role (code, judgment, the review panels) to a model. every skill that delegates opens it by path and falls back to sensible defaults when a line is absent, so you override only what you want.
 
 ## automations
 
 pstack also ships a dormant [benny workflow pack](./automations/benny/). benny triages incoming issue reports, then reproduces and fixes confirmed bugs with real ui evidence. its files are read by path and are not registered skills.
 
 to set it up, point the agent at [`FOR_AGENTS.md`](./automations/benny/FOR_AGENTS.md). setup copies the pack into the target repository under `.github/automations/benny/` and keeps user configuration outside the copied pack. no per-repo registration is needed, since pstack is registered globally. the two automations run as scheduled copilot workflows created with `save_workflow`, and the intake defaults to azure devops work items.
+
+## always-on
+
+upstream cursor makes the mode sticky with `mode: true` in the skill frontmatter.
+copilot ignores that key, so the port carries the same behaviour a different way.
+
+```bash
+node scripts/install-always-on.mjs
+```
+
+that splices a managed block into `~/.copilot/copilot-instructions.md`. copilot
+loads that file into the **system prompt** of every session, in every directory,
+git or not. no slash command, no flag, no permission prompt, and nothing to add
+per repository. the block is a short router. it names when the mode applies and tells the agent
+to invoke the [`Poteto-Mode`](./skills/poteto-mode/SKILL.md) skill by name, so a
+trivial question doesn't drag two hundred lines of playbook into context.
+invoking by name matters: copilot trusts your working directory only, so a block
+that pointed at an absolute path under `~/.copilot` would be denied the read,
+while the skill tool loads the same file with no permission at all.
+
+three properties worth knowing:
+
+- it is user-scoped, so a fresh `git clone` you open tomorrow already has it.
+- it rides in the system prompt, which is re-sent with every model request, so a
+  long autopilot run cannot lose the mode to context compaction.
+- it is idempotent, and it only ever touches its own marker block. anything else
+  you keep in that file survives byte-identical.
+
+`--dry-run` shows the change without writing. `--uninstall` removes the block and
+leaves the rest of the file alone. `skip poteto mode` stands it down for a
+session without editing anything.
+
+the source text lives at
+[`always-on/copilot-instructions.md`](./always-on/copilot-instructions.md).
+edit that and re-run the installer to change what every session sees.
 
 ## checking the port
 
@@ -294,7 +341,7 @@ there is no CI gate. this org disables hosted runners and the repo has no self-h
 | --- | --- |
 | `.cursor-plugin/plugin.json`, `/add-plugin` | a `skillDirectories` entry in `~/.copilot/settings.json` |
 | project-scoped plugin install | global; every repo you open gets the skills |
-| `mode: true` sticky frontmatter | the `poteto` agent, plus a stay-in-the-mode rule in the skill body |
+| `mode: true` sticky frontmatter | a managed block in `~/.copilot/copilot-instructions.md`, installed by [`install-always-on.mjs`](./scripts/install-always-on.mjs) |
 | `AGENTS.md` subagent contract | `.agent.md` files spawned through the `task` tool |
 | `AskQuestion` tool | the `ask_user` tool |
 | one model slug per role | `model` plus `reasoning_effort`, two fields |
