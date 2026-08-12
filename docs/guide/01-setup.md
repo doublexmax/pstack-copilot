@@ -7,7 +7,7 @@ In this page you install the plugin, pick which models pstack uses, and run your
 Clone this fork somewhere stable and register its skills directory with the Copilot CLI:
 
 ```bash
-git clone -b copilot-port <your-fork-url> ~/.copilot/pstack
+git clone https://github.com/maxxtandon_microsoft/pstack-copilot ~/.copilot/pstack
 copilot skill add ~/.copilot/pstack/skills
 ```
 
