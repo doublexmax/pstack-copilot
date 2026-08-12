@@ -21,15 +21,34 @@ trunk=${trunk#origin/}
 [ -z "$trunk" ] && trunk=master
 git fetch origin "$trunk" --quiet 2>/dev/null || echo "warn: could not fetch origin/$trunk; merged column may be stale" >&2
 
-# PR state by branch, fetched once. Empty if az is unavailable or the remote
-# is not Azure DevOps. az reports refs as refs/heads/<branch>, so the lookup
-# below normalizes before matching.
+# PR state by branch, fetched once as TSV so az does the filtering and this
+# script needs no jq. az reports refs as refs/heads/<branch>; the lookup below
+# matches that form directly. Columns: ref, id, status.
 prs=$(mktemp)
-az repos pr list --status all --top 1000 --output json 2>/dev/null \
-	> "$prs" || echo "[]" > "$prs"
+az repos pr list --status all --top 1000 \
+	--query "[].[sourceRefName, pullRequestId, status]" -o tsv 2>/dev/null \
+	> "$prs" || : > "$prs"
+# An empty PR table is not cosmetic: it disables the open-PR guard, which is
+# the check that keeps a worktree with live review work out of the safe bucket.
+[ -s "$prs" ] && have_prs=yes || {
+	have_prs=no
+	echo "warn: no PR data from az, so the open-PR guard is INACTIVE." >&2
+	echo "      Treat every 'safe' row as 'review' until you confirm by hand." >&2
+}
 
-# Copilot's local session store. Queried with sqlite3 when available.
+# Copilot's local session store, read with sqlite3. Without it the last-chat
+# column is blank, so a worktree you used this morning looks abandoned.
 sessions_db="$HOME/.copilot/session-store.db"
+if [ -f "$sessions_db" ] && ! command -v sqlite3 >/dev/null 2>&1; then
+	echo "warn: sqlite3 not found; LAST_CHAT is blank and recent work will not" >&2
+	echo "      hold a worktree back from the safe bucket." >&2
+fi
+
+# du walks every file, which costs minutes per worktree on a large monorepo.
+# Set PSTACK_AUDIT_SKIP_SIZE=1 to get the merge/PR/chat signals immediately.
+skip_size="${PSTACK_AUDIT_SKIP_SIZE:-0}"
+[ "$skip_size" = 1 ] || echo "note: measuring sizes with du; set PSTACK_AUDIT_SKIP_SIZE=1 to skip" >&2
+
 now=$(date +%s)
 
 printf "SIZE\tAGE\tMERGED\tDIRTY\tREMOTE\tPR\tLAST_CHAT\tBUCKET\tWORKTREE\n"
@@ -37,7 +56,7 @@ printf "SIZE\tAGE\tMERGED\tDIRTY\tREMOTE\tPR\tLAST_CHAT\tBUCKET\tWORKTREE\n"
 git worktree list --porcelain | awk '/^worktree /{print $2}' | while read -r wt; do
 	[ "$wt" = "$main_wt" ] && continue
 
-	size=$(du -sh "$wt" 2>/dev/null | awk '{print $1}')
+	if [ "$skip_size" = 1 ]; then size="-"; else size=$(du -sh "$wt" 2>/dev/null | awk '{print $1}'); fi
 	head=$(git -C "$wt" rev-parse HEAD 2>/dev/null)
 	head_ts=$(git -C "$wt" log -1 --format='%ct' HEAD 2>/dev/null || echo 0)
 	age=$([ "$head_ts" -gt 0 ] 2>/dev/null && echo "$(( (now - head_ts) / 86400 ))d" || echo "?")
@@ -61,8 +80,8 @@ git worktree list --porcelain | awk '/^worktree /{print $2}' | while read -r wt;
 			|| remote="ahead$(git -C "$wt" rev-list --count "origin/$branch..HEAD" 2>/dev/null)"
 	else remote=no-remote; fi
 
-	pr=$([ -n "$branch" ] && jq -r --arg b "refs/heads/$branch" \
-		'.[] | select(.sourceRefName==$b) | "#\(.pullRequestId)/\(.status)"' "$prs" 2>/dev/null | head -1)
+	pr=$([ -n "$branch" ] && awk -F'\t' -v b="refs/heads/$branch" \
+		'$1==b {print "#" $2 "/" $3; exit}' "$prs" 2>/dev/null)
 	[ -z "$pr" ] && pr="-"
 
 	# Most recent session whose cwd was this worktree. Exact match on cwd, so
@@ -78,8 +97,9 @@ git worktree list --porcelain | awk '/^worktree /{print $2}' | while read -r wt;
 	recent=$([ "$last_ts" -gt 0 ] 2>/dev/null && [ $(( (now - last_ts) / 86400 )) -le 4 ] && echo yes || echo no)
 
 	case "$dirty" in wip:*) bucket=hold-wip ;; *)
-		case "$pr" in *OPEN*) bucket=hold-open-pr ;; *)
+		case "$pr" in */active) bucket=hold-open-pr ;; *)
 			if [ "$recent" = yes ]; then bucket=verify-recent-chat
+			elif [ "$have_prs" = no ]; then bucket=review
 			elif [ "$merged" = YES ] || [ "$pr" != "-" ]; then bucket=safe
 			else bucket=review; fi ;;
 		esac ;;
