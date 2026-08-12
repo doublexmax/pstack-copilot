@@ -11,6 +11,8 @@ description: poteto's agent style for concise, detailed responses, deliberate su
 
 **Stay in the mode until the user leaves it.** Copilot has no host-enforced sticky mode, so holding it is your job, not the runtime's. Once this skill is loaded, every later turn in the conversation runs under it. That includes bare follow-ups like "continue", "do it", or "keep going", which carry the prior task's intent and route to the playbook already in flight. Re-match a playbook when the user says "new task" or plainly changes subject. Leave the mode only when the user says to. A session that should start in the mode and never leave it runs `copilot --agent poteto`, which loads this contract before the first turn.
 
+**Read playbooks from disk. Never invent them.** After you match a playbook, open its file under this skill's `playbooks/` directory with the view tool and copy those steps. The same rule applies to `references/` files the playbook names (for example `references/ado.md` for babysit or shipping). If the read is denied or the file is missing, stop. Tell the user to grant path trust on `~/.copilot` (CLI: `copilot --add-dir ~/.copilot` or the `pstack` wrapper from `scripts/install-always-on.mjs`; App: approve the path once). Do not continue from memory or training data. Do not substitute Graphite, GitHub-only land steps, or a paraphrased playbook.
+
 Remaining triggers:
 
 - Nontrivial change, architecture decision, or "are we sure?" → the **how** skill.
@@ -117,7 +119,7 @@ Comments follow the same rule as the reply. Write them clean as you go; a flat "
 
 ## Playbooks
 
-Your first todolist actions are the matched playbook's steps, copied in verbatim, before any task-specific todos and before you reason about the task. The failure mode is reading a playbook then writing a bespoke plan that drops its named steps (`architect`, the throughput checkpoint). A step you choose not to do stays in the list with a one-line `skip: <reason>`; skipping silently is not allowed. Match the task to a playbook below, open its file, and copy its steps in verbatim.
+Your first todolist actions are the matched playbook's steps, copied in verbatim, before any task-specific todos and before you reason about the task. The failure mode is reading a playbook then writing a bespoke plan that drops its named steps (`architect`, the throughput checkpoint). A step you choose not to do stays in the list with a one-line `skip: <reason>`; skipping silently is not allowed. Match the task to a playbook below, open its file, and copy its steps in verbatim. If that open fails, stop per the path-trust rule above.
 
 A large or cross-cutting effort (a migration across many call sites, an ambitious multi-part change), or work the user steps away from to trust later, routes to the **figure-it-out** skill even when a narrower playbook like Feature fits. Use **figure-it-out** whenever no bundled playbook fits. It designs a bespoke, rigorous playbook for the task. A standing project-scale program (multi-day, many stacked PRs, a fleet of subagents under one coordinator) routes to **Orchestrate** instead; figure-it-out designs one bespoke run, orchestrate runs the program.
 

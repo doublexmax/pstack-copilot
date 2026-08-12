@@ -39,17 +39,18 @@ cp ~/.copilot/pstack/agents/*.agent.md ~/.copilot/agents/
 confirm with `copilot skill list`; the pstack skills appear under
 `Custom skills:`. `~/.copilot/agents/` needs no registration.
 
-then turn the mode on by default, so you never have to type the slash command:
+then turn the mode on by default **and** grant path trust for playbooks:
 
 ```bash
 node ~/.copilot/pstack/scripts/install-always-on.mjs
 ```
 
-that writes a short block into `~/.copilot/copilot-instructions.md`. see
-[always-on](#always-on) for what it does and how to take it back out.
-
-the [setup guide](./docs/guide/01-setup.md) covers the one extra step you need
-on windows, where copilot trusts your working directory but not `~/.copilot`.
+that writes the always-on block, adds `~/.copilot` to `config.json`
+`trustedFolders`, and installs a `pstack` wrapper that passes
+`--add-dir ~/.copilot` so headless runs can read playbooks and model
+overrides. see [always-on](#always-on) for what it does and how to take it
+back out. the [setup guide](./docs/guide/01-setup.md) has the path-trust
+probe.
 
 ## get started
 
@@ -299,30 +300,38 @@ copilot ignores that key, so the port carries the same behaviour a different way
 node scripts/install-always-on.mjs
 ```
 
-that splices a managed block into `~/.copilot/copilot-instructions.md`. copilot
-loads that file into the **system prompt** of every session, in every directory,
-git or not. no slash command, no flag, no permission prompt, and nothing to add
-per repository. the block is a short router. it names when the mode applies and
-tells the agent to invoke the [`poteto-mode`](./skills/poteto-mode/SKILL.md)
-skill by name, so a trivial question doesn't drag two hundred lines of playbook
-into context. invoking by name matters: copilot trusts your working directory
-only, so a block that pointed at an absolute path under `~/.copilot` would be
-denied the read, while the skill tool loads the same file with no permission at
-all.
+the installer does three user-scoped writes:
+
+1. a managed block in `~/.copilot/copilot-instructions.md`. copilot loads that
+   file into the **system prompt** of every session, in every directory, git or
+   not. the block is a short router. it names when the mode applies and tells
+   the agent to invoke the [`poteto-mode`](./skills/poteto-mode/SKILL.md) skill
+   by name, so a trivial question doesn't drag two hundred lines of playbook
+   into context. invoking by name matters: a block that pointed at an absolute
+   path under `~/.copilot` would be denied the read, while the skill tool loads
+   the same file with no permission at all.
+2. `~/.copilot` in `config.json` `trustedFolders`, so the host treats that tree
+   as trusted without wiping folders you already listed.
+3. a `pstack` CLI wrapper (`~/.copilot/bin/*` plus a marked profile/rc block)
+   that runs `copilot --add-dir ~/.copilot ...`. playbooks, references, and
+   `pstack-models.md` are normal disk reads. without that grant, non-interactive
+   sessions fail the read and used to invent upstream behavior from memory. the
+   mode skill now **stops** on a denied playbook read instead.
 
 three properties worth knowing:
 
 - it is user-scoped, so a fresh `git clone` you open tomorrow already has it.
-- it rides in the system prompt, which is re-sent with every model request, so a
-  long autopilot run cannot lose the mode to context compaction.
-- it is idempotent, and it only ever touches its own marker block. anything else
-  you keep in that file survives byte-identical.
+- the always-on block rides in the system prompt, which is re-sent with every
+  model request, so a long autopilot run cannot lose the mode to context
+  compaction.
+- it is idempotent, and each write only touches its own markers or the
+  `~/.copilot` trust entry. anything else you keep survives.
 
-`--dry-run` shows the change without writing. `--uninstall` removes the block and
-leaves the rest of the file alone. `skip poteto mode` stands it down for a
-session without editing anything.
+`--dry-run` shows the change without writing. `--uninstall` reverses all three.
+`--skip-shell` keeps always-on and trustedFolders only. `skip poteto mode`
+stands the mode down for a session without editing anything.
 
-the source text lives at
+the always-on source text lives at
 [`always-on/copilot-instructions.md`](./always-on/copilot-instructions.md).
 edit that and re-run the installer to change what every session sees. a session
 assembles its system prompt at startup, so an edit reaches new sessions, not
@@ -344,7 +353,7 @@ there is no CI gate. this org disables hosted runners and the repo has no self-h
 | --- | --- |
 | `.cursor-plugin/plugin.json`, `/add-plugin` | a `skillDirectories` entry in `~/.copilot/settings.json` |
 | project-scoped plugin install | global; every repo you open gets the skills |
-| `mode: true` sticky frontmatter | a managed block in `~/.copilot/copilot-instructions.md`, installed by [`install-always-on.mjs`](./scripts/install-always-on.mjs) |
+| `mode: true` sticky frontmatter | a managed block in `~/.copilot/copilot-instructions.md`, plus `trustedFolders` and a `pstack --add-dir` wrapper, installed by [`install-always-on.mjs`](./scripts/install-always-on.mjs) |
 | `AGENTS.md` subagent contract | `.agent.md` files spawned through the `task` tool |
 | `AskQuestion` tool | the `ask_user` tool |
 | one model slug per role | `model` plus `reasoning_effort`, two fields |

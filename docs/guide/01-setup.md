@@ -19,21 +19,31 @@ cp ~/.copilot/pstack/agents/*.agent.md ~/.copilot/agents/
 
 Confirm with `copilot skill list`. The pstack skills appear under `Custom skills:`, which means every repo you open sees them. `~/.copilot/agents/` needs no registration; agents there are discovered from any working directory.
 
-Then turn the mode on by default:
+Then turn the mode on by default **and** grant path trust for playbooks:
 
 ```bash
 node ~/.copilot/pstack/scripts/install-always-on.mjs
 ```
 
-That splices a short block into `~/.copilot/copilot-instructions.md`, which Copilot loads into the system prompt of every session in every directory. From then on you describe the task and the mode is already on. The block is user-scoped, so a repo you clone next month is covered without any per-repo setup. `--uninstall` takes it back out and leaves anything else in that file untouched.
+That one command does three things:
+
+1. Splices a short block into `~/.copilot/copilot-instructions.md`, which Copilot loads into the system prompt of every session in every directory. From then on you describe the task and the mode is already on.
+2. Adds the absolute `~/.copilot` path to `trustedFolders` in `~/.copilot/config.json`, preserving any folders you already trusted.
+3. Installs a `pstack` CLI wrapper (`~/.copilot/bin/` shims plus a marked block in your PowerShell profile or shell rc) that runs `copilot --add-dir ~/.copilot ...`, so headless runs can read playbooks and `pstack-models.md`.
+
+The block is user-scoped, so a repo you clone next month is covered without any per-repo setup. `--uninstall` reverses all three and leaves unrelated content untouched. `--skip-shell` installs only always-on and `trustedFolders`. `--dry-run` prints what would change.
 
 ## Let pstack read its own playbooks
 
-`skillDirectories` makes every skill load, but a skill is more than its `SKILL.md`. `poteto-mode` reads playbooks and references from disk while it works, and it reads your model overrides from `~/.copilot/pstack-models.md`. All of that goes through Copilot's path permissions, and Copilot trusts your working directory only. It does not trust `~/.copilot`.
+`skillDirectories` makes every skill load, but a skill is more than its `SKILL.md`. `poteto-mode` reads playbooks and references from disk while it works, and it reads your model overrides from `~/.copilot/pstack-models.md`. All of that goes through Copilot's path permissions, and Copilot trusts your working directory only unless you grant `~/.copilot`.
 
-Interactively, approve the prompt once and you are done.
+After the installer above, prefer:
 
-Non-interactively, `-p` cannot prompt, so the read simply fails, and a capable model will often answer from memory rather than stop. The answer you get back is then upstream's behavior, not this fork's. Pass the directory:
+```bash
+pstack --agent poteto -p "..." --allow-all-tools
+```
+
+That is the same as:
 
 ```bash
 copilot --agent poteto -p "..." --allow-all-tools --add-dir ~/.copilot
@@ -41,17 +51,7 @@ copilot --agent poteto -p "..." --allow-all-tools --add-dir ~/.copilot
 
 Grant `~/.copilot` rather than `~/.copilot/pstack`. The narrower grant looks tidier but silently disables `~/.copilot/pstack-models.md`, so your model panel would fall back to the defaults with no visible error.
 
-There is no config key or environment variable for `--add-dir`, so wrap it. PowerShell, in `$PROFILE.CurrentUserAllHosts`:
-
-```powershell
-function pstack { copilot --add-dir "$HOME\.copilot" @args }
-```
-
-bash or zsh:
-
-```bash
-pstack() { copilot --add-dir "$HOME/.copilot" "$@"; }
-```
+In the Copilot app, approve a path prompt for `~/.copilot` once if a playbook read is still denied. The mode skill is under orders to **stop** on a denied playbook read instead of inventing upstream Graphite or GitHub land steps from memory.
 
 To check it, ask a question whose answer only exists in a playbook, from a directory that is not a pstack checkout:
 
