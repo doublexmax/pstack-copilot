@@ -284,7 +284,7 @@ to set it up, point the agent at [`FOR_AGENTS.md`](./automations/benny/FOR_AGENT
 node scripts/check-copilot-port.mjs
 ```
 
-one zero-dependency script guards the things that silently break a copilot skill. it fails when a `name` doesn't match its folder (the skill then registers under the wrong slash command), when a `description` is missing or past copilot's 1024-character load limit, when frontmatter carries a key copilot ignores, when a relative link in the docs or skills doesn't resolve, and when prose still names a tool from another agent runtime. run it before you open a PR against this fork.
+one zero-dependency script guards the things that silently break a copilot skill. it fails when a `name` doesn't match its folder (the skill then registers under the wrong slash command), when a `description` is missing or past copilot's 1024-character load limit, when frontmatter carries a key copilot ignores, when a relative link in the docs or skills doesn't resolve, and when prose still names a tool from another agent runtime. [ci](./.github/workflows/check.yml) runs it on every pull request, so you don't have to remember.
 
 ## what changed from upstream
 
