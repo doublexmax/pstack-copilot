@@ -19,6 +19,14 @@ cp ~/.copilot/pstack/agents/*.agent.md ~/.copilot/agents/
 
 Confirm with `copilot skill list`. The pstack skills appear under `Custom skills:`, which means every repo you open sees them. `~/.copilot/agents/` needs no registration; agents there are discovered from any working directory.
 
+Then turn the mode on by default:
+
+```bash
+node ~/.copilot/pstack/scripts/install-always-on.mjs
+```
+
+That splices a short block into `~/.copilot/copilot-instructions.md`, which Copilot loads into the system prompt of every session in every directory. From then on you describe the task and the mode is already on. The block is user-scoped, so a repo you clone next month is covered without any per-repo setup. `--uninstall` takes it back out and leaves anything else in that file untouched.
+
 ## Let pstack read its own playbooks
 
 `skillDirectories` makes every skill load, but a skill is more than its `SKILL.md`. `poteto-mode` reads playbooks and references from disk while it works, and it reads your model overrides from `~/.copilot/pstack-models.md`. All of that goes through Copilot's path permissions, and Copilot trusts your working directory only. It does not trust `~/.copilot`.
@@ -81,11 +89,11 @@ After setup, start a new session. The model file is read per session.
 Pick something real but small, and describe it the way you'd describe it to a colleague:
 
 ```text
-/poteto-mode add a --json flag to this command. text output stays byte-identical. verify both.
+add a --json flag to this command. text output stays byte-identical. verify both.
 ```
 
-Watch the todo list. The first item is always "read the Principles section". The rest are the matched playbook's steps copied in, the Feature playbook for this prompt. If `/poteto-mode` skips a step, the step stays in the list with `skip: <reason>`, so you can see what it chose not to do.
+Watch the todo list. The first item is always "read the Principles section". The rest are the matched playbook's steps copied in, the Feature playbook for this prompt. If a step gets skipped, it stays in the list with `skip: <reason>`, so you can see what it chose not to do.
 
-From here you can type normal follow-ups. Once loaded, the skill's instructions stay in the conversation's context, so `continue` and `keep going` stay on the same playbook. Copilot has no mode flag that re-asserts a skill on every turn, so the skill body carries that contract itself. Say "new task" when you switch subjects, and say so plainly when you want the mode off. To start a session already in the mode, launch `copilot --agent poteto` instead of typing the command.
+From here you can type normal follow-ups. With the always-on block installed, the mode is re-asserted in the system prompt on every model request, so `continue` and `keep going` stay on the same playbook even after a long run compacts the conversation. Say "new task" when you switch subjects, and `skip poteto mode` when you want it off for a session. Without the always-on block, type `/poteto-mode` to enter, and the skill body carries the stay-in-the-mode contract from there.
 
 Next: [Route work through `/poteto-mode`](./02-poteto-mode.md).
