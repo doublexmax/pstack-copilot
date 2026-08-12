@@ -19,17 +19,32 @@ Skip when the conversation is trivial, off-topic, or already covered by an exist
 
 ## Process
 
-### 1. Locate the active transcript
+### 1. Locate the active session
 
-The parent finds its own transcript file before fanning out. The system prompt names the active workspace's `agent-transcripts/` directory; use that path. Do not glob across `~/.cursor/projects/*/`. That crosses workspace boundaries and reads private chats from unrelated projects.
+The parent identifies its own session before fanning out, so reviewers read the right conversation.
 
-```bash
-ls -t <agent-transcripts>/*.jsonl <agent-transcripts>/*/*.jsonl <agent-transcripts>/*/subagents/*.jsonl 2>/dev/null | head -10
+Use the `session_store_sql` tool at `source: "local"`. Scope to the active repository rather than reading everything; that is a `WHERE` clause here, not a warning.
+
+```sql
+SELECT id, summary, branch, created_at
+FROM sessions
+WHERE repository = '<active repo>'
+ORDER BY created_at DESC
+LIMIT 10
 ```
 
-Three transcript layouts: legacy flat (`<id>.jsonl`), current nested (`<id>/<id>.jsonl`), and subagent (`<parent>/subagents/<child>.jsonl`).
+Confirm the match by reading `turns.user_message` at `turn_index = 0` for the top candidate and checking it against this conversation's opening prompt. Take the matching `id`.
 
-For each candidate, read the first JSONL line and check that `message.content[0].text` contains the conversation's opening user prompt. Take the matching path. If no path resolves, write a tight digest of the session and pass that instead.
+Reviewers then pull the conversation with a scoped query rather than a file read:
+
+```sql
+SELECT turn_index, user_message, assistant_response
+FROM turns
+WHERE session_id = '<id>'
+ORDER BY turn_index
+```
+
+If no session resolves, write a tight digest of the conversation and pass that instead.
 
 ### 2. Spawn three reviewers in parallel
 
@@ -60,7 +75,7 @@ Backlog items file to whatever devex / backlog tracker your team uses automatica
 For each approved Accepted item, follow the Routing field exactly:
 
 - Trivial existing-skill edit (a one-line bullet, a tightened sentence, a stale fact corrected): parent does directly.
-- Substantive existing-skill edit (a new section, a new pattern table, more than ~10 lines): hand to Cursor's built-in `create-skill` skill and run its draft / test / iterate loop.
+- Substantive existing-skill edit (a new section, a new pattern table, more than ~10 lines): hand to the **create-skill** skill and run its draft / verify / iterate loop.
 - `tune description: <skill path>` (the skill exists but didn't trigger when it should have): hand to `create-skill` and run its description-optimization loop.
 - `new skill via create-skill: <kebab-name>`: hand creation to `create-skill`. Do not invent the shape ad hoc.
 

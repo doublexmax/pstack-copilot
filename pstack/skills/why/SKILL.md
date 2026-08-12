@@ -97,7 +97,7 @@ Capture this as seed context (file paths, symbols, commits, PR numbers, linked t
 
 ### Discovery
 
-Before spawning investigators, list the available MCPs from the Cursor environment. Use the available-tools map when present. Otherwise inspect the `mcps/` directory Cursor exposes for enabled MCP servers.
+Before spawning investigators, list the MCP servers actually available in this session. Read the tool list you were given: MCP tools are namespaced by server, so the distinct prefixes are the enabled servers. Do not assume a server exists because the category below names one.
 
 Map each available MCP to one evidence category:
 

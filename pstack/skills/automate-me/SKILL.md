@@ -7,13 +7,13 @@ description: "Use for \"automate me\", \"create/update/refresh my -mode skill\",
 
 A guided flow for turning the user's working conventions into a skill agents will follow. The output is one `-mode` skill tailored to them (e.g. `jay-mode`, `priya-mode`).
 
-This skill orchestrates three others: an inline mining pass (see step 1), Cursor's built-in `create-skill` (authoring), and the **unslop** skill (prose discipline). It sequences them; it doesn't replace them.
+This skill orchestrates three others: an inline mining pass (see step 1), the **create-skill** skill (authoring), and the **unslop** skill (prose discipline). It sequences them; it doesn't replace them.
 
 ## Flow
 
 ### 0. Check for an existing skill
 
-Look recursively for `.cursor/skills/**/*-mode/SKILL.md` and `~/.cursor/skills/*-mode/SKILL.md` matching the user's handle. Mode skills can live in a personal category directory (`.cursor/skills/<handle>/`), not only at the top level. If one exists, confirm intent with `AskQuestion` (unless they already said "update my skill" or similar):
+Look for `*-mode/SKILL.md` matching the user's handle across all three skill scopes: project (`.github/skills/`), personal (`~/.copilot/skills/`), and any directory listed in `skillDirectories` in `~/.copilot/settings.json`. `copilot skill list` shows all three at once. Also check `~/.copilot/agents/<handle>.agent.md`, since a mode that should only fire on explicit invocation lives there instead. If one exists, confirm intent with the `ask_user` tool (unless they already said "update my skill" or similar):
 
 - Update the existing skill (default for repeat runs)
 - Start fresh (rare; ask why before doing it)
@@ -25,9 +25,9 @@ Update mode changes the rest of the flow:
 
 ### 1. Mine their history
 
-Locate the active workspace's transcripts before fanning out. The system prompt names the workspace's `agent-transcripts/` directory. Use only that path. Don't glob across `~/.cursor/projects/*/`. That crosses workspace boundaries and reads private chats from unrelated projects.
+Mine history with the `session_store_sql` tool at `source: "local"`. Scope to the active repository (`WHERE repository = '<repo>'` on `sessions`) so you never read another project's private conversations.
 
-Survey recent agent conversations within that scope for recurring patterns. Run multiple parallel subagents across slices of history (e.g. last 2-4 weeks, split into 3 slices so each has enough material). Each slice mining subagent reads transcripts from the workspace-scoped path the parent provides, looks for the signals below, and returns a short structured list of patterns it saw with evidence pointers. Default signals worth hunting:
+Survey recent agent conversations within that scope for recurring patterns. Run multiple parallel subagents across slices of history (e.g. last 2-4 weeks, split into 3 slices so each has enough material). The parent runs one query to list candidate `session_id`s in scope and hands each subagent its slice of that list. Each subagent queries `turns` filtered by its `session_id`s, looks for the signals below, and returns a short structured list of patterns it saw with evidence pointers. Default signals worth hunting:
 
 - Response preferences (length, tone, format, "dumb it down" corrections)
 - Delegation habits (subagents, models, specialized workflows, parallelism)
@@ -63,13 +63,19 @@ The **poteto-mode** skill shows the shape. Read it for granularity. Don't copy i
 
 ### 4. Draft the skill
 
-Use Cursor's built-in `create-skill` skill to author the skill. Placement:
+Use the **create-skill** skill to author it. Placement depends on how the mode should fire.
 
-- Path: preserve an existing mode skill's category. For a new mode, use `.cursor/skills/<handle>/<handle>-mode/SKILL.md` when the repo has an established personal category for that handle; otherwise default to `.cursor/skills/<handle>-mode/SKILL.md` in the project (or `~/.cursor/skills/<handle>-mode/` if the user prefers a personal skill).
+A mode skill is heavy and opinionated, so it should apply when the user invokes it, not auto-trigger on a loose description match. Copilot has no `disable-model-invocation` flag; the way to get explicit-invocation-only behavior is to make it an **agent** instead of a skill.
+
+- **Default: an agent** at `~/.copilot/agents/<handle>.agent.md`. Agents only run when selected or spawned, which is the behavior a mode wants. Frontmatter is `name` and `description` only.
+- **A skill** at `~/.copilot/skills/<handle>-mode/SKILL.md` (or a registered directory) when the user does want it to auto-apply on description match, or when other skills need to invoke it by name.
+- Preserve an existing mode's location rather than moving it.
+
+Then:
+
 - Handle: the user's first name or chosen identifier.
-- Frontmatter `description`: trigger on their name + `/<handle>-mode` + "work in their style", not on generic keywords like "write code" or "review PR".
-- Frontmatter formatting: follow `create-skill`'s YAML rules. Keep `description` as one YAML scalar; quote it or use `description: >-` with indented continuation lines when punctuation or wrapping requires it.
-- Frontmatter `disable-model-invocation: true` by default. Mode skills are heavy and opinionated; they should only apply when the user explicitly invokes them (by name or slash command), not auto-trigger on description matching. Opt out only if the user explicitly wants their mode to apply on every turn.
+- `description`: trigger on their name plus "work in their style", not on generic keywords like "write code" or "review PR". Cap 1024 characters.
+- Keep `description` as one YAML scalar; quote it or use `description: >-` with indented continuation lines when punctuation or wrapping requires it.
 
 ### 5. Iterate on prose
 
@@ -105,4 +111,4 @@ Run a description-optimization loop only if the skill's trigger accuracy turns o
 
 - The **poteto-mode** skill: example of the output shape.
 - The **unslop** skill: prose discipline for every line.
-- Cursor's built-in `create-skill` skill: skill authoring process and writing guidelines.
+- The **create-skill** skill: skill authoring process and writing guidelines.

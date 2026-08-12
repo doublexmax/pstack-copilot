@@ -4,13 +4,20 @@ In this page you install the plugin, pick which models pstack uses, and run your
 
 ## Install the plugin
 
-In a Cursor chat, run:
+Clone the fork somewhere stable and register its skills directory with the Copilot CLI:
 
-```text
-/add-plugin pstack
+```bash
+git clone https://github.com/cursor/plugins ~/.copilot/pstack
+copilot skill add ~/.copilot/pstack/pstack/skills
 ```
 
-Cursor confirms the plugin is installed.
+Then copy the agents so poteto mode is selectable in any repo:
+
+```bash
+cp ~/.copilot/pstack/pstack/agents/*.agent.md ~/.copilot/agents/
+```
+
+Confirm with `copilot skill list`. The pstack skills appear under `Custom skills:`, which means every repo you open sees them.
 
 ## Pick your models
 
@@ -30,9 +37,9 @@ You might be wondering what happens if you use Auto. Set a role to `inherit-pare
 
 At the end of setup, `/setup-pstack` looks for a way to prove app behavior in your project, either a `verify-*` skill or an existing harness. If it finds neither, it offers once to generate one with [`/create-verification-skill`](../../skills/create-verification-skill/SKILL.md).
 
-Say yes and it writes `.cursor/skills/verify-<app>/`, a project-local skill that teaches agents to drive your app the way a user does. It proves the skill works once before handing it over. Say no and setup moves on. You can run `/create-verification-skill` yourself any time. [Verify and ship](./06-verify-and-ship.md#create-a-project-verification-skill) covers when it earns its place.
+Say yes and it writes `.github/skills/verify-<app>/`, a project-local skill that teaches agents to drive your app the way a user does. It proves the skill works once before handing it over. Say no and setup moves on. You can run the **create-verification-skill** skill yourself any time. [Verify and ship](./06-verify-and-ship.md#create-a-project-verification-skill) covers when it earns its place.
 
-After setup, start a new chat. The model rule applies to new sessions.
+After setup, start a new session. The model file is read per session.
 
 ## Run your first task
 
