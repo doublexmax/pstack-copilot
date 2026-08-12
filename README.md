@@ -302,12 +302,13 @@ node scripts/install-always-on.mjs
 that splices a managed block into `~/.copilot/copilot-instructions.md`. copilot
 loads that file into the **system prompt** of every session, in every directory,
 git or not. no slash command, no flag, no permission prompt, and nothing to add
-per repository. the block is a short router. it names when the mode applies and tells the agent
-to invoke the [`Poteto-Mode`](./skills/poteto-mode/SKILL.md) skill by name, so a
-trivial question doesn't drag two hundred lines of playbook into context.
-invoking by name matters: copilot trusts your working directory only, so a block
-that pointed at an absolute path under `~/.copilot` would be denied the read,
-while the skill tool loads the same file with no permission at all.
+per repository. the block is a short router. it names when the mode applies and
+tells the agent to invoke the [`Poteto-Mode`](./skills/poteto-mode/SKILL.md)
+skill by name, so a trivial question doesn't drag two hundred lines of playbook
+into context. invoking by name matters: copilot trusts your working directory
+only, so a block that pointed at an absolute path under `~/.copilot` would be
+denied the read, while the skill tool loads the same file with no permission at
+all.
 
 three properties worth knowing:
 
@@ -323,7 +324,9 @@ session without editing anything.
 
 the source text lives at
 [`always-on/copilot-instructions.md`](./always-on/copilot-instructions.md).
-edit that and re-run the installer to change what every session sees.
+edit that and re-run the installer to change what every session sees. a session
+assembles its system prompt at startup, so an edit reaches new sessions, not
+ones already running.
 
 ## checking the port
 
