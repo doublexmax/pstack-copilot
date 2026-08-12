@@ -249,9 +249,9 @@ models are configurable too. type [`/setup-pstack`](./skills/setup-pstack/SKILL.
 
 ## automations
 
-pstack also ships a dormant [benny automation pack](./automations/benny/). benny triages slack issue reports, then reproduces and fixes confirmed bugs with real ui evidence. its files are not registered as slash skills.
+pstack also ships a dormant [benny workflow pack](./automations/benny/). benny triages incoming issue reports, then reproduces and fixes confirmed bugs with real ui evidence. its files are read by path and are not registered skills.
 
-to set it up, point the agent at [`FOR_AGENTS.md`](./automations/benny/FOR_AGENTS.md). setup copies the pack into the target repository under `.github/automations/benny/`, enables pstack there for shared skills, and keeps user configuration outside the copied pack.
+to set it up, point the agent at [`FOR_AGENTS.md`](./automations/benny/FOR_AGENTS.md). setup copies the pack into the target repository under `.github/automations/benny/` and keeps user configuration outside the copied pack. no per-repo registration is needed, since pstack is registered globally. the two automations run as scheduled copilot workflows created with `save_workflow`, and the intake defaults to azure devops work items.
 
 ## license
 

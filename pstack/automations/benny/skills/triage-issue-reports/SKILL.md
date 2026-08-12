@@ -1,45 +1,47 @@
 ---
 name: triage-issue-reports
-description: Triage Slack issue reports with one thread-only verdict, evidence review, cause-aware routing, tracker dedupe, and fail-closed ticket creation. Use only from the configured Benny triage automation.
-disable-model-invocation: true
+description: Triage issue reports with one thread-only verdict, evidence review, cause-aware routing, tracker dedupe, and fail-closed ticket creation. Use only from the configured Benny triage workflow.
 ---
 
 # Triage issue reports
 
-Classify one Slack report and post one useful verdict in its source thread. Create a tracker issue only for a clear, new bug. Do not reproduce or fix it here.
+Classify one issue report and post one useful verdict in its source thread. Create a tracker issue only for a clear, new bug. Do not reproduce or fix it here.
 
 Load the external Benny configuration supplied by the automation. If the config is missing, malformed, or incomplete, stop without posting or writing to the tracker.
 
 ## Hard safety rules
 
-- The source channel and root thread coordinates are immutable.
-- Never post a root message in the source channel.
+- The intake queue and root thread coordinates are immutable.
+- Never post a root message in the intake queue.
 - Never post to another channel, broadcast a reply, send a DM, or start a replacement thread.
 - Preflight the source parent before any tracker write and immediately before the verdict post.
 - If the parent is missing, deleted, inaccessible, or uncertain, stop with no writes.
 - Post one substantive verdict. Do not narrate progress.
-- The coordinator is the only Slack poster.
-- Delegated workers return findings only. They must be read-only and receive no Slack credentials or write actions.
-- Every child prompt must forbid `SendSlackMessage`, `PostToSlack`, `chat.postMessage`, and every other Slack write.
+- The coordinator is the only intake replier.
+- Delegated workers return findings only. They must be read-only and receive no intake write credentials or write actions.
+- Every child prompt must forbid the intake backend's reply tool and every other intake write.
 - If worker isolation cannot enforce those limits, do the work in the coordinator.
 - Never create an issue that cannot link back to the source thread.
 - Prefer no ticket over a guessed or duplicate ticket.
 - Apply pstack's `principle-separate-before-serializing-shared-state` to source coordinates.
 - Apply pstack's `principle-minimize-reader-load` and `unslop` skills to the final verdict.
 
-## 1. Freeze source coordinates
+## 1. Select one report and freeze its coordinates
+
+This workflow polls. It is not handed a single triggering event, so it must choose its own work and be safe to re-enter. See [`../../references/intake.md`](../../references/intake.md) for the backend operations used here.
 
 Before making a work list or delegating:
 
-1. Read `source_channel_id` from the trigger.
-2. Require it to equal the configured source channel.
-3. Set `SOURCE_THREAD_TS` to `trigger.thread_ts` when present. Otherwise use `trigger.ts`.
-4. Require a nonempty `SOURCE_THREAD_TS`.
-5. Store `SOURCE_CHANNEL_ID` and `SOURCE_THREAD_TS` as immutable values.
-6. Read the thread and verify that its root has exactly those coordinates.
-7. Fetch a stable source permalink.
+1. Call the intake backend's `list_new` over the configured queue.
+2. Discard every report whose thread already contains a benny marker authored by the configured `intake.triage_identity`. That marker is the completion record; do not keep a state file.
+3. Discard anything outside the configured queue.
+4. Take the oldest remaining report. Handle only the configured `reports_per_run` and leave the rest for the next tick.
+5. If nothing remains, exit quietly. Do not reply anywhere to say there was nothing to do.
+6. Store the selected report's coordinates as immutable values: `SOURCE_THREAD` for the work item id or `(channel, thread_ts)` pair, and `SOURCE_QUEUE` for the queue it came from.
+7. Re-read the thread and verify its root still has exactly those coordinates.
+8. Fetch a stable permalink to the report.
 
-Every later source read and post must use those stored values. Never replace them with a reply timestamp or an operations-thread timestamp.
+Every later source read and reply must use those stored values. Never replace them with a reply timestamp or an operations-thread timestamp.
 
 ## 2. Read the whole report
 
@@ -135,7 +137,7 @@ The configured adapter must provide:
 - Create an issue with title, body, status, labels, and source URL
 - Update an existing issue without replacing unrelated fields
 - Add a source link and recurrence note
-- Cancel, close, or delete an issue created by this run if the Slack handoff fails
+- Cancel, close, or delete an issue created by this run if the intake reply fails
 
 If a required operation is unavailable, fail closed for that write.
 
@@ -199,9 +201,9 @@ Do not put a guessed root cause in the title.
 
 ## 9. Post one verdict
 
-Run a fresh source-parent preflight. Then post exactly one reply with `channel=SOURCE_CHANNEL_ID` and `thread_ts=SOURCE_THREAD_TS`.
+Run a fresh source-parent preflight. Then post exactly one reply with the stored `SOURCE_THREAD` coordinates.
 
-Never call a source-channel posting action without a nonempty `thread_ts`.
+Never call an intake-queue posting action without nonempty `SOURCE_THREAD` coordinates.
 
 Keep the reply short:
 
@@ -223,7 +225,7 @@ Marker contract:
 
 Use only the configured marker strings. The repro automation trusts the marker only when it comes from the configured triage identity in this source thread.
 
-After posting, read the same source thread and verify the verdict appears under `SOURCE_THREAD_TS`. If it does not, never retry at the root.
+After posting, read the same source thread and verify the verdict appears under `SOURCE_THREAD`. If it does not, never retry at the root.
 
 If this run created a tracker issue and the verdict did not land, use the adapter's compensation action. Verify that the issue is canceled, closed, or deleted. If compensation cannot be verified, report the failure only in the automation run output.
 

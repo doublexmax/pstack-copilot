@@ -1,32 +1,29 @@
-# Triage automation prompt
+# Triage workflow prompt
 
-> Source material for the copied setup workflow. Paraphrase this intent into a built-in `automate` draft after `automate` confirms that the copied pack is committed in the repository where the automation will run.
+> Source material for the copied setup workflow. Paraphrase this intent into a `save_workflow` call once the copied pack is committed in the repository the workflow will run against. Pass `user_confirmation: "dialog"` so the human reviews it before it is saved.
 
-Read and follow `.cursor/automations/benny/skills/triage-issue-reports/SKILL.md` for this run.
+Read and follow `.github/automations/benny/skills/triage-issue-reports/SKILL.md` for this run.
 
-Configuration source. Include this repository-relative path only when it is committed in the same target repository. Otherwise paraphrase the configured values. Never use a plugin source or cache path:
+Configuration source. Include this repository-relative path only when it is committed in the same target repository. Otherwise paraphrase the configured values. Never use a cache path outside the repository:
 
 ```text
 {{BENNY_CONFIG_PATH}}
 ```
 
-Trigger:
+Schedule: `{{TRIAGE_INTERVAL}}`. This workflow is polled, not pushed.
 
-```json
-{
-	"source_channel_id": "{{SLACK_CHANNEL_ID}}",
-	"message_ts": "{{SLACK_MESSAGE_TS}}",
-	"thread_ts": "{{SLACK_THREAD_TS_OR_EMPTY}}"
-}
-```
+Each run:
 
-The creation intent should describe this as a new top-level report in the configured source Slack channel.
+1. Use the configured intake backend's `list_new` operation over `{{INTAKE_QUERY}}` to find reports.
+2. Skip any report that already carries a benny marker from `{{TRIAGE_IDENTITY}}`. That marker is the only completion signal; do not keep a state file.
+3. Take the oldest remaining report, handle exactly `{{REPORTS_PER_RUN}}` of them, and leave the rest for the next tick.
+4. If nothing is left to handle, exit quietly without replying anywhere.
 
-Treat the source channel and root thread timestamp as immutable. If either is missing or does not match configuration, stop without posting or writing to the issue tracker.
+Capture the report's coordinates once at the start and treat them as immutable. If they are missing or do not match configuration, stop without replying or writing to the issue tracker.
 
-The committed operational file owns classification, attachment review, cause tracing, routing, dedupe, tracker writes, and the final verdict. Post no progress messages. Never post a root message in the source channel.
+The committed operational file owns classification, attachment review, cause tracing, routing, dedupe, tracker writes, and the final verdict. Post no progress messages. Never open a new item in the intake queue.
 
-The coordinator is the only Slack poster. Any delegated worker must be read-only, return findings only, and receive an explicit ban on every Slack write action.
+The coordinator is the only intake replier. Any delegated worker must be read-only, return findings only, and receive an explicit ban on every intake write action.
 
 End the single verdict with exactly one configured marker:
 
