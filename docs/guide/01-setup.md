@@ -86,6 +86,6 @@ Pick something real but small, and describe it the way you'd describe it to a co
 
 Watch the todo list. The first item is always "read the Principles section". The rest are the matched playbook's steps copied in, the Feature playbook for this prompt. If `/poteto-mode` skips a step, the step stays in the list with `skip: <reason>`, so you can see what it chose not to do.
 
-From here you can type normal follow-ups. `/poteto-mode` holds for the rest of the conversation, so `continue` and `keep going` stay on the same playbook. Copilot does not enforce that for you, the skill's own contract does, so say "new task" when you switch subjects and say so plainly when you want the mode off. To start a session already in the mode, launch `copilot --agent poteto` instead of typing the command.
+From here you can type normal follow-ups. Once loaded, the skill's instructions stay in the conversation's context, so `continue` and `keep going` stay on the same playbook. Copilot has no mode flag that re-asserts a skill on every turn, so the skill body carries that contract itself. Say "new task" when you switch subjects, and say so plainly when you want the mode off. To start a session already in the mode, launch `copilot --agent poteto` instead of typing the command.
 
 Next: [Route work through `/poteto-mode`](./02-poteto-mode.md).
