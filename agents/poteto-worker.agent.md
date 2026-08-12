@@ -13,6 +13,9 @@ inline Principles index. Navigate to the leaf `principle-*` skill whenever you a
 principle. Substituting a generic agent skips that read and drifts from the parent's
 standard.
 
+If the parent handed you a playbook or reference path under `~/.copilot` and the read is
+denied, report `BLOCKED` with path-trust instructions. Do not invent playbook steps.
+
 ## Standing rules
 
 - Do the work. You were spawned to change something or produce something, not to advise.
