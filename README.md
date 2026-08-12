@@ -113,7 +113,7 @@ when invoked it:
 
 the full rules and playbooks live in [`skills/poteto-mode/SKILL.md`](./skills/poteto-mode/SKILL.md).
 
-[`/poteto-mode`](./skills/poteto-mode/SKILL.md) is also a sticky mode: once entered it stays on across turns, applying itself when a playbook matches or the task needs rigor and staying out of the way otherwise. opt out any time by saying so.
+[`/poteto-mode`](./skills/poteto-mode/SKILL.md) also holds across turns: once entered it stays on for the conversation, applying itself when a playbook matches or the task needs rigor and staying out of the way otherwise. copilot has no host-enforced mode flag, so the skill carries that contract itself. say "new task" to re-match, or say so plainly to opt out. want a session that starts in the mode and never leaves it? launch `copilot --agent poteto`.
 
 [`/poteto-mode`](./skills/poteto-mode/SKILL.md) works extremely well with copilot's autopilot mode. you can let the agent work for many hours without sacrificing rigor.
 
@@ -270,7 +270,7 @@ copilot already has a great plan mode which works great with pstack. but persona
 
 type [`/automate-me`](./skills/automate-me/SKILL.md). it mines your recent transcripts, drafts a `<your-name>-mode` skill from how you've actually worked, and routes through pstack underneath. you keep pstack as the base and end up with your own routing skill alongside `poteto-mode`.
 
-models are configurable too. type [`/setup-pstack`](./skills/setup-pstack/SKILL.md). it detects the models you have access to and writes a small always-applied rule mapping each role (code, judgment, the review panels) to a model. every skill reads it and falls back to sensible defaults when the rule is absent, so you override only what you want.
+models are configurable too. type [`/setup-pstack`](./skills/setup-pstack/SKILL.md). it detects the models you have access to and writes `~/.copilot/pstack-models.md`, a small override file mapping each role (code, judgment, the review panels) to a model. copilot has no user-global always-applied rule, so nothing injects that file for you; every skill that delegates opens it by path and falls back to sensible defaults when a line is absent, so you override only what you want.
 
 ## automations
 
@@ -278,13 +278,25 @@ pstack also ships a dormant [benny workflow pack](./automations/benny/). benny t
 
 to set it up, point the agent at [`FOR_AGENTS.md`](./automations/benny/FOR_AGENTS.md). setup copies the pack into the target repository under `.github/automations/benny/` and keeps user configuration outside the copied pack. no per-repo registration is needed, since pstack is registered globally. the two automations run as scheduled copilot workflows created with `save_workflow`, and the intake defaults to azure devops work items.
 
+## checking the port
+
+```bash
+node scripts/check-copilot-port.mjs
+```
+
+one zero-dependency script guards the things that silently break a copilot skill. it fails when a `name` doesn't match its folder (the skill then registers under the wrong slash command), when a `description` is missing or past copilot's 1024-character load limit, when frontmatter carries a key copilot ignores, when a relative link in the docs or skills doesn't resolve, and when prose still names a tool from another agent runtime.
+
+there is no CI gate. this org disables hosted runners and the repo has no self-hosted ones, so a workflow here would fail on every PR without ever running the script. enforcement lives in the authoring path instead. the **create-skill** procedure and the **authoring-a-skill** playbook both name this command as a required step, which is the path an agent actually takes through this repo. run it yourself before you open a PR.
+
 ## what changed from upstream
 
 | upstream (cursor plugin) | here |
 | --- | --- |
 | `.cursor-plugin/plugin.json`, `/add-plugin` | a `skillDirectories` entry in `~/.copilot/settings.json` |
 | project-scoped plugin install | global; every repo you open gets the skills |
+| `mode: true` sticky frontmatter | the `poteto` agent, plus a stay-in-the-mode rule in the skill body |
 | `AGENTS.md` subagent contract | `.agent.md` files spawned through the `task` tool |
+| `AskQuestion` tool | the `ask_user` tool |
 | one model slug per role | `model` plus `reasoning_effort`, two fields |
 | `claude-fable-5` panel seat | `gemini-3.1-pro-preview` |
 | graphite (`gt`) stacking | azure devops PR chains driven by `az repos` |

@@ -3,7 +3,7 @@
 **You own the skill's voice.** Agent-facing prose has a higher bar than human prose; unhelpful sentences become instructions.
 
 1. Use the **create-skill** skill, which owns Copilot's SKILL.md authoring conventions.
-2. Validate the skill: frontmatter has `name` and `description`, referenced files exist, cross-skill links resolve.
+2. Validate mechanically, then by hand. Run `node scripts/check-copilot-port.mjs` from the pstack checkout; it fails on a `name` that does not match its folder, a missing or over-long `description`, an unsupported frontmatter key, a broken relative link, and tokens carried over from another agent runtime. Then confirm by eye that the referenced playbooks and references say what the skill claims they say.
 3. Test cases if structural; skip if subjective.
 4. Run **Opening a PR**.
 
