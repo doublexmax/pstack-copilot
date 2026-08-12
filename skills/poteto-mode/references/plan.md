@@ -16,7 +16,7 @@ Read the **Principles** section of the `poteto-mode` skill end to end, and the l
 
 ## 2. Scope and constraints
 
-State your read of scope and constraints in one paragraph. Use `AskQuestion` only for genuinely ambiguous intent (the **never-block-on-the-human** principle skill); give concrete options with each open question.
+State your read of scope and constraints in one paragraph. Use the `ask_user` tool only for genuinely ambiguous intent (the **never-block-on-the-human** principle skill); give concrete options with each open question.
 
 Resolve what is in scope vs explicitly out, technical or platform constraints, patterns to preserve, and the definition of done.
 

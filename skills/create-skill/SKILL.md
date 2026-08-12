@@ -106,9 +106,14 @@ only; bodies are paid for on use.
 4. Write the body as a procedure. Split anything long into `references/`.
 5. Run the **unslop** skill over the whole file. Skills are prose an agent reads closely,
    and slop costs accuracy, not just taste.
-6. Verify it loads: `copilot skill list` and confirm it appears in the right segment with no
+6. Check the contract mechanically. From a pstack checkout, run
+   `node scripts/check-copilot-port.mjs`. It reads every `skills/*/SKILL.md` and
+   `agents/*.agent.md` and fails on a `name` that does not match its path, a missing or
+   over-long `description`, an unsupported frontmatter key, a broken relative link, or a
+   token carried over from another agent runtime. Fix what it reports before moving on.
+7. Verify it loads: `copilot skill list` and confirm it appears in the right segment with no
    failure. A new registered directory or a new personal skill may need a CLI restart.
-7. Prove it routes. Start a fresh session, type one of your trigger phrases verbatim, and
+8. Prove it routes. Start a fresh session, type one of your trigger phrases verbatim, and
    confirm the skill fires. If it does not, the description is wrong; go back to step 1.
 
 ## Revising a skill that misfires

@@ -1,6 +1,6 @@
 # Set up pstack
 
-In this page you install the plugin, pick which models pstack uses, and run your first task. Setup is one command plus a short conversation.
+In this page you register the skills directory, pick which models pstack uses, and run your first task. Setup is one command plus a short conversation.
 
 ## Install pstack
 
@@ -36,7 +36,7 @@ Grant `~/.copilot` rather than `~/.copilot/pstack`. The narrower grant looks tid
 There is no config key or environment variable for `--add-dir`, so wrap it. PowerShell, in `$PROFILE.CurrentUserAllHosts`:
 
 ```powershell
-function pstack { copilot --add-dir "$HOME\.copilot\pstack" @args }
+function pstack { copilot --add-dir "$HOME\.copilot" @args }
 ```
 
 bash or zsh:
@@ -86,6 +86,6 @@ Pick something real but small, and describe it the way you'd describe it to a co
 
 Watch the todo list. The first item is always "read the Principles section". The rest are the matched playbook's steps copied in, the Feature playbook for this prompt. If `/poteto-mode` skips a step, the step stays in the list with `skip: <reason>`, so you can see what it chose not to do.
 
-From here you can type normal follow-ups. `/poteto-mode` is sticky. It stays on for the conversation until you opt out by saying so.
+From here you can type normal follow-ups. `/poteto-mode` holds for the rest of the conversation, so `continue` and `keep going` stay on the same playbook. Copilot does not enforce that for you, the skill's own contract does, so say "new task" when you switch subjects and say so plainly when you want the mode off. To start a session already in the mode, launch `copilot --agent poteto` instead of typing the command.
 
 Next: [Route work through `/poteto-mode`](./02-poteto-mode.md).
