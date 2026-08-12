@@ -24,8 +24,8 @@ Resolve what is in scope vs explicitly out, technical or platform constraints, p
 
 Delegate codebase exploration (the **guard-the-context-window** principle skill).
 
-- Prefer `subagent_type: "poteto-agent"`. `generalPurpose` is the fallback. Never use the built-in `plan` subagent_type; it ignores this skill.
-- Pass `model:` explicitly per the configured roles (defaults `grok-4.5-fast-xhigh` for code, `claude-fable-5-thinking-max` for judgment).
+- Prefer `agent_type: "poteto-worker"`. `general-purpose` is the fallback. Never delegate a phase to a built-in planning agent; it ignores this skill.
+- Pass `model:` explicitly per the configured roles (defaults `grok-4.5 / high` for code, `gemini-3.1-pro-preview / high` for judgment).
 
 Each explorer returns file pointers, conventions, dependencies, test infrastructure, and entry points. No inlined dumps.
 
@@ -73,7 +73,7 @@ Order phases so infrastructure and shared types land first (the **foundational-t
 
 For changes touching existing code, apply the **redesign-from-first-principles** principle skill: if we'd built this with the new requirement on day one, what would it look like? Redesign holistically; deliver incrementally.
 
-If a phase creates or edits a skill, the phase instructs the implementer to use the **create-skill** skill (Cursor's built-in for authoring SKILL.md files).
+If a phase creates or edits a skill, the phase instructs the implementer to use the **create-skill** skill, which owns SKILL.md conventions for Copilot.
 
 ## 5. Verification per phase
 
@@ -81,12 +81,12 @@ Each phase needs both:
 
 **Static.** Type check, lint, project tests pass.
 
-**Runtime.** Exercise the feature on the matching surface via the relevant control skill:
+**Runtime.** Exercise the feature on the matching surface, driving the real artifact the way a user does (the **prove-it-works** skill owns the standard):
 
-- Browser / Electron / Web UIs: the `control-ui` skill from the `cursor-team-kit` plugin.
-- CLIs and TUIs: the `control-cli` skill from the `cursor-team-kit` plugin.
+- Browser / Electron / Web UIs: drive the running app, and use the `browser` canvas to see it.
+- CLIs and TUIs: run the built binary, not the source entry point.
 - Native mobile: whatever simulator-driving skill your team has.
-- No control skill for the touched surface: flag it in the plan.
+- No way to drive the touched surface: flag it in the plan.
 
 For bug fixes, the loop is reproduce on the surface, fix, verify on the same surface. Unit tests show a branch behaves a certain way; they do not prove the bug is gone (the **prove-it-works** principle skill).
 
@@ -96,9 +96,9 @@ In the overview, name which poteto-mode non-negotiables the implementer must app
 
 - the **how** skill over each unfamiliar subsystem before changing it.
 - the **interrogate** skill for adversarial review on contested designs before shipping.
-- `/deslop` over each diff before commit. the **unslop** skill over any prose surface.
+- the **unslop** skill over each diff before commit, and over any prose surface.
 - the **show-me-your-work** skill to keep a decision trail when the plan is large enough to need an auditable record.
-- Cursor's built-in **babysit** skill after opening the PR.
+- the **Babysit** playbook (`playbooks/babysit.md`) after opening the PR.
 
 ## 7. Hand back
 
