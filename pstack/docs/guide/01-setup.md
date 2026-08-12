@@ -2,12 +2,12 @@
 
 In this page you install the plugin, pick which models pstack uses, and run your first task. Setup is one command plus a short conversation.
 
-## Install the plugin
+## Install pstack
 
-Clone the fork somewhere stable and register its skills directory with the Copilot CLI:
+Clone this fork somewhere stable and register its skills directory with the Copilot CLI:
 
 ```bash
-git clone https://github.com/cursor/plugins ~/.copilot/pstack
+git clone -b copilot-port <your-fork-url> ~/.copilot/pstack
 copilot skill add ~/.copilot/pstack/pstack/skills
 ```
 
@@ -17,7 +17,42 @@ Then copy the agents so poteto mode is selectable in any repo:
 cp ~/.copilot/pstack/pstack/agents/*.agent.md ~/.copilot/agents/
 ```
 
-Confirm with `copilot skill list`. The pstack skills appear under `Custom skills:`, which means every repo you open sees them.
+Confirm with `copilot skill list`. The pstack skills appear under `Custom skills:`, which means every repo you open sees them. `~/.copilot/agents/` needs no registration; agents there are discovered from any working directory.
+
+## Let pstack read its own playbooks
+
+`skillDirectories` makes every skill load, but a skill is more than its `SKILL.md`. `poteto-mode` reads playbooks and references from disk while it works, and it reads your model overrides from `~/.copilot/pstack-models.md`. All of that goes through Copilot's path permissions, and Copilot trusts your working directory only. It does not trust `~/.copilot`.
+
+Interactively, approve the prompt once and you are done.
+
+Non-interactively, `-p` cannot prompt, so the read simply fails, and a capable model will often answer from memory rather than stop. The answer you get back is then upstream's behavior, not this fork's. Pass the directory:
+
+```bash
+copilot --agent poteto -p "..." --allow-all-tools --add-dir ~/.copilot
+```
+
+Grant `~/.copilot` rather than `~/.copilot/pstack`. The narrower grant looks tidier but silently disables `~/.copilot/pstack-models.md`, so your model panel would fall back to the defaults with no visible error.
+
+There is no config key or environment variable for `--add-dir`, so wrap it. PowerShell, in `$PROFILE.CurrentUserAllHosts`:
+
+```powershell
+function pstack { copilot --add-dir "$HOME\.copilot\pstack" @args }
+```
+
+bash or zsh:
+
+```bash
+pstack() { copilot --add-dir "$HOME/.copilot" "$@"; }
+```
+
+To check it, ask a question whose answer only exists in a playbook, from a directory that is not a pstack checkout:
+
+```bash
+pstack --agent poteto -p 'Read the shipping playbook. Which VCS does it target, and what command gives the authoritative merge verdict? Name every file you read.' --allow-all-tools
+```
+
+A correct run names `playbooks/shipping.md` and `references/ado.md`, answers Azure DevOps, and quotes `az repos pr policy list`. If it answers GitHub, or names `git patch-id`, the reads were denied and the model filled the gap from training data.
+
 
 ## Pick your models
 

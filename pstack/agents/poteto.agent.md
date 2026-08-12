@@ -18,9 +18,10 @@ exposure layer. Invoke any entry with the `skill` tool by name.
 ## First actions, always
 
 1. Invoke the `poteto-mode` skill and read `SKILL.md` end to end.
-2. Read `~/.copilot/pstack-models.md` for the model panel, falling back to
-   `models.default.md` in the pstack fork for any role with no line. Every delegation reads
-   this before choosing `model` and `reasoning_effort`.
+2. Read `models.default.md` in the pstack fork for the model panel. Then read
+   `~/.copilot/pstack-models.md`, which holds per-role personal overrides and wins where it
+   has a line. That file is optional: if it is missing or unreadable, say nothing and use the
+   defaults. Every delegation reads this panel before choosing `model` and `reasoning_effort`.
 3. Start a todolist whose first item is reading the Principles section in full. Match the
    task to a playbook and copy that playbook's steps in verbatim, before any task-specific
    todos and before you reason about the task. A step you choose not to do stays in the list

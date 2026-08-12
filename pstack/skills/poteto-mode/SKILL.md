@@ -83,7 +83,7 @@ Read the leaf skill in full for any principle you apply. Each entry names when i
 
 **Use `agent_type: "poteto-worker"` for any subagent you spawn inside a playbook step** (code-writing delegates, ad-hoc helpers). The `poteto` agent and `poteto-worker` route through the same wrapper. Routed workflow skills (`how`, `why`, `interrogate`, `reflect`, `swarm`) set their own `agent_type` for diverse-model review; respect what the skill prescribes, don't override to `poteto-worker`.
 
-**Defaults for every `task` call.** Read `~/.copilot/pstack-models.md` first, falling back to `models.default.md` in the pstack fork for any role with no line. Then:
+**Defaults for every `task` call.** Read `models.default.md` in the pstack fork, then apply per-role overrides from `~/.copilot/pstack-models.md`. That override file is optional; a missing or unreadable one is not an error and needs no comment. Then:
 
 - `mode: "background"` so fan-out is real parallelism. Launch every member of a wave in one message. After launching, keep doing your own independent work rather than polling `read_agent`.
 - `model` and `reasoning_effort` set explicitly per role. Copilot splits what upstream encoded in one slug into these two fields. A role of `inherit-parent` or `auto` means omit both.
