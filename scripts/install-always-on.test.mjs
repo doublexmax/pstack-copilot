@@ -38,7 +38,7 @@ const cases = {
     h.run();
     const text = h.read();
     assert.ok(!text.includes(root), 'no clone path baked in');
-    assert.ok(text.includes('`Poteto-Mode`'), 'routes by skill name');
+    assert.ok(text.includes('`poteto-mode`'), 'routes by skill name');
     h.cleanup();
   },
   'running twice is byte-identical'() {

@@ -81,12 +81,12 @@ Each phase needs both:
 
 **Static.** Type check, lint, project tests pass.
 
-**Runtime.** Exercise the feature on the matching surface, driving the real artifact the way a user does (the **prove-it-works** skill owns the standard):
+**Runtime.** Exercise the feature on the matching surface, driving the real artifact the way a user does (the **prove-it-works** skill owns the standard). Prefer `.github/skills/verify-*`; generate one with **create-verification-skill** when the project has no harness:
 
 - Browser / Electron / Web UIs: drive the running app, and use the `browser` canvas to see it.
 - CLIs and TUIs: run the built binary, not the source entry point.
 - Native mobile: whatever simulator-driving skill your team has.
-- No way to drive the touched surface: flag it in the plan.
+- No way to drive the touched surface after trying generate/harness: flag it in the plan.
 
 For bug fixes, the loop is reproduce on the surface, fix, verify on the same surface. Unit tests show a branch behaves a certain way; they do not prove the bug is gone (the **prove-it-works** principle skill).
 

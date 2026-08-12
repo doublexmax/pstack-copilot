@@ -166,7 +166,7 @@ the full rules and playbooks live in [`skills/poteto-mode/SKILL.md`](./skills/po
 | [`/show-me-your-work`](./skills/show-me-your-work/SKILL.md) | you want a reviewable decision trail. logs decisions to a tsv you can commit. |
 | [`/create-verification-skill`](./skills/create-verification-skill/SKILL.md) | your project has no scripted way to prove app behavior. generates a project-local verify skill with a feature map, for any language or platform. |
 | [`/maintain-verification-skill`](./skills/maintain-verification-skill/SKILL.md) | your verify skill's feature map has drifted from the app. source wave + one live pass, at most one PR of proven corrections. |
-| [`/unslop`](./skills/unslop/SKILL.md) | you're cleaning up writing. removes AI tells. |
+| [`/unslop`](./skills/unslop/SKILL.md) | you're cleaning up writing or a code diff. prose path removes AI tells; code path is the old deslop pass. |
 | [`/bro`](./skills/bro/SKILL.md) | you want the last message restated in plain human language, no jargon. |
 | [`/technical-writing`](./skills/technical-writing/SKILL.md) | layered doc standard (Diátaxis + Google developer style + STE + Global English) for docs, RFCs, readmes, PR descriptions, commit messages. |
 
@@ -266,11 +266,11 @@ a few things `poteto-mode` references but doesn't bundle:
 
 this fork resolves the upstream plugin dependencies rather than pointing at them:
 
-- `deslop` is folded into [`/unslop`](./skills/unslop/SKILL.md). there is no separate deslop skill; anywhere a playbook said "deslop", run unslop.
+- `deslop` is the **Code** section of [`/unslop`](./skills/unslop/SKILL.md). there is no separate deslop skill; `deslop`, `deslop it`, and "clean the diff" all run that path.
 - [`/create-skill`](./skills/create-skill/SKILL.md) is authored here, because copilot has no built-in equivalent.
 - `/babysit` is the [babysit playbook](./skills/poteto-mode/playbooks/babysit.md), which is the only babysit in this fork.
 
-still genuinely absent: `control-cli` (for CLIs and TUIs) and `control-ui` (for browser, Electron, web). playbooks that reach for them fall back to describing the interaction and asking the operator to drive it.
+still genuinely absent as bundled host tools: `control-cli` and `control-ui` from cursor-team-kit. playbooks do not depend on those names. they drive the project's `.github/skills/verify-*` skill, generate one with [`/create-verification-skill`](./skills/create-verification-skill/SKILL.md) when missing, or use the repo's own harness (Playwright, PTY, curl, the built binary). hand the operator the wheel only after stating why no harness can reach the target.
 
 ## why are there no planning skills?
 
@@ -303,7 +303,7 @@ that splices a managed block into `~/.copilot/copilot-instructions.md`. copilot
 loads that file into the **system prompt** of every session, in every directory,
 git or not. no slash command, no flag, no permission prompt, and nothing to add
 per repository. the block is a short router. it names when the mode applies and
-tells the agent to invoke the [`Poteto-Mode`](./skills/poteto-mode/SKILL.md)
+tells the agent to invoke the [`poteto-mode`](./skills/poteto-mode/SKILL.md)
 skill by name, so a trivial question doesn't drag two hundred lines of playbook
 into context. invoking by name matters: copilot trusts your working directory
 only, so a block that pointed at an absolute path under `~/.copilot` would be
@@ -353,11 +353,12 @@ there is no CI gate. this org disables hosted runners and the repo has no self-h
 | github PR review threads | ado threads via the ado mcp |
 | event-triggered automations | scheduled copilot workflows via `save_workflow` |
 | slack intake for benny | intake adapter, defaults to ado work items |
-| separate `deslop` skill | folded into [`/unslop`](./skills/unslop/SKILL.md) |
+| separate `deslop` skill | Code path inside [`/unslop`](./skills/unslop/SKILL.md) |
 | bundled `create-skill` | authored here; copilot ships no equivalent |
+| `control-cli` / `control-ui` | project `verify-*` skills + [`/create-verification-skill`](./skills/create-verification-skill/SKILL.md) |
 
-`control-cli` and `control-ui` are still absent. playbooks that reach for them
-describe the interaction and ask the operator to drive it.
+`control-cli` and `control-ui` are not bundled. verification goes through a
+project verify skill or a generated one, not an operator-drive default.
 
 ## license
 
