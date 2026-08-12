@@ -61,7 +61,7 @@ Then proceed to Step 3.
 
 ### Step 2b. Direct Explain (simple questions)
 
-Spawn a single Task subagent that explores and explains in one pass:
+Spawn a single `task` subagent that explores and explains in one pass:
 
 - `agent_type`: `"general-purpose"`
 - `model`: your configured how-explainer model (default `gemini-3.1-pro-preview / high`)
@@ -73,7 +73,7 @@ Proceed to Step 4.
 
 ### Step 3. Synthesize (complex questions only)
 
-Once all explorers return, spawn a single Task subagent to synthesize their findings into one coherent explanation:
+Once all explorers return, spawn a single `task` subagent to synthesize their findings into one coherent explanation:
 
 - `agent_type`: `"general-purpose"`
 - `model`: your configured how-explainer model (default `gemini-3.1-pro-preview / high`)

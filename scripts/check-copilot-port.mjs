@@ -22,9 +22,20 @@ const FOREIGN_TOKENS = [
   { pattern: /\bsubagent_type\b/, use: 'agent_type' },
   { pattern: /\brun_in_background\b/, use: 'mode: "background"' },
   { pattern: /(?<![\w/.])\/loop\b/, use: 'autopilot mode' },
+  { pattern: /\bloop skill\b/i, use: 'autopilot mode' },
   { pattern: /\/add-plugin\b/, use: 'copilot skill add' },
   { pattern: /\.mdc\b/, use: '.md' },
   { pattern: /install the plugin/i, use: 'register the skills directory' },
+  { pattern: /`Task`/, use: '`task`' },
+  { pattern: /\bTask tool\b/, use: 'task tool' },
+  { pattern: /\bTask subagent\b/, use: 'task subagent' },
+  { pattern: /\bfull Task schema\b/i, use: 'task tool fields' },
+  { pattern: /\bincluding `environment`\b/, use: 'no environment on task; omit' },
+  { pattern: /\bno gt\b/i, use: 'no Graphite; ADO chains only' },
+  { pattern: /`Poteto-Mode`/, use: '`poteto-mode`' },
+  { pattern: /\bvia the control skill\b/i, use: 'project verify-* skill' },
+  { pattern: /\bthe control skill\b/i, use: 'project verify-* skill' },
+  { pattern: /\bcontrol-skill path\b/i, use: 'verify-* path' },
 ];
 
 const TOKEN_ROOTS = ['skills', 'agents', 'docs'];
