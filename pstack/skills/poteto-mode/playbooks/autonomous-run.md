@@ -1,6 +1,6 @@
 ### Autonomous run
 
-**You own the exit condition. Define done, then drive to it without stopping.** For "going to bed" / "run until done" / "/loop until X".
+**You own the exit condition. Define done, then drive to it without stopping.** For "going to bed" / "run until done" / "keep going until X".
 
 1. State the exit condition as a checkable predicate before the first iteration (tests green, repro fixed, all N PRs merged, pixel-diff zero). A vague goal stalls; a predicate lets you stop.
 2. Pick the wake mechanism. Autopilot mode is the wake mechanism: it keeps the turn running without waiting on the human, so the finish condition gets re-checked instead of the run ending. An event to watch (CI, a merge, a ref advancing) gets a watcher subagent spawned with `mode: "background"` that reports back on the event, with a long time-based heartbeat as fallback. No event gets a fixed-interval heartbeat sized to when the result is worth re-checking.

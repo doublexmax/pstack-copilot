@@ -12,7 +12,7 @@ A good handoff has the goal, the finish condition, permissions, and an escape ha
 /poteto-mode im going to bed. migrate every caller to the new parser in a fresh worktree off <base>.
 done means zero old callers, all parser fixtures pass, old api deleted.
 keep a decision log. don't ask me before committing.
-/loop until done. if you're truly stuck after a few hours, stop and write up why.
+keep going until done. if you're truly stuck after a few hours, stop and write up why.
 ```
 
 Walk through what each line buys you:
@@ -76,6 +76,6 @@ The contract above drives one task to one finish condition. Some nights hold mor
 /poteto-mode orchestrate the store migration. own it until every package is converted and merged. i'll check in twice a day.
 ```
 
-**Pitfall:** a duration is not a finish condition. "work on this for 4 hours" gives the agent nothing to check, and you'll wake up to four hours of motion instead of a result. Give `/loop` a predicate that can pass or fail.
+**Pitfall:** a duration is not a finish condition. "work on this for 4 hours" gives the agent nothing to check, and you'll wake up to four hours of motion instead of a result. Give autopilot a predicate that can pass or fail.
 
 Next: [Steer with principle names](./08-principles.md).
