@@ -967,168 +967,257 @@ function countLine(value: Counts): string {
     : entries.map(([name, count]) => `${name}=${count}`).join(", ");
 }
 
-const OPEN_GT_PR_STATUSES = new Set([
-  "Trunk branch locked",
-  "Changes requested",
-  "Waiting on PRs in this stack to merge",
-  "Waiting on downstack merge state",
-  "Draft",
-  "Required checks failed",
-  "Undergoing failure detection",
-  "Merge queue failed on current head commit",
-  "Handed off to merge queue...",
-  "Waiting on downstack",
-  "Merge conflicts",
-  "Needs reviewers",
-  "Needs approvals",
-  "Needs restack",
-  "Queued to merge...",
-  "Ready to merge",
-  "Ready to merge as stack",
-  "Rebasing...",
-  "Waiting on CI...",
-  "Stale, needs rebase onto trunk",
-  "Unresolved comments",
-  "Waiting on required CI",
-  "Waiting to merge...",
-]);
+interface AdoRemote {
+  readonly orgUrl: string;
+  readonly project: string;
+  readonly repo: string;
+}
 
-interface GtPullRequest {
+interface AdoPullRequest {
+  readonly pullRequestId: number;
+  readonly sourceRefName: string;
+  readonly targetRefName: string;
+  readonly status: string;
+}
+
+interface ChainEntry {
   readonly pr: number;
+  readonly branches: string;
   readonly state: FrontierPrState;
 }
 
-interface GtFrontierEntry extends GtPullRequest {
-  readonly branches: string;
+function shortBranch(ref: string): string {
+  return ref.startsWith("refs/heads/")
+    ? ref.slice("refs/heads/".length)
+    : ref;
 }
 
-function parseGtPullRequest({
-  branch,
-  detail,
-}: {
-  branch: string;
-  detail: string;
-}): GtPullRequest {
-  const match =
-    /^(?:\[origin\] )?PR #([1-9]\d*)(?: \(([^)\r\n]+)\))?(?: .+)?$/.exec(
-      detail
-    );
-  const pr = Number(match?.[1] ?? 0);
-  if (match === null || !Number.isSafeInteger(pr)) {
-    throw new UserError(
-      `gt info output has an invalid PR row for branch ${branch}: ${detail}`
-    );
-  }
-  const status = match[2];
-  if (status === "Merged") {
-    return { pr, state: "MERGED" };
-  }
-  if (status === "Closed") {
-    return { pr, state: "CLOSED" };
-  }
-  if (status === undefined || OPEN_GT_PR_STATUSES.has(status)) {
-    return { pr, state: "OPEN" };
-  }
-  throw new UserError(
-    `gt info output has an unknown PR state for branch ${branch}: ${status}`
+function parseAdoRemote(url: string): AdoRemote {
+  const cleaned = url.trim().replace(/\.git$/, "");
+  const ssh = /^(?:ssh:\/\/)?git@ssh\.dev\.azure\.com[:/]v3\/([^/]+)\/([^/]+)\/([^/]+)$/.exec(
+    cleaned
   );
+  if (ssh !== null) {
+    return {
+      orgUrl: `https://dev.azure.com/${ssh[1]}/`,
+      project: ssh[2] ?? "",
+      repo: ssh[3] ?? "",
+    };
+  }
+  const https = /^https?:\/\/(?:[^@/]+@)?([^/]+)\/(.+)$/.exec(cleaned);
+  if (https === null) {
+    throw new UserError(
+      `origin is not an Azure DevOps remote: ${url}. The frontier is read from ADO, so orch only understands dev.azure.com and *.visualstudio.com remotes.`
+    );
+  }
+  const host = https[1] ?? "";
+  const segments = (https[2] ?? "")
+    .split("/")
+    .filter((part) => part.length > 0 && part !== "DefaultCollection");
+  const gitIndex = segments.indexOf("_git");
+  if (gitIndex < 1 || segments.length !== gitIndex + 2) {
+    throw new UserError(
+      `origin does not look like an ADO repo URL: ${url}. Expected .../<project>/_git/<repo>.`
+    );
+  }
+  const project = segments[gitIndex - 1] ?? "";
+  const repo = segments[gitIndex + 1] ?? "";
+  const orgUrl = host.endsWith(".visualstudio.com")
+    ? `https://${host}/`
+    : `https://${host}/${segments[0] ?? ""}/`;
+  return { orgUrl, project, repo };
 }
 
-function parseGtBranches(raw: string): readonly string[] {
-  const branches: string[] = [];
-  const lines = raw.replace(/\r/g, "").split("\n");
-  for (const [index, line] of lines.entries()) {
-    if (line.length === 0) {
-      continue;
-    }
-    const branchMatch =
-      /^(?:│ )*[◯◉] +([^\s]+)((?: \([^()\r\n]*\))*)$/.exec(line);
-    if (branchMatch === null) {
-      throw new UserError(
-        `gt log short output has an unparseable line ${index + 1}: ${JSON.stringify(line)}`
-      );
-    }
-    const branch = branchMatch[1] ?? "";
-    if (branches.includes(branch)) {
-      throw new UserError(
-        `gt log short output contains duplicate branch ${branch}`
-      );
-    }
-    branches.push(branch);
-  }
-  const trunk = branches[0];
-  if (trunk === undefined) {
-    throw new UserError("gt log short output did not contain a stack");
-  }
-  return branches.slice(1);
-}
-
-function graphitePullRequest({
-  branch,
-  repo,
-}: {
-  branch: string;
-  repo: string;
-}): GtPullRequest {
+function adoRemote(repo: string): AdoRemote {
   let raw: string;
   try {
-    raw = execFileSync("gt", ["--no-interactive", "info", branch], {
+    raw = execFileSync("git", ["remote", "get-url", "origin"], {
       cwd: repo,
       encoding: "utf8",
-      env: { ...process.env, NO_COLOR: "1" },
+      env: process.env,
       stdio: ["ignore", "pipe", "pipe"],
     });
   } catch (error) {
     throw new UserError(
-      `gt info ${branch} failed: ${errorMessage(error)}`
+      `git remote get-url origin failed: ${errorMessage(error)}`
     );
   }
-  const rows = raw
-    .replace(/\r/g, "")
-    .split("\n")
-    .filter(
-      (line) =>
-        line.startsWith("PR #") || line.startsWith("[origin] PR #")
-    );
-  if (rows.length === 0) {
-    throw new UserError(
-      `gt info output branch ${branch} has no pull request; this clone's gt metadata may predate the submit, so resolve the frontier from the stacker's clone or after gt sync`
-    );
-  }
-  if (rows.length > 1) {
-    throw new UserError(
-      `gt info output contains multiple PRs for branch ${branch}`
-    );
-  }
-  return parseGtPullRequest({ branch, detail: rows[0] ?? "" });
+  return parseAdoRemote(raw);
 }
 
-function graphiteFrontier(repo: string): readonly GtFrontierEntry[] {
-  let raw: string;
+function trunkBranch(repo: string): string {
   try {
-    raw = execFileSync(
-      "gt",
-      ["--no-interactive", "log", "short", "--stack", "--reverse"],
+    const raw = execFileSync(
+      "git",
+      ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
       {
         cwd: repo,
         encoding: "utf8",
-        env: { ...process.env, NO_COLOR: "1" },
+        env: process.env,
         stdio: ["ignore", "pipe", "pipe"],
       }
     );
+    const value = raw.trim().replace(/^origin\//, "");
+    if (value.length > 0) {
+      return value;
+    }
+  } catch {
+    // origin/HEAD is not always set; fall through to the default.
+  }
+  return "master";
+}
+
+// The Azure CLI ships as a batch shim on Windows. execFileSync cannot resolve
+// it without the extension, and Node refuses to spawn a .cmd without a shell,
+// so Windows takes the shell path with every argument explicitly quoted.
+const AZ_COMMAND = process.platform === "win32" ? "az.cmd" : "az";
+
+function quoteForShell(value: string): string {
+  return `"${value.replace(/"/g, '""')}"`;
+}
+
+function runAz(args: readonly string[], repo: string): string {
+  const windows = process.platform === "win32";
+  return execFileSync(
+    AZ_COMMAND,
+    windows ? args.map(quoteForShell) : [...args],
+    {
+      cwd: repo,
+      encoding: "utf8",
+      env: process.env,
+      shell: windows,
+      stdio: ["ignore", "pipe", "pipe"],
+    }
+  );
+}
+
+function activeAdoPullRequests(repo: string): readonly AdoPullRequest[] {
+  const remote = adoRemote(repo);
+  let raw: string;
+  try {
+    raw = runAz(
+      [
+        "repos",
+        "pr",
+        "list",
+        "--org",
+        remote.orgUrl,
+        "--project",
+        remote.project,
+        "--repository",
+        remote.repo,
+        "--status",
+        "active",
+        "--top",
+        "200",
+        "--output",
+        "json",
+      ],
+      repo
+    );
+  } catch (error) {
+    throw new UserError(`az repos pr list failed: ${errorMessage(error)}`);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
   } catch (error) {
     throw new UserError(
-      `gt log short --stack --reverse failed: ${errorMessage(error)}`
+      `az repos pr list did not return JSON: ${errorMessage(error)}`
     );
   }
-  const result = parseGtBranches(raw).map((branch) => ({
-    branches: branch,
-    ...graphitePullRequest({ branch, repo }),
-  }));
-  if (new Set(result.map((row) => row.pr)).size !== result.length) {
-    throw new UserError("gt info output contains duplicate pull requests");
+  if (!Array.isArray(parsed)) {
+    throw new UserError("az repos pr list did not return an array");
   }
-  return result;
+  return parsed.map((row, index) => {
+    const record = row as Record<string, unknown>;
+    const pr = Number(record["pullRequestId"]);
+    const source = record["sourceRefName"];
+    const target = record["targetRefName"];
+    if (
+      !Number.isSafeInteger(pr) ||
+      pr <= 0 ||
+      typeof source !== "string" ||
+      typeof target !== "string"
+    ) {
+      throw new UserError(
+        `az repos pr list row ${index + 1} is missing pullRequestId, sourceRefName, or targetRefName`
+      );
+    }
+    return {
+      pullRequestId: pr,
+      sourceRefName: source,
+      targetRefName: target,
+      status: typeof record["status"] === "string" ? record["status"] : "active",
+    };
+  });
+}
+
+function adoFrontier(repo: string): readonly ChainEntry[] {
+  const trunk = trunkBranch(repo);
+  const prs = activeAdoPullRequests(repo);
+  const byTarget = new Map<string, AdoPullRequest[]>();
+  for (const pr of prs) {
+    const target = shortBranch(pr.targetRefName);
+    const bucket = byTarget.get(target);
+    if (bucket === undefined) {
+      byTarget.set(target, [pr]);
+    } else {
+      bucket.push(pr);
+    }
+  }
+  const chain: ChainEntry[] = [];
+  const seen = new Set<number>();
+  let cursor = trunk;
+  for (;;) {
+    const next = byTarget.get(cursor) ?? [];
+    if (next.length === 0) {
+      break;
+    }
+    if (next.length > 1) {
+      throw new UserError(
+        `branch ${cursor} is the target of ${next.length} open PRs (${next
+          .map((pr) => `#${pr.pullRequestId}`)
+          .join(", ")}); the chain has forked, so resolve it before recomputing the frontier`
+      );
+    }
+    const pr = next[0];
+    if (pr === undefined) {
+      break;
+    }
+    if (seen.has(pr.pullRequestId)) {
+      throw new UserError(
+        `PR #${pr.pullRequestId} appears twice while walking the chain from ${trunk}; the target refs form a cycle`
+      );
+    }
+    seen.add(pr.pullRequestId);
+    chain.push({
+      pr: pr.pullRequestId,
+      branches: shortBranch(pr.sourceRefName),
+      state: "OPEN",
+    });
+    cursor = shortBranch(pr.sourceRefName);
+  }
+  const reachable = new Set<string>([trunk]);
+  for (const entry of chain) {
+    reachable.add(entry.branches);
+  }
+  const orphans = prs.filter(
+    (pr) => !reachable.has(shortBranch(pr.targetRefName))
+  );
+  if (orphans.length > 0) {
+    throw new UserError(
+      `${orphans.length} open PR(s) target a branch that is not in the chain from ${trunk}: ${orphans
+        .map(
+          (pr) =>
+            `#${pr.pullRequestId} -> ${shortBranch(pr.targetRefName)}`
+        )
+        .join(
+          ", "
+        )}. ADO never retargets a child when its parent completes, so retarget them onto the chain before recomputing the frontier.`
+    );
+  }
+  return chain;
 }
 
 function branchSha({
@@ -1159,7 +1248,7 @@ function branchSha({
 }
 
 function resolveFrontier(repo: string): readonly FrontierPr[] {
-  return graphiteFrontier(repo).map((row) => ({
+  return adoFrontier(repo).map((row) => ({
     ...row,
     sha: branchSha({ branch: row.branches, repo }),
   }));
@@ -1184,14 +1273,14 @@ function validateFrontierPin({
   const extra = actual.filter((pr) => !expectedSet.has(pr));
   const drift: string[] = [];
   if (missing.length > 0) {
-    drift.push(`missing from gt: ${missing.join(",")}`);
+    drift.push(`missing from ADO: ${missing.join(",")}`);
   }
   if (extra.length > 0) {
-    drift.push(`extra in gt: ${extra.join(",")}`);
+    drift.push(`extra in ADO: ${extra.join(",")}`);
   }
   if (missing.length === 0 && extra.length === 0) {
     drift.push(
-      `order differs: expected ${expected.join(",")}; gt ${actual.join(",")}`
+      `order differs: expected ${expected.join(",")}; ADO ${actual.join(",")}`
     );
   }
   throw new UserError(`frontier pin mismatch: ${drift.join("; ")}`);

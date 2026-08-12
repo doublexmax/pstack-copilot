@@ -42,12 +42,17 @@ For each substantive commit, pull the PR context:
 ```bash
 # Find the PR number from the merge commit or branch
 git log -1 --format=%B <hash>
-
-# Full PR context: body, review comments, linked issues
-gh pr view <number> --json title,body,author,createdAt,mergedAt,labels,closingIssuesReferences,comments,reviews,files
-
-# The --json reviews and comments fields are where the real signal is
 ```
+
+Then read the PR itself. On an Azure DevOps remote:
+
+```
+repo_pull_request action=get            # title, description, author, dates
+repo_pull_request action=get_changes    # the files and diffs
+repo_pull_request_thread action=list    # review discussion
+```
+
+The review discussion is where the real signal is — the description states intent, but the threads record what the reviewers pushed back on and why the final shape won. On a GitHub remote, `gh pr view <number> --json title,body,author,createdAt,mergedAt,labels,closingIssuesReferences,comments,reviews,files` is the equivalent.
 
 Look for out-of-band docs:
 

@@ -94,6 +94,28 @@ async function makeGitStack(directory: string): Promise<{
     git({ repo, args: ["commit", "-m", branch] });
   }
 
+  git({
+    repo,
+    args: [
+      "remote",
+      "add",
+      "origin",
+      "https://msazure.visualstudio.com/One/_git/Repo",
+    ],
+  });
+  git({
+    repo,
+    args: ["update-ref", "refs/remotes/origin/main", "main"],
+  });
+  git({
+    repo,
+    args: [
+      "symbolic-ref",
+      "refs/remotes/origin/HEAD",
+      "refs/remotes/origin/main",
+    ],
+  });
+
   return {
     repo,
     mergedSha: git({ repo, args: ["rev-parse", "stack/merged"] }),
@@ -102,54 +124,45 @@ async function makeGitStack(directory: string): Promise<{
   };
 }
 
-async function withFakeGt<T>({
+async function withFakeAz<T>({
   directory,
   operation,
-  output,
+  pullRequests,
 }: {
   directory: string;
-  operation: (outputPath: string) => Promise<T>;
-  output: string;
+  operation: () => Promise<T>;
+  pullRequests: string;
 }): Promise<T> {
   const bin = join(directory, "bin");
-  const outputPath = join(directory, "gt-output.txt");
+  const outputPath = join(directory, "az-pr-list.json");
   await mkdir(bin);
-  await writeFile(outputPath, output);
-  const gt = join(bin, "gt");
+  await writeFile(outputPath, pullRequests);
+  const az = join(bin, "az");
   await writeFile(
-    gt,
+    az,
     `#!/usr/bin/env bash
 set -euo pipefail
 if [ "$(pwd -P)" != "${realpathSync(join(directory, "repo"))}" ]; then
-  printf 'gt ran outside the fixture repo: %s\\n' "$(pwd -P)" >&2
+  printf 'az ran outside the fixture repo: %s\\n' "$(pwd -P)" >&2
   exit 2
 fi
 case "$*" in
-  "--no-interactive log short --stack --reverse")
+  "repos pr list"*)
     cat "${outputPath}"
     ;;
-  "--no-interactive info stack/merged")
-    printf 'stack/merged\\nPR #10 (Merged) merged change\\n'
-    ;;
-  "--no-interactive info stack/closed")
-    printf 'stack/closed\\nPR #13 (Closed) closed change\\n'
-    ;;
-  "--no-interactive info stack/open")
-    printf 'stack/open\\nPR #11 (Needs approvals) open change\\n'
-    ;;
   *)
-    printf 'unexpected gt arguments: %s\\n' "$*" >&2
+    printf 'unexpected az arguments: %s\\n' "$*" >&2
     exit 2
     ;;
 esac
 `
   );
-  await chmod(gt, 0o755);
+  await chmod(az, 0o755);
 
   const originalPath = process.env.PATH;
   process.env.PATH = `${bin}:${originalPath ?? ""}`;
   try {
-    return await operation(outputPath);
+    return await operation();
   } finally {
     if (originalPath === undefined) {
       delete process.env.PATH;
@@ -157,6 +170,23 @@ esac
       process.env.PATH = originalPath;
     }
   }
+}
+
+function adoPr({
+  pr,
+  source,
+  target,
+}: {
+  pr: number;
+  source: string;
+  target: string;
+}): Record<string, unknown> {
+  return {
+    pullRequestId: pr,
+    sourceRefName: `refs/heads/${source}`,
+    targetRefName: `refs/heads/${target}`,
+    status: "active",
+  };
 }
 
 function runCli(
@@ -406,18 +436,18 @@ describe("Store", () => {
     ]);
   });
 
-  it("resolves the ordered Graphite frontier and validates an optional pin", async () => {
+  it("resolves the ordered ADO chain frontier and validates an optional pin", async () => {
     const { directory, store } = await initializedStore();
     const stack = await makeGitStack(directory);
-    const output = `◯ main
-◯ stack/merged
-◯ stack/closed
-◉ stack/open (current)
-`;
+    const pullRequests = JSON.stringify([
+      adoPr({ pr: 11, source: "stack/open", target: "stack/closed" }),
+      adoPr({ pr: 10, source: "stack/merged", target: "main" }),
+      adoPr({ pr: 13, source: "stack/closed", target: "stack/merged" }),
+    ]);
 
-    await withFakeGt({
+    await withFakeAz({
       directory,
-      output,
+      pullRequests,
       operation: async () => {
         expect(await store.frontier.set({ repo: stack.repo })).toEqual({
           generation: 1,
@@ -426,13 +456,13 @@ describe("Store", () => {
               pr: 10,
               branches: "stack/merged",
               sha: stack.mergedSha,
-              state: "MERGED",
+              state: "OPEN",
             },
             {
               pr: 13,
               branches: "stack/closed",
               sha: stack.closedSha,
-              state: "CLOSED",
+              state: "OPEN",
             },
             {
               pr: 11,
@@ -441,7 +471,7 @@ describe("Store", () => {
               state: "OPEN",
             },
           ],
-          lowestUnmerged: 11,
+          lowestUnmerged: 10,
         });
         expect(
           (
@@ -458,7 +488,7 @@ describe("Store", () => {
             prs: [10, 11, 12],
           })
         ).rejects.toThrow(
-          "frontier pin mismatch: missing from gt: 12; extra in gt: 13"
+          "frontier pin mismatch: missing from ADO: 12; extra in ADO: 13"
         );
         await expect(
           store.frontier.set({
@@ -466,7 +496,7 @@ describe("Store", () => {
             prs: [13, 10, 11],
           })
         ).rejects.toThrow(
-          "frontier pin mismatch: order differs: expected 13,10,11; gt 10,13,11"
+          "frontier pin mismatch: order differs: expected 13,10,11; ADO 10,13,11"
         );
         await expect(
           store.frontier.set({
@@ -478,19 +508,58 @@ describe("Store", () => {
     });
   });
 
-  it("rejects unparseable Graphite output loudly", async () => {
+  it("rejects an orphaned child, a forked chain, and a non-ADO remote", async () => {
     const { directory, store } = await initializedStore();
     const stack = await makeGitStack(directory);
 
-    await withFakeGt({
+    await withFakeAz({
       directory,
-      output: "◯ main\nthis line is not Graphite output\n",
+      pullRequests: JSON.stringify([
+        adoPr({ pr: 10, source: "stack/merged", target: "main" }),
+        adoPr({ pr: 11, source: "stack/open", target: "stack/gone" }),
+      ]),
       operation: async () => {
         await expect(
           store.frontier.set({ repo: stack.repo })
         ).rejects.toThrow(
-          'gt log short output has an unparseable line 2: "this line is not Graphite output"'
+          "1 open PR(s) target a branch that is not in the chain from main: #11 -> stack/gone"
         );
+      },
+    });
+
+    const forked = await initializedStore();
+    const forkedStack = await makeGitStack(forked.directory);
+    await withFakeAz({
+      directory: forked.directory,
+      pullRequests: JSON.stringify([
+        adoPr({ pr: 10, source: "stack/merged", target: "main" }),
+        adoPr({ pr: 13, source: "stack/closed", target: "main" }),
+      ]),
+      operation: async () => {
+        await expect(
+          forked.store.frontier.set({ repo: forkedStack.repo })
+        ).rejects.toThrow("branch main is the target of 2 open PRs");
+      },
+    });
+
+    const foreign = await initializedStore();
+    const foreignStack = await makeGitStack(foreign.directory);
+    git({
+      repo: foreignStack.repo,
+      args: [
+        "remote",
+        "set-url",
+        "origin",
+        "https://github.com/octocat/hello.git",
+      ],
+    });
+    await withFakeAz({
+      directory: foreign.directory,
+      pullRequests: "[]",
+      operation: async () => {
+        await expect(
+          foreign.store.frontier.set({ repo: foreignStack.repo })
+        ).rejects.toThrow("origin is not an Azure DevOps remote");
       },
     });
   });

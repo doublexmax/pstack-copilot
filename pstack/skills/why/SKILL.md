@@ -83,11 +83,14 @@ git log --oneline -20 -- <file>
 git log -1 --format=%B <commit>
 ```
 
-Pull PR bodies and discussion via `gh` for any substantive commits:
+Pull PR bodies and discussion for any substantive commits. Use the Azure DevOps MCP when the remote is ADO:
 
-```bash
-gh pr view <number> --json title,body,author,createdAt,mergedAt,labels,closingIssuesReferences,comments,reviews
 ```
+repo_pull_request action=get       # title, description, author, dates, reviewers
+repo_pull_request_thread action=list  # the discussion that explains the change
+```
+
+On a GitHub remote the equivalent is `gh pr view <number> --json title,body,author,createdAt,mergedAt,labels,closingIssuesReferences,comments,reviews`.
 
 Capture this as seed context (file paths, symbols, commits, PR numbers, linked ticket IDs). Pass it to the investigators so they don't rediscover it.
 
