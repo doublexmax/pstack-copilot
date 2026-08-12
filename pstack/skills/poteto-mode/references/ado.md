@@ -27,15 +27,19 @@ Per-policy status is `approved`, `queued`, `running`, `rejected`, `broken`, or
 Poll `repo_pull_request action=get` plus the policy list, then classify. One verdict
 per poll, for the frontier PR only.
 
+`az` and the REST API return these values lowercase (`active`, `completed`,
+`abandoned`, `succeeded`, `conflicts`), so compare them lowercase or fold case
+first. The portal displays them capitalized; that is display only.
+
 | Verdict | Condition | Terminal |
 |---|---|---|
-| `READY` | every applicable policy `approved`, `mergeStatus == Succeeded`, `status == Active`, `isDraft == false` | yes |
-| `BLOCKED:conflicts` | `mergeStatus == Conflicts` | no — **report, never resolve** |
+| `READY` | every applicable policy `approved`, `mergeStatus == succeeded`, `status == active`, `isDraft == false` | yes |
+| `BLOCKED:conflicts` | `mergeStatus == conflicts` | no — **report, never resolve** |
 | `BLOCKED:ci` | a `Build` policy `rejected` or `broken` | no |
 | `BLOCKED:threads` | `Comment requirements` not `approved` | no |
 | `WAITING:review` | reviewer policies `queued`, nothing else blocking | no — a wait, not a blocker |
-| `ADVANCE` | frontier `status == Completed` | no — move to the next PR in the frozen list |
-| `COMPLETE` | every PR in the frozen list `Completed` | yes |
+| `ADVANCE` | frontier `status == completed` | no — move to the next PR in the frozen list |
+| `COMPLETE` | every PR in the frozen list `completed` | yes |
 
 Reviewer votes on `reviewers[]`: `10` approved, `5` approved with suggestions, `0` no
 vote, `-5` waiting for author, `-10` rejected. `isContainer: true` is a team, not a
