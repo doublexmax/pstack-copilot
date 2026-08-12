@@ -1,12 +1,12 @@
 # pstack for copilot
 
 a port of [pstack](https://github.com/cursor/plugins/tree/main/pstack) by
-[poteto](https://x.com/poteto), rewritten to run natively on the github copilot
+[poteto](https://x.com/poteto), rewritten to run on the github copilot
 app. 45 skills, 23 playbooks, 21 principles, and 3 agents. MIT, same as upstream.
 
 this is not a mirror. the cursor plugin manifest, the `/add-plugin` install path,
-the event-triggered automations, and the graphite stacking layer are all gone,
-replaced by their copilot and azure devops equivalents. see
+the event-triggered automations, and the graphite stacking layer are all gone.
+copilot and azure devops equivalents took their place. see
 [what changed](#what-changed-from-upstream).
 
 there's a growing sense that ai writes too much slop code. i agree. i don't want to ship like a team of twenty slop artists. throughput without quality is not a goal i aspire to. if you want to go fast, go deep first.
@@ -59,7 +59,7 @@ use [`/poteto-mode`](./skills/poteto-mode/SKILL.md) at the start of a task. it r
 
 ### just use [`/poteto-mode`](./skills/poteto-mode/SKILL.md)
 
-this skill is the main shortcut. i use it whenever i need the agent to do rigorous engineering work. it comes with twenty-two playbooks:
+this skill is the main shortcut. i use it whenever i need the agent to do rigorous engineering work. it comes with twenty-three playbooks:
 
 ```
 /poteto-mode this pr has a subtle bug where the scroll drifts every 750ms even when idle. repro
@@ -72,7 +72,7 @@ morning.
 ```
 
 <details>
-<summary>the twenty-two playbooks</summary>
+<summary>the twenty-three playbooks</summary>
 
 | playbook | for |
 |---|---|
@@ -98,6 +98,7 @@ morning.
 | [pause safely](./skills/poteto-mode/playbooks/pause-safely.md) | suspend in-flight work cleanly so it can be resumed later. |
 | [multi-phase plan](./skills/poteto-mode/playbooks/multi-phase-plan.md) | work that spans phases or stacked PRs. |
 | [worktree cleanup](./skills/poteto-mode/playbooks/worktree-cleanup.md) | reclaim disk by pruning merged or abandoned worktrees and stale ios simulators, safety-gated. |
+| [opening a pr](./skills/poteto-mode/playbooks/opening-a-pr.md) | the shared tail every other playbook runs: worktree hygiene, commit shaping, and how the pr gets opened. |
 
 </details>
 

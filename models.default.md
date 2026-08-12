@@ -61,6 +61,6 @@ different model. `claude-sonnet-5`, `claude-opus-5`, `gemini-3.1-pro-preview`,
 
 ## Panel composition
 
-The four panel roles deliberately use four different vendors, so a review panel
+The four panel roles use four different vendors, so a review panel
 disagrees for real reasons rather than repeating one model family's blind spots.
 Gemini holds the seat that upstream gave to a second Anthropic model.
