@@ -284,7 +284,9 @@ to set it up, point the agent at [`FOR_AGENTS.md`](./automations/benny/FOR_AGENT
 node scripts/check-copilot-port.mjs
 ```
 
-one zero-dependency script guards the things that silently break a copilot skill. it fails when a `name` doesn't match its folder (the skill then registers under the wrong slash command), when a `description` is missing or past copilot's 1024-character load limit, when frontmatter carries a key copilot ignores, when a relative link in the docs or skills doesn't resolve, and when prose still names a tool from another agent runtime. [ci](./.github/workflows/check.yml) runs it on every pull request, so you don't have to remember.
+one zero-dependency script guards the things that silently break a copilot skill. it fails when a `name` doesn't match its folder (the skill then registers under the wrong slash command), when a `description` is missing or past copilot's 1024-character load limit, when frontmatter carries a key copilot ignores, when a relative link in the docs or skills doesn't resolve, and when prose still names a tool from another agent runtime.
+
+there is no CI gate. this org disables hosted runners and the repo has no self-hosted ones, so a workflow here would fail on every PR without ever running the script. enforcement lives in the authoring path instead. the **create-skill** procedure and the **authoring-a-skill** playbook both name this command as a required step, which is the path an agent actually takes through this repo. run it yourself before you open a PR.
 
 ## what changed from upstream
 
