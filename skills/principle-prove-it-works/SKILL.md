@@ -11,6 +11,12 @@ Verify every task output by checking the real thing directly. Do not infer from 
 
 **Pattern:** After completing any task, ask: "how do I prove this actually works?"
 
+Before choosing a command, list the bounded claims required by the requested outcome. Do not add an unbounded claim that all existing behavior remains intact.
+1. Map each claim to sufficient direct evidence.
+2. Bind load-bearing evidence to the tested artifact and, when material, its environment, branch or revision, deployment, population, or time window. Time-sensitive claims require fresh evidence.
+3. Run the direct check. If it fails, fix the work or the observation method. Do not substitute a weaker proxy.
+4. An unsupported required claim means the work is not complete.
+
 Check the real thing, not a proxy:
 - Check process liveness directly, not indirectly through derived state
 - Read the actual value, not a cached or derived representation
