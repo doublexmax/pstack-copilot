@@ -25,7 +25,7 @@ clone it anywhere and register the skills directory globally, so every repo you
 open gets them:
 
 ```bash
-git clone https://github.com/maxxtandon_microsoft/pstack-copilot ~/.copilot/pstack
+git clone https://github.com/doublexmax/pstack-copilot ~/.copilot/pstack
 copilot skill add ~/.copilot/pstack/skills
 ```
 

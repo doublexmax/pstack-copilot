@@ -7,7 +7,7 @@ In this page you register the skills directory, pick which models pstack uses, a
 Clone this fork somewhere stable and register its skills directory with the Copilot CLI:
 
 ```bash
-git clone https://github.com/maxxtandon_microsoft/pstack-copilot ~/.copilot/pstack
+git clone https://github.com/doublexmax/pstack-copilot ~/.copilot/pstack
 copilot skill add ~/.copilot/pstack/skills
 ```
 
