@@ -15,6 +15,8 @@ const UNSUPPORTED_FRONTMATTER = [
   'reminder',
   'alwaysApply',
   'globs',
+  'paths',
+  'is_background',
 ];
 
 const FOREIGN_TOKENS = [
@@ -36,9 +38,20 @@ const FOREIGN_TOKENS = [
   { pattern: /\bvia the control skill\b/i, use: 'project verify-* skill' },
   { pattern: /\bthe control skill\b/i, use: 'project verify-* skill' },
   { pattern: /\bcontrol-skill path\b/i, use: 'verify-* path' },
+  { pattern: /\bcontrol-(ui|cli)\b/, use: 'the project verify-* skill' },
+  { pattern: /\bpstack-models\.mdc\b/, use: '~/.copilot/pstack-models.md' },
+  { pattern: /~\/\.cursor\b/, use: '~/.copilot' },
+  { pattern: /\bgeneralPurpose\b/, use: 'agent_type: "general-purpose"' },
+  { pattern: /\breadonly:\s*`?(true|false)`?/, use: 'agent_type: "explore" or a prompt-level write ban' },
+  { pattern: /\bagent-transcripts\b/, use: 'the session_store_sql tool' },
+  { pattern: /\bSendToUser\b/, use: 'the ask_user tool' },
+  { pattern: /\bis_background\b/, use: 'mode: "background"' },
+  { pattern: /\benvironment:\s*"?(cloud|local)"?/, use: 'create_session with execution_location' },
 ];
 
 const TOKEN_ROOTS = ['skills', 'agents', 'docs'];
+
+const UPSTREAM_MAPPING_DOCS = new Set(['docs/upstream-sync.md']);
 
 const violations = [];
 
@@ -66,11 +79,24 @@ function parseFrontmatter(text) {
   const end = text.indexOf('\n---', 3);
   if (end === -1) return null;
   const block = text.slice(text.indexOf('\n') + 1, end);
+  const lines = block.split('\n');
   const fields = new Map();
-  for (const line of block.split('\n')) {
-    const match = /^([A-Za-z][A-Za-z0-9_-]*):\s?(.*)$/.exec(line);
+  for (let i = 0; i < lines.length; i += 1) {
+    const match = /^([A-Za-z][A-Za-z0-9_-]*):\s?(.*)$/.exec(lines[i]);
     if (!match) continue;
     let value = match[2].trim();
+
+    const blockScalar = /^([>|])[-+]?$/.exec(value);
+    if (blockScalar) {
+      const folded = [];
+      while (i + 1 < lines.length && (lines[i + 1].trim() === '' || /^\s+\S/.test(lines[i + 1]))) {
+        i += 1;
+        folded.push(lines[i].trim());
+      }
+      fields.set(match[1], folded.join(blockScalar[1] === '>' ? ' ' : '\n').trim());
+      continue;
+    }
+
     const quoted =
       (value.startsWith("'") && value.endsWith("'")) || (value.startsWith('"') && value.endsWith('"'));
     if (quoted && value.length > 1) value = value.slice(1, -1);
@@ -151,7 +177,7 @@ for (const file of walk(join(root, 'agents'))) {
 
 const markdown = TOKEN_ROOTS.flatMap((dir) => walk(join(root, dir))).filter((f) => f.endsWith('.md'));
 for (const file of markdown) {
-  checkForeignTokens(file);
+  if (!UPSTREAM_MAPPING_DOCS.has(relative(root, file).split('\\').join('/'))) checkForeignTokens(file);
   checkLinks(file);
 }
 checkLinks(join(root, 'README.md'));

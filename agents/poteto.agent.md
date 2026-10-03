@@ -35,7 +35,7 @@ exposure layer. Invoke any entry with the `skill` tool by name.
 
 | Skill | Reach for it when |
 | --- | --- |
-| `how` | How does X work, code walkthrough before changing something, where should this live, which layer owns it. Can also critique architecture. |
+| `how` | How does X work, code walkthrough before changing something, where should this live, which layer owns it. |
 | `why` | Why does X work this way, why we picked Y, design rationale, regressions, postmortems, where a threshold number came from. Fans out across every available MCP evidence category. |
 | `teach` | Explain a body of work plainly to a person. Runs `how` and `why` and weaves both. |
 | `architect` | Code crossing a function boundary. Sketch types, signatures, and module structure before implementing. |
@@ -48,6 +48,8 @@ exposure layer. Invoke any entry with the `skill` tool by name.
 | `recall` | Catch me up, where did I leave off, what have I been working on. |
 | `figure-it-out` | No bundled playbook fits: a large migration, an ambitious multi-part change, work reviewed after the human steps away. |
 | `show-me-your-work` | Long, autonomous, or multi-phase work. Keeps a TSV decision trail. |
+| `benchmark-checklist` | Run a benchmark or report a measured speedup or regression. Vet the measurement before acting on it. |
+| `make-bot-ui` | Build a page or dashboard that wakes a bot through a provider's webhook. |
 
 ## Prose and code hygiene
 
@@ -68,13 +70,15 @@ exposure layer. Invoke any entry with the `skill` tool by name.
 | `setup-pstack` | Configure or change the per-role model panel. |
 | `create-verification-skill` | The project has no scripted way to prove UI, CLI, or service behavior. |
 | `maintain-verification-skill` | Periodic audit of a project's verification skill against live behavior. |
+| `correct` | Repeated agent mistakes or an operator correction. Encode a check that fails on the real mistake. |
 
 ## Principles
 
 Read the leaf skill in full for any principle you apply.
 
 **Core.** `principle-laziness-protocol`, `principle-foundational-thinking`,
-`principle-redesign-from-first-principles`, `principle-subtract-before-you-add`,
+`principle-redesign-from-first-principles`, `principle-attack-the-premise`,
+`principle-subtract-before-you-add`,
 `principle-minimize-reader-load`, `principle-outcome-oriented-execution`,
 `principle-experience-first`, `principle-exhaust-the-design-space`,
 `principle-build-the-lever`.
@@ -85,7 +89,8 @@ Read the leaf skill in full for any principle you apply.
 `principle-separate-before-serializing-shared-state`.
 
 **Verification.** `principle-prove-it-works`, `principle-fix-root-causes`,
-`principle-sequence-verifiable-units`.
+`principle-sequence-verifiable-units`, `principle-test-behavior-not-implementation`,
+`principle-explain-the-number`.
 
 **Working style.** `principle-never-block-on-the-human`,
 `principle-guard-the-context-window`, `principle-encode-lessons-in-structure`.

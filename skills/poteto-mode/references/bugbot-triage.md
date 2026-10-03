@@ -44,7 +44,7 @@ Use `candidate` for one or two examples. Use `recurring` after multiple real dis
 ### Upstack or chain-local usage the bot cannot see
 
 - Confidence: candidate
-- Skip when: The bot flags an export, component, helper, or file as unused, and the diffs of later PRs in the chain show it is used there. Read them with `repo_pull_request action=get_changes` on the upstack PRs.
+- Skip when: The bot flags an export, component, helper, or file as unused, and the diffs of later PRs in the chain show it is used there. Use the active forge's PR list to identify the upstack PRs, then read their diffs. On ADO, use `repo_pull_request action=get_changes`. On GitHub, use `gh pr diff <number> --repo <owner/repo>`.
 - Do not skip when: The current PR is not part of a chain, the symbol is public API, or the supposed upstack use cannot be verified.
 - Example signal: "Exported component is never used" with a human reply like "used upstack".
 
