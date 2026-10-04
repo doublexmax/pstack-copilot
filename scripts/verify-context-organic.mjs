@@ -306,7 +306,7 @@ save(join(out, 'evidence.json'), evidence);
 writeFileSync(join(out, 'findings.md'), [
   '# Organic routing findings', '',
   'The integrated feature ran on ordinary project requests. The prompts did not prescribe decomposition, models, skills, workload labels, or context tiers.',
-  'The isolated role map selected the approved model and effort. Each invocation requested default parent context. Receipts record the effective value.',
+  'The isolated role map assigns the selected model and maximum effort to every role, not the personal mixed-model map. Each invocation requested default parent context. Receipts record the effective value.',
   'This is evidence about classification and project output. It is not a quality, speed, efficiency, or cost improvement claim.', '',
   ...reports.flatMap((report) => [
     `## ${report.case}`, '',

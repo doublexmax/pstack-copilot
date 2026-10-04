@@ -180,7 +180,8 @@ node scripts\verify-context-routing.mjs --cli "<copilot.exe>" --out "<evidence-d
 
 The separate suite runs an amount correction and a cross-component receipt-delivery question in ordinary project directories.
 Neither prompt names skills, models, workload labels, context tiers, or a delegate count.
-Each request has an isolated Copilot home with copied agents, registered skills, native hooks, and the approved model map.
+Each request has an isolated Copilot home with copied agents, registered skills, and native hooks.
+Its isolated role map assigns the selected model and maximum effort to all roles. It does not reproduce your personal mixed-model assignments.
 The source checkout and independent expectations stay outside the project directories.
 Project writes and shell commands are limited by an observer hook.
 Remote export and built-in MCP servers are disabled. This is a permission boundary, not an operating-system sandbox.
