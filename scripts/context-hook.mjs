@@ -159,9 +159,6 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       ? await import(pathToFileURL(join(root, 'scripts', 'context-routing.mjs')).href) : undefined;
     const result = runHook(phase, event, { root, home, routing });
     if (result.warning) console.error(JSON.stringify({ status: 'warning', scope: result.record.scope, error: result.warning }));
-    if (phase === 'preToolUse' && result.record.scope === 'managed') {
-      console.log(JSON.stringify({ type: 'progress', message: `Pstack context ${JSON.stringify(result.record)}` }));
-    }
     console.log(JSON.stringify(result.output));
   } catch (error) {
     console.error(JSON.stringify({ status: 'error', event: phase, error: error.message }));

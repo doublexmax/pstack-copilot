@@ -135,8 +135,7 @@ test('the real stdio adapter emits modifiedArgs without an allow decision', (t) 
 
   assert.equal(processResult.status, 0, processResult.stderr);
   const outputs = processResult.stdout.trim().split('\n').map(JSON.parse);
-  assert.equal(outputs[0].type, 'progress');
-  assert.deepEqual(outputs[1], { modifiedArgs: { ...event.toolArgs, context_tier: 'long_context' } });
+  assert.deepEqual(outputs, [{ modifiedArgs: { ...event.toolArgs, context_tier: 'long_context' } }]);
   const unsafe = spawnSync(process.execPath, [script, 'userPromptSubmitted'], {
     env: { ...process.env, COPILOT_HOME: f.home }, encoding: 'utf8',
     input: JSON.stringify(envelope({ sessionId: '..\\outside', prompt: 'skip poteto mode' })),

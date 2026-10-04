@@ -63,6 +63,12 @@ function prepare(name) {
   const second = spawnSync(process.execPath, [installer, '--skip-trust', '--skip-shell'], { cwd: ROOT, env, encoding: 'utf8' });
   assert.equal(second.status, 0, second.stderr);
   const observations = join(dir, 'observations');
+  if (name === 'correction') {
+    const nativeFile = join(home, 'hooks', 'pstack-context.json');
+    const native = JSON.parse(readFileSync(nativeFile, 'utf8'));
+    delete native.hooks.sessionStart;
+    writeFileSync(nativeFile, `${JSON.stringify(native, null, 2)}\n`);
+  }
   const proofHooks = { version: 1, hooks: {
     preToolUse: [{ type: 'command', matcher: 'powershell', exec: process.execPath,
       args: [observer, 'pre', observations, resolver], timeoutSec: 30 }],
@@ -70,7 +76,7 @@ function prepare(name) {
       args: [observer, 'post', observations, resolver], timeoutSec: 30 }],
   } };
   writeFileSync(join(home, 'hooks', 'zz-pstack-proof.json'), `${JSON.stringify(proofHooks, null, 2)}\n`);
-  return { dir, home, env, observations,
+  return { dir, home, env, observations, protocolOnly: name === 'correction',
     modelBytes: readFileSync(join(home, 'pstack-models.md')), settingsBytes: readFileSync(join(home, 'settings.json')),
     entryBytes: readFileSync(join(home, 'hooks', 'context-hook.mjs')) };
 }
@@ -78,6 +84,7 @@ function prepare(name) {
 function run(f, label, prompt, resume) {
   const args = [
     '--model', model, '--reasoning-effort', 'max', '--context', 'default',
+    ...(f.protocolOnly ? ['--no-custom-instructions'] : []),
     '--no-auto-update', '--no-remote', '--no-remote-export', '--no-ask-user', '--disable-builtin-mcps',
     '--available-tools', 'task', 'skill', 'view', 'glob', 'rg', 'powershell', 'read_agent', 'sql',
     '--allow-tool', 'task', '--allow-tool', 'skill', '--allow-tool', 'view', '--allow-tool', 'glob',
@@ -144,7 +151,7 @@ for (const name of cases) {
       prompt: `${plan ? `${plan.declaration}\n` : ''}Read models.default.md, context.default.json, and scripts\\context-hook.mjs with view. Return NATIVE_PROOF. Do not delegate, invoke skills, run a shell, or write files.`,
     };
     const result = run(f, 'native-probe',
-      `This is read-only native protocol verification. Use task exactly once with this exact JSON argument object. Do not change it, add a declaration, use skills, run a shell, or write files. Wait for the result. ${JSON.stringify(args)}`);
+      `This is read-only native protocol verification, not a workflow. The correction input is intentionally wrong to exercise the hook. Use task exactly once with this exact JSON argument object. Do not repair it yourself, add a declaration, use skills, run a shell, or write files. Wait for the result. ${JSON.stringify(args)}`);
     const tier = 'long_context';
     const report = inspectDispatch({ events: result.events, observations: observations(f), expectedModel: model, expectedTier: tier });
     assert.ok(report.delegates.every((delegate) => delegate.requestedTier
@@ -154,7 +161,8 @@ for (const name of cases) {
         && record.status === 'resolved' && record.reason === 'eligible-large-corpus'));
     }
     writeFileSync(join(f.dir, 'dispatch-evidence.json'), `${JSON.stringify(report, null, 2)}\n`);
-    reports.push({ case: name, ...report });
+    reports.push({ case: name, ...report, ...(name === 'correction'
+      ? { kind: 'hook-protocol-not-capability-proof', bootstrapInstructionsDisabled: true } : {}) });
   } else if (name !== 'opt-out') {
     console.log(`running ${name} with an isolated Copilot home`);
     const result = run(f, 'workflow', prompts[name]);
