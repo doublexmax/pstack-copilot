@@ -43,6 +43,12 @@ test('patches cannot escape the requested file or move it into the Copilot home'
   assert.equal(call('edit', { path: 'src/amount.mjs' }), null);
 });
 
+test('native freeform patch strings allow the requested file and still reject escaped paths', () => {
+  assert.equal(call('apply_patch', '*** Begin Patch\n*** Update File: src/amount.mjs\n@@\n-old\n+new\n*** End Patch'), null);
+  assert.equal(call('apply_patch', '*** Begin Patch\n*** Update File: ../amount.mjs\n@@\n-old\n+new\n*** End Patch'),
+    'Patch paths are restricted to the requested project file.');
+});
+
 test('delegates keep the configured model without prescribing a tier or delegate count', () => {
   assert.equal(call('task', { model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: 'long_context' }), null);
   assert.equal(call('task', { context_tier: 'default' }), null);
@@ -61,6 +67,8 @@ test('the real stdio observer denies an escaping write and records post-hook arg
   assert.deepEqual(run('pre', { toolName: 'write', toolArgs: { path: join(dir, 'home', 'settings.json') } }), {
     permissionDecision: 'deny', permissionDecisionReason: 'Writes are restricted to the requested project file.',
   });
+  assert.deepEqual(run('pre', { toolName: 'apply_patch',
+    toolArgs: '*** Begin Patch\n*** Update File: src/amount.mjs\n@@\n-old\n+new\n*** End Patch' }), {});
   const event = { toolName: 'task', toolArgs: { name: 'reader', prompt: 'Read the delivery path.', context_tier: 'default' } };
   assert.deepEqual(run('post', event), {});
   const records = readdirSync(join(dir, 'home', 'operation-records')).map((file) =>
