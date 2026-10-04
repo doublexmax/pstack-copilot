@@ -169,7 +169,32 @@ Reasoning effort is a separate setting. A larger window does not promise better 
 The [hook reference](https://docs.github.com/en/copilot/reference/hooks-reference#pretooluse-decision-control) defines `modifiedArgs`, permission decisions, and fail behavior.
 Run the committed isolated verifier for fresh requested, post-hook, and effective-tier evidence.
 It hashes source files before and after the run and rejects a changing artifact.
+Its prompts prescribe workloads, delegate count, and partition rules.
+Those checks prove dispatch mechanics, not autonomous decomposition or better output.
 
 ```powershell
 node scripts\verify-context-routing.mjs --cli "<copilot.exe>" --out "<evidence-directory>" --model gpt-6.1-sol
 ```
+
+### Observe organic classification separately
+
+The separate suite runs an amount correction and a cross-component receipt-delivery question in ordinary project directories.
+Neither prompt names skills, models, workload labels, context tiers, or a delegate count.
+Each request has an isolated Copilot home with copied agents, registered skills, native hooks, and the approved model map.
+The source checkout and independent expectations stay outside the project directories.
+Project writes and shell commands are limited by an observer hook.
+Remote export and built-in MCP servers are disabled. This is a permission boundary, not an operating-system sandbox.
+
+```powershell
+node scripts\verify-context-organic.mjs --cli "<copilot.exe>" --out "<new-receipt-directory>" --model gpt-6.1-sol
+```
+
+Every attempt records opened files, declarations, reasons, input references, original arguments, post-hook arguments, and effective configurations.
+Source and isolated integration hashes bind each receipt to its artifact.
+The amount output has independent literal checks. The delivery answer has separate expected findings for artifact review.
+`RECORDED` means the run completed, not that every classification or prose answer passed review.
+Timeouts and missing output remain `INCONCLUSIVE`.
+Direct completion supplies no delegate-classification evidence.
+Bounded decomposition is valid even for a cross-component request.
+Review any joint-corpus justification against the files actually read.
+The suite does not widen prompts to obtain long context or measure quality, speed, efficiency, or cost gains.
