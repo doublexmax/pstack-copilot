@@ -74,6 +74,13 @@ test('skill-name invocation does not replace canonical links inside checkout ski
   assert.deepEqual(checkBindings(dir), ['skills/how/SKILL.md: delegation must bind the canonical context-routing skill']);
 });
 
+test('agent bindings reject a checkout-relative routing link', (t) => {
+  const dir = fixture(t);
+  writeFileSync(join(dir, 'agents', 'poteto.agent.md'),
+    'Before delegation invoke [context-routing](../skills/context-routing/SKILL.md).\n');
+  assert.deepEqual(checkBindings(dir), ['agents/poteto.agent.md: delegation must invoke context-routing by name with the skill tool']);
+});
+
 test('instructions to launch an app for a task are not delegate instructions', (t) => {
   const dir = fixture(t);
   const file = join(dir, 'skills', 'app-verifier', 'SKILL.md');

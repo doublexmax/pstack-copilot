@@ -44,6 +44,12 @@ export function checkBindings(root) {
       if (!/invoke the\s*\r?\n?\s*`context-routing` skill/i.test(body)) errors.push(`${name}: missing automatic context-routing trigger`);
       continue;
     }
+    if (name.startsWith('agents/')) {
+      if (!/invoke the\s+`context-routing` skill with the\s+`skill` tool/i.test(body)) {
+        errors.push(`${name}: delegation must invoke context-routing by name with the skill tool`);
+      }
+      continue;
+    }
     const links = [...body.matchAll(/\]\(([^)\s]+)\)/g)]
       .some((match) => resolve(dirname(file), match[1].split('#')[0]) === canonical);
     if (!links) errors.push(`${name}: delegation must bind the canonical context-routing skill`);

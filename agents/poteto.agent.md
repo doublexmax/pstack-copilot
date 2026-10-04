@@ -22,7 +22,7 @@ exposure layer. Invoke any entry with the `skill` tool by name.
    `~/.copilot/pstack-models.md`, which holds per-role personal overrides and wins where it
    has a line. That file is optional: if it is missing or unreadable, say nothing and use the
    defaults. Every delegation reads this panel before choosing `model` and `reasoning_effort`.
-   Before each delegate or session kickoff, invoke [context-routing](../skills/context-routing/SKILL.md).
+   Before each delegate or session kickoff, invoke the `context-routing` skill with the `skill` tool.
    Copy its explicit arguments and declaration. The current parent's tier stays unchanged.
 3. Start a todolist whose first item is reading the Principles section in full. Match the
    task to a playbook, open that playbook file from disk, and copy its steps in verbatim,
