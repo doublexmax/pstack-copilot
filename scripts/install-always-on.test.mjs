@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,6 +7,17 @@ import assert from 'node:assert';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const script = join(root, 'scripts', 'install-always-on.mjs');
+
+function snapshot(dir, prefix = '') {
+  if (!existsSync(dir)) return {};
+  return Object.fromEntries(readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const file = join(dir, entry.name);
+    const name = `${prefix}${entry.name}`;
+    return entry.isDirectory()
+      ? Object.entries(snapshot(file, `${name}/`))
+      : [[name, readFileSync(file)]];
+  }));
+}
 
 function withHome(seed, { profile = true, shellRc = false, copilotName = '.copilot' } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'pstack-'));
@@ -303,6 +314,176 @@ const cases = {
     assert.strictEqual(existsSync(entry), false);
     assert.strictEqual(existsSync(join(h.copilotDir, 'hooks', 'pstack-context.json')), false);
     h.cleanup();
+  },
+  'fresh hook skip installs the other integration without native hook files'() {
+    const h = withHome();
+    try {
+      h.run('--hooks', 'skip');
+      assert.ok(h.read().includes('<!-- pstack:begin poteto-mode -->'));
+      assert.deepStrictEqual(h.readConfig().trustedFolders, [h.copilotDir]);
+      assert.ok(h.readProfile().includes('function pstack'));
+      assert.ok(existsSync(h.bin('pstack.cmd')));
+      assert.strictEqual(existsSync(join(h.copilotDir, 'hooks', 'pstack-context.json')), false);
+      assert.strictEqual(existsSync(join(h.copilotDir, 'hooks', 'context-hook.mjs')), false);
+      const once = snapshot(h.home);
+      h.run('--hooks', 'skip');
+      assert.deepStrictEqual(snapshot(h.home), once);
+    } finally { h.cleanup(); }
+  },
+  'hook skip leaves existing and foreign hooks unchanged during instruction refresh'() {
+    const h = withHome();
+    try {
+      h.run();
+      const dir = join(h.copilotDir, 'hooks');
+      writeFileSync(join(dir, 'context-hook.mjs'), 'user entry\n');
+      writeFileSync(join(dir, 'pstack-context.json'), '{invalid but untouched}\n');
+      const hooks = snapshot(dir);
+      writeFileSync(h.target, 'my notes\n');
+      h.run('--hooks', 'skip');
+      assert.ok(h.read().startsWith('my notes\n\n<!-- pstack:begin poteto-mode -->'));
+      assert.deepStrictEqual(snapshot(dir), hooks);
+    } finally { h.cleanup(); }
+  },
+  'hook-only removal preserves instructions, policy, models, trust, wrappers, agents, and session state'() {
+    const h = withHome('user instructions\n');
+    try {
+      h.run();
+      const dir = h.copilotDir;
+      mkdirSync(join(dir, 'agents'));
+      copyFileSync(join(root, 'agents', 'poteto.agent.md'), join(dir, 'agents', 'poteto.agent.md'));
+      writeFileSync(join(dir, 'settings.json'), '{"contextTier":"default","subagents":{"agents":{"poteto-worker":{"contextTier":"inherit"}}}}\n');
+      writeFileSync(join(dir, 'pstack-models.md'), readFileSync(join(root, 'models.default.md')));
+      writeFileSync(join(dir, 'pstack-context.json'), '{"schemaVersion":1,"default":"invalid"}\n');
+      writeFileSync(join(dir, 'hooks', 'user.json'), '{"version":1,"hooks":{}}\n');
+      writeFileSync(h.config, '{\n  // User trust comment.\n  "trustedFolders": ["retained"]\n}\n');
+      const marker = join(dir, 'session-state', 'session-one', 'files', 'pstack-context-opt-out');
+      mkdirSync(dirname(marker), { recursive: true });
+      writeFileSync(marker, 'disabled\n');
+      const before = snapshot(h.home);
+      const expected = { ...before };
+      delete expected['.copilot/hooks/pstack-context.json'];
+      delete expected['.copilot/hooks/context-hook.mjs'];
+      h.run('--hooks', 'remove', '--dry-run');
+      assert.deepStrictEqual(snapshot(h.home), before);
+      h.run('--hooks', 'remove');
+      assert.strictEqual(existsSync(join(dir, 'hooks', 'pstack-context.json')), false);
+      assert.strictEqual(existsSync(join(dir, 'hooks', 'context-hook.mjs')), false);
+      assert.deepStrictEqual(snapshot(h.home), expected);
+      h.run('--hooks', 'remove');
+      assert.deepStrictEqual(snapshot(h.home), expected);
+    } finally { h.cleanup(); }
+  },
+  'hook-only removal needs neither source instructions nor a resolver checkout'() {
+    const h = withHome();
+    try {
+      h.run('--skip-shell', '--skip-trust');
+      const before = h.read();
+      const brokenRoot = join(h.home, 'missing-sources');
+      mkdirSync(join(brokenRoot, 'scripts'), { recursive: true });
+      copyFileSync(script, join(brokenRoot, 'scripts', 'install-always-on.mjs'));
+      execFileSync(process.execPath, [join(brokenRoot, 'scripts', 'install-always-on.mjs'), '--hooks', 'remove'], {
+        env: { ...process.env, COPILOT_HOME: h.copilotDir }, encoding: 'utf8',
+      });
+      assert.strictEqual(existsSync(join(h.copilotDir, 'hooks', 'context-hook.mjs')), false);
+      assert.strictEqual(existsSync(join(h.copilotDir, 'hooks', 'pstack-context.json')), false);
+      assert.strictEqual(h.read(), before);
+    } finally { h.cleanup(); }
+  },
+  'hook removal and reinstall refuse foreign reserved files before any write'() {
+    for (const [file, bytes, message] of [
+      ['pstack-context.json', '{"version":1,"hooks":{}}\n', /foreign hook file/],
+      ['pstack-context.json', '{\n', /invalid hook file/],
+      ['context-hook.mjs', 'user entry\n', /foreign hook entry/],
+    ]) {
+      const h = withHome();
+      try {
+        h.run();
+        writeFileSync(join(h.copilotDir, 'hooks', file), bytes);
+        const before = snapshot(h.home);
+        assert.throws(() => h.run('--hooks', 'remove'), message);
+        assert.deepStrictEqual(snapshot(h.home), before);
+        assert.throws(() => h.run(), message);
+        assert.deepStrictEqual(snapshot(h.home), before);
+      } finally { h.cleanup(); }
+    }
+  },
+  'dry-run with either install or skip writes nothing'() {
+    for (const action of ['install', 'skip']) {
+      const h = withHome();
+      try {
+        const before = snapshot(h.home);
+        h.run('--hooks', action, '--dry-run');
+        assert.deepStrictEqual(snapshot(h.home), before);
+        assert.strictEqual(h.read(), null);
+      } finally { h.cleanup(); }
+    }
+  },
+  'default and explicit reinstall re-enable the removed owned hooks'() {
+    const h = withHome();
+    try {
+      h.run();
+      const installed = snapshot(h.home);
+      h.run('--hooks', 'remove');
+      h.run('--hooks', 'skip');
+      assert.strictEqual(existsSync(join(h.copilotDir, 'hooks', 'pstack-context.json')), false);
+      h.run();
+      assert.deepStrictEqual(snapshot(h.home), installed);
+      h.run('--hooks', 'remove');
+      h.run('--hooks', 'install');
+      assert.deepStrictEqual(snapshot(h.home), installed);
+    } finally { h.cleanup(); }
+  },
+  'context-only policy changes leave hooks disabled and the explicit resolver usable'() {
+    const h = withHome();
+    try {
+      h.run();
+      h.run('--hooks', 'remove');
+      const before = snapshot(h.home);
+      const env = { ...process.env, COPILOT_HOME: h.copilotDir };
+      const resolver = join(root, 'scripts', 'context-routing.mjs');
+      execFileSync(process.execPath, [resolver, 'set-policy', '--default', 'adaptive'], { env, encoding: 'utf8' });
+      const after = snapshot(h.home);
+      delete after['.copilot/pstack-context.json'];
+      assert.deepStrictEqual(after, before);
+      const result = JSON.parse(execFileSync(process.execPath, [resolver, 'resolve',
+        '--role', 'how explainer', '--model', 'gpt-6.1-sol', '--effort', 'max',
+        '--workload', 'bounded', '--why', 'Read one helper.', '--input', 'src/format.mjs',
+        '--host-context', 'supported', '--host-source', 'Current task context schema',
+        '--support', 'supported', '--source', 'Exact-model current task schema',
+      ], { env, encoding: 'utf8' }));
+      assert.deepStrictEqual(result.toolArguments, {
+        model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: 'default',
+      });
+      assert.strictEqual(result.decision.reason, 'bounded-work');
+      assert.ok(result.declaration.startsWith('PSTACK_CONTEXT_V1 '));
+      assert.strictEqual(existsSync(join(h.copilotDir, 'hooks', 'pstack-context.json')), false);
+    } finally { h.cleanup(); }
+  },
+  'malformed and contradictory hook options fail without writes'() {
+    for (const args of [
+      ['--hooks'], ['--hooks', '--dry-run'], ['--hooks', 'invalid'],
+      ['--hooks', 'install', '--hooks', 'skip'], ['--dry-run', '--dry-run'],
+      ['--uninstall', '--hooks', 'install'], ['--uninstall', '--hooks', 'skip'],
+      ['--uninstall', '--hooks', 'remove'], ['--hooks', 'remove', '--skip-shell'],
+      ['--hooks', 'remove', '--skip-trust'],
+    ]) {
+      const h = withHome();
+      try {
+        const before = snapshot(h.home);
+        assert.throws(() => h.run(...args), /--hooks|duplicate option/);
+        assert.deepStrictEqual(snapshot(h.home), before);
+      } finally { h.cleanup(); }
+    }
+  },
+  'help distinguishes hook skip from hook-only removal'() {
+    const h = withHome();
+    try {
+      const help = h.run('--help');
+      assert.match(help, /--hooks <install\|skip\|remove>/);
+      assert.match(help, /skip leaves existing hooks unchanged/);
+      assert.match(help, /remove changes only owned hook files/);
+      assert.strictEqual(h.read(), null);
+    } finally { h.cleanup(); }
   },
 };
 
