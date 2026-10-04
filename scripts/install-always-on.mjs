@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const sourceFile = join(root, 'always-on', 'copilot-instructions.md');
 const home = process.env.USERPROFILE || process.env.HOME || homedir();
-const copilotDir = join(home, '.copilot');
+const copilotDir = resolve(process.env.COPILOT_HOME || join(home, '.copilot'));
 const instructionsFile = join(copilotDir, 'copilot-instructions.md');
 const configFile = join(copilotDir, 'config.json');
 const binDir = join(copilotDir, 'bin');
@@ -17,11 +17,12 @@ const instructionsEnd = '<!-- pstack:end poteto-mode -->';
 const shellBegin = '# BEGIN pstack path trust';
 const shellEnd = '# END pstack path trust';
 
-const USAGE = `usage: node install-always-on.mjs [--dry-run] [--uninstall] [--skip-shell]
+const USAGE = `usage: node install-always-on.mjs [--dry-run] [--uninstall] [--skip-shell] [--skip-trust]
 
 Installs poteto-mode always-on instructions, adds ~/.copilot to config.json
 trustedFolders, and installs a pstack wrapper that runs copilot with
---add-dir ~/.copilot so playbooks and pstack-models.md are readable.`;
+--add-dir ~/.copilot so playbooks and pstack-models.md are readable.
+--skip-trust leaves config.json untouched, including JSONC files.`;
 
 function parseManagedBlock(text, begin, end) {
   const beginAt = text.indexOf(begin);
@@ -77,9 +78,17 @@ function readJson(file) {
   const raw = readFileSync(file, 'utf8').trim();
   if (!raw) return {};
   try {
-    return JSON.parse(raw);
+    const value = JSON.parse(raw);
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error('expected an object');
+    }
+    if (value.trustedFolders !== undefined
+      && (!Array.isArray(value.trustedFolders) || value.trustedFolders.some((folder) => typeof folder !== 'string'))) {
+      throw new Error('trustedFolders must be an array of paths');
+    }
+    return value;
   } catch {
-    throw new Error(`invalid JSON in ${file}`);
+    throw new Error(`invalid JSON configuration in ${file}; use --skip-trust to leave it untouched`);
   }
 }
 
@@ -286,7 +295,7 @@ function installShell(removing, dryRun, skipShell) {
 
 try {
   const args = process.argv.slice(2);
-  const allowed = new Set(['--dry-run', '--uninstall', '--skip-shell', '--help', '-h']);
+  const allowed = new Set(['--dry-run', '--uninstall', '--skip-shell', '--skip-trust', '--help', '-h']);
   const unknown = args.find((arg) => !allowed.has(arg));
   if (unknown) throw new Error(`unknown option: ${unknown}\n${USAGE}`);
   if (args.includes('--help') || args.includes('-h')) {
@@ -297,9 +306,13 @@ try {
   const dryRun = args.includes('--dry-run');
   const removing = args.includes('--uninstall');
   const skipShell = args.includes('--skip-shell');
+  const skipTrust = args.includes('--skip-trust');
+
+  if (!skipTrust) readJson(configFile);
 
   installInstructions(removing, dryRun);
-  installTrustedFolder(removing, dryRun);
+  if (skipTrust) console.log('skipping trustedFolders (--skip-trust)');
+  else installTrustedFolder(removing, dryRun);
   installShell(removing, dryRun, skipShell);
 } catch (error) {
   console.error(`error: ${error.message}`);

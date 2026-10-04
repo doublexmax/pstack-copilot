@@ -8,10 +8,11 @@ import assert from 'node:assert';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const script = join(root, 'scripts', 'install-always-on.mjs');
 
-function withHome(seed, { profile = true, shellRc = false } = {}) {
+function withHome(seed, { profile = true, shellRc = false, copilotName = '.copilot' } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'pstack-'));
-  const target = join(home, '.copilot', 'copilot-instructions.md');
-  const config = join(home, '.copilot', 'config.json');
+  const copilotDir = join(home, copilotName);
+  const target = join(copilotDir, 'copilot-instructions.md');
+  const config = join(copilotDir, 'config.json');
   const profilePath = join(home, 'Documents', 'PowerShell', 'Microsoft.PowerShell_profile.ps1');
   const shellRcPath = join(home, '.bashrc');
   if (seed !== undefined) {
@@ -24,6 +25,7 @@ function withHome(seed, { profile = true, shellRc = false } = {}) {
         ...process.env,
         HOME: home,
         USERPROFILE: home,
+        COPILOT_HOME: copilotDir,
         ...(profile ? { PSTACK_PROFILE_PATH: profilePath } : { PSTACK_PROFILE_PATH: '' }),
         ...(shellRc ? { PSTACK_SHELL_RC: shellRcPath } : {}),
       },
@@ -33,7 +35,7 @@ function withHome(seed, { profile = true, shellRc = false } = {}) {
   const readConfig = () => (existsSync(config) ? JSON.parse(readFileSync(config, 'utf8')) : null);
   const readProfile = () => (existsSync(profilePath) ? readFileSync(profilePath, 'utf8') : null);
   const readRc = () => (existsSync(shellRcPath) ? readFileSync(shellRcPath, 'utf8') : null);
-  const bin = (name) => join(home, '.copilot', 'bin', name);
+  const bin = (name) => join(copilotDir, 'bin', name);
   return {
     home,
     run,
@@ -193,6 +195,49 @@ const cases = {
     const rc = h.readRc();
     assert.ok(rc.includes('pstack()'), rc);
     assert.ok(rc.includes('--add-dir'), rc);
+    h.cleanup();
+  },
+  'COPILOT_HOME selects the instruction, config, and shim directory'() {
+    const h = withHome(undefined, { copilotName: 'isolated-copilot' });
+    h.run();
+    assert.ok(h.read().includes('poteto mode'));
+    assert.deepStrictEqual(h.readConfig().trustedFolders, [join(h.home, 'isolated-copilot')]);
+    assert.ok(existsSync(h.bin('pstack.cmd')));
+    assert.strictEqual(existsSync(join(h.home, '.copilot')), false);
+    h.cleanup();
+  },
+  'invalid config fails before any installation write'() {
+    for (const value of ['{', '[]', '{"trustedFolders": "bad"}', '{"trustedFolders": [1]}']) {
+      const h = withHome();
+      mkdirSync(dirname(h.config), { recursive: true });
+      writeFileSync(h.config, value);
+      assert.throws(() => h.run(), /invalid JSON configuration/);
+      assert.strictEqual(h.read(), null);
+      assert.strictEqual(h.readProfile(), null);
+      assert.strictEqual(existsSync(h.bin('pstack.cmd')), false);
+      assert.strictEqual(readFileSync(h.config, 'utf8'), value);
+      h.cleanup();
+    }
+  },
+  'skip-trust preserves JSONC and unrelated preferences across install and uninstall'() {
+    const h = withHome('keep these instructions\n');
+    const jsonc = '{\n  // Preserve this comment.\n  "trustedFolders": ["C:\\\\already-trusted"]\n}\n';
+    const models = readFileSync(join(root, 'models.default.md'), 'utf8').match(/```\r?\n([\s\S]*?)\r?\n```/)[1];
+    const modelFile = join(dirname(h.config), 'pstack-models.md');
+    const settingsFile = join(dirname(h.config), 'settings.json');
+    const settings = '{"contextTier":"default","subagents":{"agents":{"poteto-worker":{"contextTier":"inherit"}}}}\n';
+    writeFileSync(h.config, jsonc);
+    writeFileSync(modelFile, models);
+    writeFileSync(settingsFile, settings);
+    h.run('--skip-trust', '--skip-shell');
+    const once = h.read();
+    h.run('--skip-trust', '--skip-shell');
+    assert.strictEqual(h.read(), once);
+    h.run('--uninstall', '--skip-trust', '--skip-shell');
+    assert.strictEqual(h.read(), 'keep these instructions\n');
+    assert.strictEqual(readFileSync(h.config, 'utf8'), jsonc);
+    assert.strictEqual(readFileSync(modelFile, 'utf8'), models);
+    assert.strictEqual(readFileSync(settingsFile, 'utf8'), settings);
     h.cleanup();
   },
 };

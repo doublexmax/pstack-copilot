@@ -33,6 +33,11 @@ That one command does three things:
 
 The block is user-scoped, so a repo you clone next month is covered without any per-repo setup. `--uninstall` reverses all three and leaves unrelated content untouched. `--skip-shell` installs only always-on and `trustedFolders`. `--dry-run` prints what would change.
 
+If your `config.json` has JSONC comments, use `--skip-trust` to leave that file untouched.
+The installer validates the trust configuration before it writes anything.
+Keep the existing trust grant or pass `--add-dir` when you start Copilot.
+`COPILOT_HOME` selects a different Copilot configuration directory for an isolated installation.
+
 ## Let pstack read its own playbooks
 
 `skillDirectories` makes every skill load, but a skill is more than its `SKILL.md`. `poteto-mode` reads playbooks and references from disk while it works, and it reads your model overrides from `~/.copilot/pstack-models.md`. All of that goes through Copilot's path permissions, and Copilot trusts your working directory only unless you grant `~/.copilot`.
