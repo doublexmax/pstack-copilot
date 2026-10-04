@@ -137,16 +137,18 @@ for (const name of cases) {
       support: 'supported', source: 'Exact-model long-context task support verified on this CLI by natural corpus dispatch',
     }, { home: f.home }) : null;
     const args = {
-      agent_type: 'general-purpose', mode: 'sync', model, reasoning_effort: 'max', context_tier: 'default',
+      agent_type: 'general-purpose', mode: 'sync', model, reasoning_effort: 'max',
+      context_tier: name === 'correction' ? 'default' : 'long_context',
       name: name === 'correction' ? 'pstack-correction-proof' : 'ordinary-proof',
       description: 'Read the contracts',
       prompt: `${plan ? `${plan.declaration}\n` : ''}Read models.default.md, context.default.json, and scripts\\context-hook.mjs with view. Return NATIVE_PROOF. Do not delegate, invoke skills, run a shell, or write files.`,
     };
     const result = run(f, 'native-probe',
       `This is read-only native protocol verification. Use task exactly once with this exact JSON argument object. Do not change it, add a declaration, use skills, run a shell, or write files. Wait for the result. ${JSON.stringify(args)}`);
-    const tier = name === 'correction' ? 'long_context' : 'default';
+    const tier = 'long_context';
     const report = inspectDispatch({ events: result.events, observations: observations(f), expectedModel: model, expectedTier: tier });
-    assert.ok(report.delegates.every((delegate) => delegate.requestedTier === 'default'));
+    assert.ok(report.delegates.every((delegate) => delegate.requestedTier
+      === (name === 'correction' ? 'default' : 'long_context')));
     if (name === 'correction') {
       assert.ok(decisions(f, result.sessionId).some((record) => record.name === args.name
         && record.status === 'resolved' && record.reason === 'eligible-large-corpus'));

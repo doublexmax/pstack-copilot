@@ -91,7 +91,7 @@ The installer adds `hooks\pstack-context.json` and a self-contained `hooks\conte
 It refuses a foreign file at that reserved path and preserves other hooks.
 Repeated installation is byte-identical for owned files.
 Uninstall removes the managed hook and instruction block, not your policy or model map.
-If you move the checkout, rerun the installer so its hook path points to the new location.
+After updating pstack or moving the checkout, rerun the installer to refresh the copied entry and its checkout path.
 
 For an already trusted installation with JSONC configuration, preserve trust settings and shell files.
 
