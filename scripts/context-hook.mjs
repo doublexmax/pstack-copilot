@@ -1,11 +1,22 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { copilotHome, loadContextPolicy, routeToolCall } from './context-routing.mjs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
+export const ENTRY_VERSION = 'pstack-context-entry-v1';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const PHASES = new Set(['sessionStart', 'userPromptSubmitted', 'preToolUse', 'postToolUse']);
+
+function copilotHome() {
+  return resolve(process.env.COPILOT_HOME || join(process.env.USERPROFILE || process.env.HOME || homedir(), '.copilot'));
+}
+
+function managed(event) {
+  const launch = event.toolName === 'task' ? event.toolArgs : event.toolArgs?.kickoff;
+  return (event.toolName === 'task' && typeof launch?.name === 'string' && launch.name.startsWith('pstack-'))
+    || (typeof launch?.prompt === 'string' && launch.prompt.startsWith('PSTACK_CONTEXT_'));
+}
 
 function statePath(home, sessionId) {
   if (typeof sessionId !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(sessionId)) throw new Error('invalid hook sessionId');
@@ -37,6 +48,7 @@ function record(home, phase, event, result) {
     timestamp: event.timestamp,
     tool: event.toolName ?? null,
     scope: result.scope,
+    name: event.toolArgs?.name ?? null,
     ...(result.decision ?? { reason: result.reason }),
     ...(result.observedTier === undefined ? {} : { observedTier: result.observedTier, observation: result.observation }),
   };
@@ -67,7 +79,7 @@ function respond(home, phase, event, result) {
   }
 }
 
-export function runHook(phase, event, { root = ROOT, home = copilotHome() } = {}) {
+export function runHook(phase, event, { root = ROOT, home = copilotHome(), routing } = {}) {
   if (!PHASES.has(phase)) throw new Error(`unknown hook event ${phase}`);
   const state = statePath(home, event.sessionId);
   if (!Number.isSafeInteger(event.timestamp) || event.timestamp < 0) throw new Error('invalid hook timestamp');
@@ -88,7 +100,7 @@ export function runHook(phase, event, { root = ROOT, home = copilotHome() } = {}
         output: { additionalContext: 'Pstack context routing is off for this session. Leave delegate arguments unchanged. Submit the whole command /poteto-mode to re-enter. This opt-out persists on resume.' },
       });
     }
-    const context = loadContextPolicy({ root, home });
+    const context = routing.loadContextPolicy({ root, home });
     const result = { scope: 'session', reason: 'context-routing-ready' };
     return {
       output: { additionalContext: [
@@ -105,7 +117,8 @@ export function runHook(phase, event, { root = ROOT, home = copilotHome() } = {}
   const optedOut = existsSync(state);
   let result;
   try {
-    result = routeToolCall(event, { root, home, optedOut });
+    result = optedOut ? { scope: 'opt-out', reason: 'session-opt-out', output: {} }
+      : routing.routeToolCall(event, { root, home });
   } catch (error) {
     result = {
       scope: 'managed',
@@ -130,7 +143,21 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const phase = process.argv[2];
   try {
     const event = JSON.parse(readFileSync(0, 'utf8'));
-    const result = runHook(phase, event);
+    if (['preToolUse', 'postToolUse'].includes(phase) && !managed(event)) {
+      console.error(JSON.stringify({ scope: 'unmanaged', reason: 'no-pstack-declaration' }));
+      console.log('{}');
+      process.exit(0);
+    }
+    const home = copilotHome();
+    const root = resolve(process.argv[3] || ROOT);
+    const optedOut = typeof event.sessionId === 'string' && /^[a-zA-Z0-9_-]+$/.test(event.sessionId)
+      && existsSync(statePath(home, event.sessionId));
+    const needsRouting = (!optedOut || wholeCommand(event.initialPrompt) === 'on')
+      && (phase === 'sessionStart' && wholeCommand(event.initialPrompt) !== 'off'
+      || ['preToolUse', 'postToolUse'].includes(phase));
+    const routing = needsRouting
+      ? await import(pathToFileURL(join(root, 'scripts', 'context-routing.mjs')).href) : undefined;
+    const result = runHook(phase, event, { root, home, routing });
     if (result.warning) console.error(JSON.stringify({ status: 'warning', scope: result.record.scope, error: result.warning }));
     if (phase === 'preToolUse' && result.record.scope === 'managed') {
       console.log(JSON.stringify({ type: 'progress', message: `Pstack context ${JSON.stringify(result.record)}` }));

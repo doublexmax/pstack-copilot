@@ -6,14 +6,14 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { runHook } from './context-hook.mjs';
-import { resolveRole } from './context-routing.mjs';
+import { loadContextPolicy, resolveRole, routeToolCall } from './context-routing.mjs';
 
 const script = fileURLToPath(new URL('./context-hook.mjs', import.meta.url));
 
 function fixture(t) {
   const home = mkdtempSync(join(tmpdir(), 'pstack-hook-'));
   t.after(() => rmSync(home, { recursive: true, force: true }));
-  return { home };
+  return { home, routing: { loadContextPolicy, routeToolCall } };
 }
 
 function envelope(overrides = {}) {
@@ -132,6 +132,7 @@ test('the real stdio adapter emits modifiedArgs without an allow decision', (t) 
   const processResult = spawnSync(process.execPath, [script, 'preToolUse'], {
     env: { ...process.env, COPILOT_HOME: f.home }, encoding: 'utf8', input: JSON.stringify(event),
   });
+
   assert.equal(processResult.status, 0, processResult.stderr);
   const outputs = processResult.stdout.trim().split('\n').map(JSON.parse);
   assert.equal(outputs[0].type, 'progress');
@@ -145,4 +146,16 @@ test('the real stdio adapter emits modifiedArgs without an allow decision', (t) 
   assert.deepEqual(JSON.parse(unsafe.stderr), {
     status: 'error', event: 'userPromptSubmitted', error: 'invalid hook sessionId',
   });
+});
+
+test('unmarked native calls bypass broken checkout and session validation before importing anything', (t) => {
+  const f = fixture(t);
+  const broken = join(f.home, 'missing-checkout');
+  const result = spawnSync(process.execPath, [script, 'preToolUse', broken], {
+    env: { ...process.env, COPILOT_HOME: f.home }, encoding: 'utf8',
+    input: JSON.stringify({ toolName: 'task', toolArgs: { name: 'ordinary', prompt: 'Read one file.' } }),
+  });
+  assert.equal(result.status, 0);
+  assert.deepEqual(JSON.parse(result.stdout), {});
+  assert.deepEqual(JSON.parse(result.stderr), { scope: 'unmanaged', reason: 'no-pstack-declaration' });
 });

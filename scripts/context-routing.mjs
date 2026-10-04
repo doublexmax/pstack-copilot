@@ -74,16 +74,17 @@ function json(raw, label) {
   return object(value, label);
 }
 
-function parseModels(raw, label, allowed) {
+function parseModels(raw, label, allowed, diagnostics = []) {
   const roles = new Map();
+  const seen = new Set();
   for (const [index, line] of raw.replace(/\r\n/g, '\n').split('\n').entries()) {
     const row = line.trim();
     if (!row || row.startsWith('#') || row.startsWith('```')) continue;
     const match = /^([^:]+):\s*(.+)$/.exec(row);
     if (!match) throw new Error(`${label}:${index + 1}: expected role: model / effort`);
     const role = match[1].trim();
-    if (allowed && !allowed.has(role)) throw new Error(`${label}:${index + 1}: unknown role ${role}`);
-    if (roles.has(role)) throw new Error(`${label}:${index + 1}: duplicate role ${role}`);
+    if (seen.has(role)) throw new Error(`${label}:${index + 1}: duplicate role ${role}`);
+    seen.add(role);
     const choices = match[2].split(',').map((item) => {
       const choice = item.trim();
       if (ALIASES.has(choice)) return { alias: choice };
@@ -93,7 +94,8 @@ function parseModels(raw, label, allowed) {
       }
       return { model: pair[1], reasoning_effort: pair[2] };
     });
-    roles.set(role, choices);
+    if (allowed && !allowed.has(role)) diagnostics.push(`retired-model-role:${role}`);
+    else roles.set(role, choices);
   }
   return roles;
 }
@@ -204,15 +206,17 @@ function decide(context, declared, model, target) {
 function selectedModels(context, home) {
   const file = join(home, 'pstack-models.md');
   const raw = readOptional(file);
-  const overrides = raw === null ? new Map() : parseModels(raw, file, context.roles);
-  return new Map([...context.roles, ...overrides]);
+  const diagnostics = [];
+  const overrides = raw === null ? new Map() : parseModels(raw, file, context.roles, diagnostics);
+  return { choices: new Map([...context.roles, ...overrides]), diagnostics };
 }
 
 export function resolveRole(request, { root = ROOT, home = copilotHome() } = {}) {
   const context = loadContextPolicy({ root, home });
   const target = request.target ?? 'task';
   if (!TARGETS.has(target)) throw new Error(`unknown launch target ${target}`);
-  const choices = selectedModels(context, home).get(request.role);
+  const models = selectedModels(context, home);
+  const choices = models.choices.get(request.role);
   if (!choices) throw new Error(`unknown role ${request.role}`);
   const member = request.member ?? 0;
   if (!Number.isSafeInteger(member) || member < 0 || member >= choices.length) throw new Error('invalid panel member');
@@ -246,6 +250,7 @@ export function resolveRole(request, { root = ROOT, home = copilotHome() } = {})
     ...(request.parentModel === undefined ? {} : { parentModel: request.parentModel }),
   }, context.roles, target);
   const decision = decide(context, declared, choice.model ?? null, target);
+  decision.diagnostics.push(...models.diagnostics);
   const result = { decision, declaration: `${DECLARATION_PREFIX}${JSON.stringify(declared)}` };
   if (decision.status === 'resolved') {
     const args = { ...(choice.model ? choice : {}), context_tier: decision.tier };
@@ -268,7 +273,6 @@ export function routeToolCall(event, { root = ROOT, home = copilotHome(), optedO
   const first = newline === -1 ? prompt : prompt.slice(0, newline).replace(/\r$/, '');
   if (newline >= 0 && prompt.slice(newline + 1).startsWith(DECLARATION_PREFIX)) throw new Error('duplicate launch declaration');
   const context = loadContextPolicy({ root, home });
-  selectedModels(context, home);
   const declared = declaration(json(first.slice(DECLARATION_PREFIX.length), 'declaration'), context.roles, event.toolName);
   if (launch.model !== undefined) modelId(launch.model, 'toolArgs.model');
   if (launch.context_tier !== undefined && !TIERS.has(launch.context_tier)) throw new Error('invalid toolArgs.context_tier');

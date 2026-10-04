@@ -26,7 +26,8 @@ The existing 17-role `pstack-models.md` format remains `model / effort`.
 `default` is optional in a personal file. An omitted value inherits the checked-in default.
 `roles` is optional. Exact role keys override the global mode.
 Combined labels retain their commas. Panel members keep separate model-support decisions.
-Unknown keys, unknown roles, duplicate fields, invalid modes, and malformed model configuration fail loudly.
+Unknown policy keys or role overrides, duplicate fields, invalid modes, and malformed model configuration fail loudly.
+Retired valid model-role lines produce a diagnostic and remain unchanged during context-only setup.
 
 | Mode | Decision |
 | --- | --- |
@@ -76,6 +77,7 @@ Opt-out leaves arguments unchanged, not forced to default.
 It persists when you resume the same session.
 Submit the whole command `/poteto-mode` to re-enter.
 Quoted text, code, substrings, and extended commands do not toggle this state.
+Opt-out follows the host session ID. A separately identified child or new session does not automatically inherit it.
 
 Aliases on `task` use a known effective parent model or report `alias-parent-unresolved`.
 An omitted kickoff model does not establish which model the host will choose.
@@ -85,7 +87,7 @@ No decision inherits the parent's context tier.
 ## Installation and scope
 
 Register the checkout's skills and copy its agents, then run the always-on installer.
-The installer adds `hooks\pstack-context.json` with direct-exec Node hooks.
+The installer adds `hooks\pstack-context.json` and a self-contained `hooks\context-hook.mjs` entry with direct-exec Node hooks.
 It refuses a foreign file at that reserved path and preserves other hooks.
 Repeated installation is byte-identical for owned files.
 Uninstall removes the managed hook and instruction block, not your policy or model map.
@@ -112,7 +114,10 @@ The host can disable hooks. Command hook timeouts fail open.
 A launch that omits both reserved markers is unmanaged, so the native hook cannot detect a forgotten pstack classification.
 The source gate catches missing workflow bindings, not arbitrary agent behavior.
 An unavailable hook executable can also break the host's hook execution.
-These are not universal enforcement guarantees.
+Copilot denies tool calls when a command pre-tool hook crashes or its executable cannot start, including unrelated calls.
+The installed entry bypasses unmarked calls before checkout imports or session validation, so a broken pstack checkout does not block them.
+If Node or the copied entry is unavailable, remove only `hooks\pstack-context.json` to restore the ordinary permission flow.
+These are not universal enforcement guarantees. Copilot App hook behavior is unverified by the CLI receipts.
 Local user hooks do not install themselves in cloud workers.
 Explicit kickoff arguments are wired, but remote execution needs its own capability evidence.
 
@@ -125,6 +130,7 @@ Reasoning effort is a separate setting. A larger window does not promise better 
 
 The [hook reference](https://docs.github.com/en/copilot/reference/hooks-reference#pretooluse-decision-control) defines `modifiedArgs`, permission decisions, and fail behavior.
 Run the committed isolated verifier for fresh requested, post-hook, and effective-tier evidence.
+It hashes source files before and after the run and rejects a changing artifact.
 
 ```powershell
 node scripts\verify-context-routing.mjs --cli "<copilot.exe>" --out "<evidence-directory>" --model gpt-6.1-sol

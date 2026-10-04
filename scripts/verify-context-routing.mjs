@@ -5,13 +5,14 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFi
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inspectDispatch, readEvents } from './copilot-dispatch-evidence.mjs';
+import { resolveRole } from './context-routing.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const options = {};
 for (let i = 2; i < process.argv.length; i += 2) {
   const name = process.argv[i];
   if (!['--cli', '--out', '--model', '--case'].includes(name) || !process.argv[i + 1]) {
-    throw new Error('usage: node verify-context-routing.mjs --cli <binary> --out <new-directory> [--model <id>] [--case bounded|large-corpus|opt-out]');
+    throw new Error('usage: node verify-context-routing.mjs --cli <binary> --out <new-directory> [--model <id>] [--case bounded|large-corpus|opt-out|correction|unmanaged]');
   }
   if (options[name]) throw new Error(`duplicate option ${name}`);
   options[name] = process.argv[i + 1];
@@ -29,7 +30,19 @@ const resolver = join(ROOT, 'scripts', 'context-routing.mjs');
 const observer = join(ROOT, 'scripts', 'context-proof-observer.mjs');
 const installer = join(ROOT, 'scripts', 'install-always-on.mjs');
 const cases = options['--case'] ? [options['--case']] : ['bounded', 'large-corpus', 'opt-out'];
-assert.ok(cases.every((name) => ['bounded', 'large-corpus', 'opt-out'].includes(name)), 'unknown verification case');
+assert.ok(cases.every((name) => ['bounded', 'large-corpus', 'opt-out', 'correction', 'unmanaged'].includes(name)), 'unknown verification case');
+
+function artifactFiles() {
+  const paths = execFileSync('git', ['-C', ROOT, 'ls-files', '--cached', '--others', '--exclude-standard'], { encoding: 'utf8' })
+    .trim().split('\n').filter((name) => /^(skills|agents|always-on|scripts|docs)\//.test(name)
+      || ['context.default.json', 'models.default.md', 'README.md'].includes(name));
+  return paths.filter((name) => existsSync(join(ROOT, name))).sort().map((name) => ({
+    path: name, sha256: createHash('sha256').update(readFileSync(join(ROOT, name))).digest('hex'),
+  }));
+}
+
+const filesBefore = artifactFiles();
+const headBefore = execFileSync('git', ['-C', ROOT, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 
 function prepare(name) {
   const dir = join(out, name);
@@ -57,7 +70,9 @@ function prepare(name) {
       args: [observer, 'post', observations, resolver], timeoutSec: 30 }],
   } };
   writeFileSync(join(home, 'hooks', 'zz-pstack-proof.json'), `${JSON.stringify(proofHooks, null, 2)}\n`);
-  return { dir, home, env, observations, modelBytes: readFileSync(join(home, 'pstack-models.md')), settingsBytes: readFileSync(join(home, 'settings.json')) };
+  return { dir, home, env, observations,
+    modelBytes: readFileSync(join(home, 'pstack-models.md')), settingsBytes: readFileSync(join(home, 'settings.json')),
+    entryBytes: readFileSync(join(home, 'hooks', 'context-hook.mjs')) };
 }
 
 function run(f, label, prompt, resume) {
@@ -84,6 +99,7 @@ function run(f, label, prompt, resume) {
   const events = readEvents(join(f.home, 'session-state', terminal.sessionId, 'events.jsonl'));
   assert.deepEqual(readFileSync(join(f.home, 'pstack-models.md')), f.modelBytes, 'the isolated model map changed');
   assert.deepEqual(readFileSync(join(f.home, 'settings.json')), f.settingsBytes, 'parent or per-agent preferences changed');
+  assert.deepEqual(readFileSync(join(f.home, 'hooks', 'context-hook.mjs')), f.entryBytes, 'the copied production hook changed during the run');
   return { sessionId: terminal.sessionId, events, streamed };
 }
 
@@ -112,7 +128,32 @@ const prompts = {
 const reports = [];
 for (const name of cases) {
   const f = prepare(name);
-  if (name !== 'opt-out') {
+  if (name === 'correction' || name === 'unmanaged') {
+    console.log(`running native ${name} dispatch`);
+    const plan = name === 'correction' ? resolveRole({
+      role: 'how explainer', model, effort: 'max', workload: 'large-corpus',
+      why: 'Compare the model, policy, and hook contracts together.', inputs: ['models.default.md', 'context.default.json', 'scripts\\context-hook.mjs'],
+      hostContext: true, hostSource: 'Current CLI task context field, verified by natural workflow dispatch',
+      support: 'supported', source: 'Exact-model long-context task support verified on this CLI by natural corpus dispatch',
+    }, { home: f.home }) : null;
+    const args = {
+      agent_type: 'general-purpose', mode: 'sync', model, reasoning_effort: 'max', context_tier: 'default',
+      name: name === 'correction' ? 'pstack-correction-proof' : 'ordinary-proof',
+      description: 'Read the contracts',
+      prompt: `${plan ? `${plan.declaration}\n` : ''}Read models.default.md, context.default.json, and scripts\\context-hook.mjs with view. Return NATIVE_PROOF. Do not delegate, invoke skills, run a shell, or write files.`,
+    };
+    const result = run(f, 'native-probe',
+      `This is read-only native protocol verification. Use task exactly once with this exact JSON argument object. Do not change it, add a declaration, use skills, run a shell, or write files. Wait for the result. ${JSON.stringify(args)}`);
+    const tier = name === 'correction' ? 'long_context' : 'default';
+    const report = inspectDispatch({ events: result.events, observations: observations(f), expectedModel: model, expectedTier: tier });
+    assert.ok(report.delegates.every((delegate) => delegate.requestedTier === 'default'));
+    if (name === 'correction') {
+      assert.ok(decisions(f, result.sessionId).some((record) => record.name === args.name
+        && record.status === 'resolved' && record.reason === 'eligible-large-corpus'));
+    }
+    writeFileSync(join(f.dir, 'dispatch-evidence.json'), `${JSON.stringify(report, null, 2)}\n`);
+    reports.push({ case: name, ...report });
+  } else if (name !== 'opt-out') {
     console.log(`running ${name} with an isolated Copilot home`);
     const result = run(f, 'workflow', prompts[name]);
     const report = inspectDispatch({
@@ -126,8 +167,11 @@ for (const name of cases) {
       && String(event.data.arguments.command).includes(resolver)), 'the workflow did not call the canonical resolver');
     const records = decisions(f, result.sessionId);
     assert.ok(records.some((record) => record.event === 'sessionStart' && record.reason === 'context-routing-ready'), 'missing automatic session hook');
-    assert.ok(records.some((record) => record.event === 'preToolUse' && record.status === 'resolved'
-      && record.workload === name && record.tier === (name === 'bounded' ? 'default' : 'long_context')), 'missing workload decision');
+    for (const delegate of report.delegates) {
+      assert.ok(records.some((record) => record.event === 'preToolUse' && record.status === 'resolved'
+        && record.name === delegate.name && record.effectiveModel === delegate.model
+        && record.workload === name && record.tier === delegate.effectiveTier), 'missing delegate-bound workload decision');
+    }
     writeFileSync(join(f.dir, 'dispatch-evidence.json'), `${JSON.stringify(report, null, 2)}\n`);
     reports.push({ case: name, ...report, decisionDirectory: join(f.home, 'pstack-context-decisions', result.sessionId) });
   } else {
@@ -155,16 +199,14 @@ for (const name of cases) {
     reports.push({ case: name, ...report, optOutResumed: true, explicitReEntry: true });
   }
 }
-const paths = execFileSync('git', ['-C', ROOT, 'ls-files', '--cached', '--others', '--exclude-standard'], { encoding: 'utf8' })
-  .trim().split('\n').filter((name) => /^(skills|agents|always-on|scripts|docs)\//.test(name) || ['context.default.json', 'models.default.md', 'README.md'].includes(name));
-const files = paths.filter((name) => existsSync(join(ROOT, name))).map((name) => ({
-  path: name, sha256: createHash('sha256').update(readFileSync(join(ROOT, name))).digest('hex'),
-}));
+const filesAfter = artifactFiles();
+assert.deepEqual(filesAfter, filesBefore, 'feature source files changed during verification; the run is not artifact-bound');
 const evidence = {
   status: 'PASS', observedAt: new Date().toISOString(),
   cli, model, branch: execFileSync('git', ['-C', ROOT, 'branch', '--show-current'], { encoding: 'utf8' }).trim(),
-  headCommit: execFileSync('git', ['-C', ROOT, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
-  reports, files,
+  headCommit: headBefore,
+  headAfter: execFileSync('git', ['-C', ROOT, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+  reports, files: filesBefore, filesAfter, sourceStable: true,
 };
 writeFileSync(join(out, 'evidence.json'), `${JSON.stringify(evidence, null, 2)}\n`);
 console.log(`PASS: ${reports.map((report) => report.case).join(', ')}; ${join(out, 'evidence.json')}`);

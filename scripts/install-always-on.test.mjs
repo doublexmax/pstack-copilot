@@ -256,7 +256,7 @@ const cases = {
     const hooks = JSON.parse(readFileSync(join(dir, 'pstack-context.json'), 'utf8'));
     for (const phase of ['sessionStart', 'userPromptSubmitted', 'preToolUse', 'postToolUse']) {
       assert.strictEqual(hooks.hooks[phase][0].exec, process.execPath);
-      assert.deepStrictEqual(hooks.hooks[phase][0].args, [join(root, 'scripts', 'context-hook.mjs'), phase]);
+      assert.deepStrictEqual(hooks.hooks[phase][0].args, [join(h.copilotDir, 'hooks', 'context-hook.mjs'), phase, root]);
       assert.strictEqual(hooks.hooks[phase][0].powershell, undefined);
       assert.strictEqual(hooks.hooks[phase][0].bash, undefined);
     }
@@ -264,6 +264,7 @@ const cases = {
     assert.strictEqual(readFileSync(join(h.copilotDir, 'pstack-context.json'), 'utf8'), policy);
     h.run('--uninstall', '--skip-shell');
     assert.strictEqual(existsSync(join(dir, 'pstack-context.json')), false);
+    assert.strictEqual(existsSync(join(dir, 'context-hook.mjs')), false);
     assert.strictEqual(readFileSync(join(dir, 'user.json'), 'utf8'), foreign);
     assert.strictEqual(readFileSync(join(h.copilotDir, 'pstack-context.json'), 'utf8'), policy);
     h.cleanup();
@@ -282,6 +283,26 @@ const cases = {
       assert.strictEqual(h.readProfile(), null);
       h.cleanup();
     }
+  },
+  'the copied entry permits unmarked calls after checkout loss and uninstall needs no resolver'() {
+    const h = withHome();
+    h.run('--skip-trust', '--skip-shell');
+    const entry = join(h.copilotDir, 'hooks', 'context-hook.mjs');
+    const output = execFileSync(process.execPath, [entry, 'preToolUse', join(h.home, 'missing-checkout')], {
+      env: { ...process.env, COPILOT_HOME: h.copilotDir }, encoding: 'utf8',
+      input: JSON.stringify({ toolName: 'task', toolArgs: { name: 'ordinary', prompt: 'Read one file.' } }),
+    });
+    assert.deepStrictEqual(JSON.parse(output), {});
+    const brokenRoot = join(h.home, 'broken-checkout');
+    mkdirSync(join(brokenRoot, 'scripts'), { recursive: true });
+    writeFileSync(join(brokenRoot, 'scripts', 'install-always-on.mjs'), readFileSync(script));
+    execFileSync(process.execPath, [join(brokenRoot, 'scripts', 'install-always-on.mjs'),
+      '--uninstall', '--skip-trust', '--skip-shell'], {
+      env: { ...process.env, COPILOT_HOME: h.copilotDir }, encoding: 'utf8',
+    });
+    assert.strictEqual(existsSync(entry), false);
+    assert.strictEqual(existsSync(join(h.copilotDir, 'hooks', 'pstack-context.json')), false);
+    h.cleanup();
   },
 };
 

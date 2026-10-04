@@ -242,7 +242,7 @@ test('malformed policy, duplicate JSON keys, unknown roles, and malformed legacy
   f.write('pstack-context.json', { schemaVersion: 1 });
   for (const raw of [
     'feature, refactoring: gpt-6.1-sol / impossible\n', 'feature, refactoring: auto / max\n',
-    'retired role: gpt-6.1-sol / max\n', 'bad line\n',
+    'bad line\n',
     'feature, refactoring: auto\nfeature, refactoring: inherit-parent\n',
   ]) {
     f.write('pstack-models.md', raw);
@@ -250,6 +250,19 @@ test('malformed policy, duplicate JSON keys, unknown roles, and malformed legacy
   }
 });
 
+test('retired valid model-role lines are diagnostic and never rewritten or allowed to block context-only setup', (t) => {
+  const f = fixture(t);
+  const models = 'how critics: gpt-6.1-sol / max\nfeature, refactoring: gpt-6.1-sol / max\n';
+  f.write('pstack-models.md', models);
+  configurePolicy({ defaultMode: 'adaptive' }, f);
+  const result = resolveRole(request(), f);
+  assert.deepEqual(result.toolArguments, { model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: 'default' });
+  assert.deepEqual(result.decision.diagnostics, ['retired-model-role:how critics']);
+  assert.equal(readFileSync(join(f.home, 'pstack-models.md'), 'utf8'), models);
+  assert.deepEqual(routeToolCall(event(result), f).output, { modifiedArgs: event(result).toolArgs });
+  f.write('pstack-models.md', 'how critics: invalid / impossible\n');
+  assert.throws(() => resolveRole(request(), f), /invalid model \/ effort/);
+});
 test('policy-only configuration is idempotent and preserves a full 17-role model map and parent preferences', (t) => {
   const f = fixture(t);
   const models = readFileSync(join(root, 'models.default.md'), 'utf8').match(/```\r?\n([\s\S]*?)\r?\n```/)[1];

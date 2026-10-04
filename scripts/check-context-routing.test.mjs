@@ -61,3 +61,14 @@ test('the gate calls the real resolver and observes both literal dispatch output
   }
   assert.deepEqual(await checkResolver(dir), []);
 });
+
+test('a missing policy file fails the behavioral package gate', async (t) => {
+  const dir = fixture(t);
+  mkdirSync(join(dir, 'scripts'));
+  for (const name of ['models.default.md', 'scripts/context-routing.mjs']) {
+    copyFileSync(join(root, name), join(dir, name));
+  }
+  const errors = await checkResolver(dir);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /context\.default\.json/);
+});

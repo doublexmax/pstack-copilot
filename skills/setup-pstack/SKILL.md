@@ -132,7 +132,7 @@ If the user already chose a policy, use that choice. Otherwise ask one question 
 
 - `Adaptive, long context for supported large-corpus work (Recommended)`
 - `Default context for every delegate`
-- `Long context when the selected model and host support it`
+- `Require long context for every delegate; block when support is unproven`
 
 Use `adaptive`, `default`, or `long_context` for the corresponding mode.
 Write only the personal context file through the canonical command:

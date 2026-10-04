@@ -3,17 +3,17 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSy
 import { homedir, platform } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { copilotHome, loadContextPolicy } from './context-routing.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const sourceFile = join(root, 'always-on', 'copilot-instructions.md');
 const home = process.env.USERPROFILE || process.env.HOME || homedir();
-const copilotDir = copilotHome();
+const copilotDir = resolve(process.env.COPILOT_HOME || join(home, '.copilot'));
 const instructionsFile = join(copilotDir, 'copilot-instructions.md');
 const configFile = join(copilotDir, 'config.json');
 const binDir = join(copilotDir, 'bin');
 const hookFile = join(copilotDir, 'hooks', 'pstack-context.json');
 const hookScript = join(root, 'scripts', 'context-hook.mjs');
+const hookEntry = join(copilotDir, 'hooks', 'context-hook.mjs');
 
 const instructionsBegin = '<!-- pstack:begin poteto-mode -->';
 const instructionsEnd = '<!-- pstack:end poteto-mode -->';
@@ -95,7 +95,7 @@ function readJson(file) {
   }
 }
 
-function planNativeHooks(removing) {
+async function planNativeHooks(removing) {
   const phases = ['sessionStart', 'userPromptSubmitted', 'preToolUse', 'postToolUse'];
   const current = existsSync(hookFile) ? readFileSync(hookFile, 'utf8') : null;
   if (current !== null) {
@@ -117,30 +117,36 @@ function planNativeHooks(removing) {
           && Object.keys(entries[0].env).length === 1
           && entries[0].type === 'command'
           && typeof entries[0].exec === 'string'
-          && Array.isArray(entries[0].args) && entries[0].args.length === 2
+          && Array.isArray(entries[0].args) && [2, 3].includes(entries[0].args.length)
           && typeof entries[0].args[0] === 'string'
           && basename(entries[0].args[0]) === 'context-hook.mjs' && entries[0].args[1] === phase
           && Object.keys(entries[0]).every((key) => ['type', 'exec', 'args', 'env', 'matcher', 'timeoutSec'].includes(key));
       });
     if (!owned) throw new Error(`refusing to replace a foreign hook file ${hookFile}`);
   }
-  if (removing) return { current, next: null };
+  const entryCurrent = existsSync(hookEntry) ? readFileSync(hookEntry, 'utf8') : null;
+  if (entryCurrent !== null && !entryCurrent.includes("export const ENTRY_VERSION = 'pstack-context-entry-v1';")) {
+    throw new Error(`refusing to replace a foreign hook entry ${hookEntry}`);
+  }
+  if (removing) return { current, next: null, entryCurrent, entryNext: null };
   requireFile(hookScript);
+  const { loadContextPolicy } = await import('./context-routing.mjs');
   loadContextPolicy({ root, home: copilotDir });
   const hooks = Object.fromEntries(phases.map((phase) => [phase, [{
     type: 'command',
     exec: process.execPath,
-    args: [hookScript, phase],
+    args: [hookEntry, phase, root],
     env: { PSTACK_CONTEXT_MANAGED: '1' },
     ...(['preToolUse', 'postToolUse'].includes(phase)
       ? { matcher: 'task|create_session|open_pr_session|open_issue_session' } : {}),
     timeoutSec: 30,
   }]]));
-  return { current, next: `${JSON.stringify({ version: 1, hooks }, null, 2)}\n` };
+  return { current, next: `${JSON.stringify({ version: 1, hooks }, null, 2)}\n`,
+    entryCurrent, entryNext: readFileSync(hookScript, 'utf8') };
 }
 
 function installNativeHooks(plan, dryRun) {
-  if (plan.current === plan.next) {
+  if (plan.current === plan.next && plan.entryCurrent === plan.entryNext) {
     console.log(`no changes needed at ${hookFile}`);
     return;
   }
@@ -150,8 +156,10 @@ function installNativeHooks(plan, dryRun) {
   }
   if (plan.next === null) {
     if (plan.current !== null) unlinkSync(hookFile);
+    if (plan.entryCurrent !== null) unlinkSync(hookEntry);
   } else {
     mkdirSync(dirname(hookFile), { recursive: true });
+    if (plan.entryCurrent !== plan.entryNext) writeFileSync(hookEntry, plan.entryNext);
     writeFileSync(hookFile, plan.next);
   }
   console.log(`${plan.next === null ? 'removed' : 'installed'} native context hooks at ${hookFile}`);
@@ -374,7 +382,7 @@ try {
   const skipTrust = args.includes('--skip-trust');
 
   if (!skipTrust) readJson(configFile);
-  const nativeHooks = planNativeHooks(removing);
+  const nativeHooks = await planNativeHooks(removing);
 
   installInstructions(removing, dryRun);
   installNativeHooks(nativeHooks, dryRun);

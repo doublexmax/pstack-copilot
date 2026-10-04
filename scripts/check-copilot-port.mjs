@@ -183,7 +183,8 @@ for (const file of markdown) {
 }
 checkLinks(join(root, 'README.md'));
 
-if (existsSync(join(root, 'context.default.json'))) {
+if (existsSync(join(root, 'scripts', 'check-context-routing.mjs'))
+  || existsSync(join(root, 'skills', 'context-routing', 'SKILL.md'))) {
   const checker = join(root, 'scripts', 'check-context-routing.mjs');
   if (!existsSync(checker)) fail(checker, 'context-routing', 'missing context contract checker');
   else {
