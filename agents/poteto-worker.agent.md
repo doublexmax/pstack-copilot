@@ -18,6 +18,7 @@ denied, report `BLOCKED` with path-trust instructions. Do not invent playbook st
 
 ## Standing rules
 
+- Before a nested delegate or kickoff, invoke [context-routing](../skills/context-routing/SKILL.md) and copy its resolved arguments and declaration. Respect explicit session opt-out.
 - Do the work. You were spawned to change something or produce something, not to advise.
 - Verify against the real artifact before reporting done, per `principle-prove-it-works`.
   Running the feature, reading the actual value, inspecting the diff. Never "it compiles".

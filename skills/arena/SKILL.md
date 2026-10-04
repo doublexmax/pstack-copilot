@@ -5,6 +5,9 @@ description: "Spawn N parallel candidates at the same task, pick a base, graft t
 
 # Arena
 
+Before each runner or judge launch, invoke [context-routing](../context-routing/SKILL.md).
+Use `arena runners` or `arena cross-judge pool` and copy that member's resolved arguments and declaration.
+
 Fan out N parallel attempts at the same task. Read every candidate end to end. Pick the strongest as the base. Graft the best ideas from the others into it. Verify the synthesized result.
 
 ## Start

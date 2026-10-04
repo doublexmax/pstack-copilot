@@ -5,6 +5,9 @@ description: "Reconstruct your recent working context from your own chat history
 
 # Recall
 
+Before a history-reading delegate launches, invoke [context-routing](../context-routing/SKILL.md) with `how explorer`.
+Copy its resolved arguments and declaration for the specific session slice. Direct queries need no delegate routing.
+
 **Before you start or resume work, you rebuild the user's recent working context and hand back a tight capsule of where things stand now and what to do next.**
 
 Keep it tight and on-topic. Read only what the in-scope threads need, then stop.

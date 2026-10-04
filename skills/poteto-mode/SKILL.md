@@ -5,6 +5,10 @@ description: poteto's agent style for concise, detailed responses, deliberate su
 
 # Poteto mode
 
+Before every task delegate or session kickoff, invoke [context-routing](../context-routing/SKILL.md).
+Use its resolver's literal arguments and declaration, including direct workflow calls.
+Respect the session's explicit opt-out. Do not select a context tier inline.
+
 ## Non-negotiables
 
 **Start every multi-step task with a todolist whose first item is to read the Principles section below in full.** The principles ground every trigger here. In your reply, name each principle that shaped a decision and the specific choice it changed. Cite only principles whose leaf SKILL.md you read this session.
@@ -96,7 +100,7 @@ Read the leaf skill in full for any principle you apply. Each entry names when i
 - `mode: "background"` so fan-out is real parallelism. Launch every member of a wave in one message. After launching, keep doing your own independent work rather than polling `read_agent`.
 - `model` and `reasoning_effort` set explicitly per role. Copilot splits what upstream encoded in one slug into these two fields. A role of `inherit-parent` or `auto` means omit both.
 - File pointers, not inlined context. Subagents share your filesystem, so hand them paths.
-- `context_tier: "long_context"` when the delegate must read a large corpus. Reach for this before reaching for a different model.
+- `context_tier` comes from **context-routing** for this delegate's workload and exact-model evidence. Bounded work defaults to normal context; a panel resolves each member separately.
 - No read-only flag exists. Where upstream said `readonly`, either use `agent_type: "explore"` for pure repo reading, or keep `general-purpose` and forbid writes in the prompt. Prefer the latter whenever the delegate needs MCP access or a specific model, because `explore` has neither.
 - Subagents can be multi-turn. `write_agent` sends a follow-up into the same context and `read_agent` collects it. Reach for that only under the reuse test below.
 

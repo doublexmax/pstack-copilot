@@ -1,16 +1,19 @@
 #!/usr/bin/env node
 import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir, platform } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { copilotHome, loadContextPolicy } from './context-routing.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const sourceFile = join(root, 'always-on', 'copilot-instructions.md');
 const home = process.env.USERPROFILE || process.env.HOME || homedir();
-const copilotDir = resolve(process.env.COPILOT_HOME || join(home, '.copilot'));
+const copilotDir = copilotHome();
 const instructionsFile = join(copilotDir, 'copilot-instructions.md');
 const configFile = join(copilotDir, 'config.json');
 const binDir = join(copilotDir, 'bin');
+const hookFile = join(copilotDir, 'hooks', 'pstack-context.json');
+const hookScript = join(root, 'scripts', 'context-hook.mjs');
 
 const instructionsBegin = '<!-- pstack:begin poteto-mode -->';
 const instructionsEnd = '<!-- pstack:end poteto-mode -->';
@@ -19,7 +22,7 @@ const shellEnd = '# END pstack path trust';
 
 const USAGE = `usage: node install-always-on.mjs [--dry-run] [--uninstall] [--skip-shell] [--skip-trust]
 
-Installs poteto-mode always-on instructions, adds ~/.copilot to config.json
+Installs poteto-mode instructions and native pstack context hooks, adds ~/.copilot to config.json
 trustedFolders, and installs a pstack wrapper that runs copilot with
 --add-dir ~/.copilot so playbooks and pstack-models.md are readable.
 --skip-trust leaves config.json untouched, including JSONC files.`;
@@ -90,6 +93,68 @@ function readJson(file) {
   } catch {
     throw new Error(`invalid JSON configuration in ${file}; use --skip-trust to leave it untouched`);
   }
+}
+
+function planNativeHooks(removing) {
+  const phases = ['sessionStart', 'userPromptSubmitted', 'preToolUse', 'postToolUse'];
+  const current = existsSync(hookFile) ? readFileSync(hookFile, 'utf8') : null;
+  if (current !== null) {
+    let previous;
+    try {
+      previous = JSON.parse(current);
+    } catch {
+      throw new Error(`refusing to replace invalid hook file ${hookFile}`);
+    }
+    const hooks = previous?.hooks;
+    const owned = previous && typeof previous === 'object' && !Array.isArray(previous)
+      && previous.version === 1 && hooks && typeof hooks === 'object' && !Array.isArray(hooks)
+      && Object.keys(previous).sort().join(',') === 'hooks,version'
+      && Object.keys(hooks).sort().join(',') === [...phases].sort().join(',')
+      && phases.every((phase) => {
+        const entries = hooks[phase];
+        return Array.isArray(entries) && entries.length === 1 && entries[0] && typeof entries[0] === 'object'
+          && entries[0].env?.PSTACK_CONTEXT_MANAGED === '1'
+          && Object.keys(entries[0].env).length === 1
+          && entries[0].type === 'command'
+          && typeof entries[0].exec === 'string'
+          && Array.isArray(entries[0].args) && entries[0].args.length === 2
+          && typeof entries[0].args[0] === 'string'
+          && basename(entries[0].args[0]) === 'context-hook.mjs' && entries[0].args[1] === phase
+          && Object.keys(entries[0]).every((key) => ['type', 'exec', 'args', 'env', 'matcher', 'timeoutSec'].includes(key));
+      });
+    if (!owned) throw new Error(`refusing to replace a foreign hook file ${hookFile}`);
+  }
+  if (removing) return { current, next: null };
+  requireFile(hookScript);
+  loadContextPolicy({ root, home: copilotDir });
+  const hooks = Object.fromEntries(phases.map((phase) => [phase, [{
+    type: 'command',
+    exec: process.execPath,
+    args: [hookScript, phase],
+    env: { PSTACK_CONTEXT_MANAGED: '1' },
+    ...(['preToolUse', 'postToolUse'].includes(phase)
+      ? { matcher: 'task|create_session|open_pr_session|open_issue_session' } : {}),
+    timeoutSec: 30,
+  }]]));
+  return { current, next: `${JSON.stringify({ version: 1, hooks }, null, 2)}\n` };
+}
+
+function installNativeHooks(plan, dryRun) {
+  if (plan.current === plan.next) {
+    console.log(`no changes needed at ${hookFile}`);
+    return;
+  }
+  if (dryRun) {
+    console.log(`would ${plan.next === null ? 'remove' : 'install'} native context hooks at ${hookFile}`);
+    return;
+  }
+  if (plan.next === null) {
+    if (plan.current !== null) unlinkSync(hookFile);
+  } else {
+    mkdirSync(dirname(hookFile), { recursive: true });
+    writeFileSync(hookFile, plan.next);
+  }
+  console.log(`${plan.next === null ? 'removed' : 'installed'} native context hooks at ${hookFile}`);
 }
 
 function installInstructions(removing, dryRun) {
@@ -309,8 +374,10 @@ try {
   const skipTrust = args.includes('--skip-trust');
 
   if (!skipTrust) readJson(configFile);
+  const nativeHooks = planNativeHooks(removing);
 
   installInstructions(removing, dryRun);
+  installNativeHooks(nativeHooks, dryRun);
   if (skipTrust) console.log('skipping trustedFolders (--skip-trust)');
   else installTrustedFolder(removing, dryRun);
   installShell(removing, dryRun, skipShell);

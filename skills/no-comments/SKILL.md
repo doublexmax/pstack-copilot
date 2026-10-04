@@ -5,6 +5,9 @@ description: "Spawn Comment Sicko, fix accepted findings, and offer encodings fo
 
 # No comments
 
+Before spawning Comment Sicko, invoke [context-routing](../context-routing/SKILL.md) with `judgment and prose`.
+Preserve an explicitly selected or inherited model. Copy the resolved arguments and declaration for the actual diff scope.
+
 Spawn Comment Sicko. Act on accepted findings.
 
 Defer to Comment Sicko's fresh perspective.

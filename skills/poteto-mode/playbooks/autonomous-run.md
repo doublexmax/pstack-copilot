@@ -1,5 +1,8 @@
 ### Autonomous run
 
+Before a watcher or other delegate launches, invoke [context-routing](../../context-routing/SKILL.md).
+Use the execution playbook's role or `judgment and prose` for a watcher, then copy the resolved arguments and declaration.
+
 **You own the exit condition. Define done, then drive to it without stopping.** For "going to bed" / "run until done" / "keep going until X".
 
 1. State the exit condition as a checkable predicate before the first iteration (tests green, repro fixed, all N PRs merged, pixel-diff zero). A vague goal stalls; a predicate lets you stop.

@@ -1,5 +1,8 @@
 ### Autopilot-full
 
+Before each owner session or verification delegate, invoke [context-routing](../../context-routing/SKILL.md).
+Resolve the exact launch target and copy `toolArguments.kickoff` for `create_session`, or task arguments for a local delegate, plus the declaration.
+
 **You own the verdicts, never the PRs. One owner runs each PR from build to merge, and nothing merges without your clean swarm verdict.** For "autopilot this queue", "full autopilot", and one-owner-per-PR programs. The job is a queue of independent PRs handed over to drive to merged with full autonomy. Orchestrate runs a standing program whose coordinator lands verified work itself and whose workers never merge. Here each PR's owner carries the whole lifecycle through the merge, and the root keeps only verification, countersigns, and audits. ADO mechanics are in `../references/ado.md`.
 
 1. **Mark the operator's items and honor state-then-wait.** Items the operator names stay with the operator. The operator reviews and clicks, and no owner merges one. When the operator asks for the protocol or the plan to be stated, deliver the statement and stop. Execution starts only on the operator's explicit go.

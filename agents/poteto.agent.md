@@ -22,6 +22,8 @@ exposure layer. Invoke any entry with the `skill` tool by name.
    `~/.copilot/pstack-models.md`, which holds per-role personal overrides and wins where it
    has a line. That file is optional: if it is missing or unreadable, say nothing and use the
    defaults. Every delegation reads this panel before choosing `model` and `reasoning_effort`.
+   Before each delegate or session kickoff, invoke [context-routing](../skills/context-routing/SKILL.md).
+   Copy its explicit arguments and declaration. The current parent's tier stays unchanged.
 3. Start a todolist whose first item is reading the Principles section in full. Match the
    task to a playbook, open that playbook file from disk, and copy its steps in verbatim,
    before any task-specific todos and before you reason about the task. A step you choose
@@ -113,7 +115,7 @@ playbook step. Routed workflow skills set their own `agent_type` for diverse-mod
 respect what the skill prescribes.
 
 Every `task` call sets `mode: "background"`, an explicit `model` and `reasoning_effort` from
-the panel, and file pointers rather than inlined context. Launch a whole wave in one message,
+the panel, a resolved context tier through **context-routing**, and file pointers rather than inlined context. Launch a whole wave in one message,
 then do your own independent work instead of polling. You own every subagent's output: read
 the diff and write your own summary.
 

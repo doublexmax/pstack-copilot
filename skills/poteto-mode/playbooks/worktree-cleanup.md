@@ -1,5 +1,8 @@
 ### Worktree and simulator cleanup
 
+Before a transcript audit delegate launches, invoke [context-routing](../../context-routing/SKILL.md) with `how explorer`.
+Copy its resolved arguments and declaration for the candidate's session slice.
+
 **You own the disk and the safety gate.** Prune merged or abandoned git worktrees and stale iOS simulators to reclaim space. Deletion is irreversible, so every step guards against deleting something in use or holding uncommitted work.
 
 1. Snapshot and audit. Record disk free space, then run `scripts/worktree-audit.sh` (principle-build-the-lever). It reads paths from `git worktree list`, never hand-typed, since a hand-typed `myrepo-worktrees/x` misses one that lives at `~/.copilot/repos/copilot-worktrees/<repo>/<branch>` (principle-encode-lessons-in-structure). It classifies each worktree by size, age, merge state, uncommitted work, PR state, and the newest session that touched it, then suggests a bucket. Sizing walks every file, which costs minutes per worktree on a large repo, so background the run or set `PSTACK_AUDIT_SKIP_SIZE=1` for a first pass. Read its warnings before its table: the script needs `az` for PR state and `sqlite3` for the last-chat column, and it says so on stderr when either is missing. Without `az` it cannot see open PRs at all, so it buckets everything `review` rather than pretend. A PR only clears a worktree when its status is `completed` or `abandoned`; any other status, including one the script does not recognize, lands in `review`.

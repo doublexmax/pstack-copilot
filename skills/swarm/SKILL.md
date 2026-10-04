@@ -5,6 +5,9 @@ description: "Fan out N parallel workers, drain them, and return one report. Use
 
 # Swarm
 
+Before each worker launch, invoke [context-routing](../context-routing/SKILL.md) with `swarm workers`.
+Copy the resolved task arguments and declaration. Cloud escalation resolves again for `create_session` and copies `toolArguments.kickoff` plus the declaration into its kickoff.
+
 Fan out N parallel cloud workers. They may cover separate slices, race the same brief, or mix both. The parent waits, aggregates, and returns one report.
 
 ## Start

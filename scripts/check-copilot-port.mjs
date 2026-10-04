@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname, resolve, relative, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -181,6 +182,17 @@ for (const file of markdown) {
   checkLinks(file);
 }
 checkLinks(join(root, 'README.md'));
+
+if (existsSync(join(root, 'context.default.json'))) {
+  const checker = join(root, 'scripts', 'check-context-routing.mjs');
+  if (!existsSync(checker)) fail(checker, 'context-routing', 'missing context contract checker');
+  else {
+    const result = spawnSync(process.execPath, [checker], { encoding: 'utf8' });
+    if (result.error || result.status !== 0) {
+      fail(checker, 'context-routing', result.error?.message || `${result.stdout}${result.stderr}`.trim());
+    }
+  }
+}
 
 if (violations.length === 0) {
   console.log(`ok: ${skillDirs.length} skills, ${markdown.length} markdown files`);

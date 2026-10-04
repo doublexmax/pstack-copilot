@@ -1,5 +1,8 @@
 ### Feature
 
+Before each implementation or review delegate, invoke [context-routing](../../context-routing/SKILL.md).
+Use `feature, refactoring` or the selected review role and copy the resolved arguments and declaration for that unit.
+
 **You own the design. Plan, review, verify.** Delegate implementation. Stay in the lead.
 
 1. `how` over the affected subsystem.

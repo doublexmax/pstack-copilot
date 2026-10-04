@@ -47,6 +47,7 @@ function withHome(seed, { profile = true, shellRc = false, copilotName = '.copil
     bin,
     target,
     config,
+    copilotDir,
     cleanup: () => rmSync(home, { recursive: true, force: true }),
   };
 }
@@ -74,10 +75,12 @@ const cases = {
     const once = h.read();
     const configOnce = readFileSync(h.config, 'utf8');
     const profileOnce = h.readProfile();
+    const hooksOnce = readFileSync(join(h.copilotDir, 'hooks', 'pstack-context.json'), 'utf8');
     h.run();
     assert.strictEqual(h.read(), once);
     assert.strictEqual(readFileSync(h.config, 'utf8'), configOnce);
     assert.strictEqual(h.readProfile(), profileOnce);
+    assert.strictEqual(readFileSync(join(h.copilotDir, 'hooks', 'pstack-context.json'), 'utf8'), hooksOnce);
     h.cleanup();
   },
   'foreign content survives install and uninstall byte-identical'() {
@@ -110,6 +113,7 @@ const cases = {
     assert.strictEqual(h.readConfig(), null);
     assert.strictEqual(h.readProfile(), null);
     assert.ok(!existsSync(h.bin('pstack.cmd')));
+    assert.strictEqual(existsSync(join(h.copilotDir, 'hooks', 'pstack-context.json')), false);
     h.cleanup();
   },
   'uninstall leaving nothing else empties the file'() {
@@ -239,6 +243,45 @@ const cases = {
     assert.strictEqual(readFileSync(modelFile, 'utf8'), models);
     assert.strictEqual(readFileSync(settingsFile, 'utf8'), settings);
     h.cleanup();
+  },
+  'native hooks use direct execution and preserve unrelated hook files and personal policy'() {
+    const h = withHome();
+    const dir = join(h.copilotDir, 'hooks');
+    mkdirSync(dir, { recursive: true });
+    const foreign = '{"version":1,"hooks":{"sessionStart":[{"type":"command","exec":"user-helper"}]}}\n';
+    const policy = '{"schemaVersion":1,"default":"adaptive","roles":{"how explainer":"default"}}\n';
+    writeFileSync(join(dir, 'user.json'), foreign);
+    writeFileSync(join(h.copilotDir, 'pstack-context.json'), policy);
+    h.run('--skip-shell');
+    const hooks = JSON.parse(readFileSync(join(dir, 'pstack-context.json'), 'utf8'));
+    for (const phase of ['sessionStart', 'userPromptSubmitted', 'preToolUse', 'postToolUse']) {
+      assert.strictEqual(hooks.hooks[phase][0].exec, process.execPath);
+      assert.deepStrictEqual(hooks.hooks[phase][0].args, [join(root, 'scripts', 'context-hook.mjs'), phase]);
+      assert.strictEqual(hooks.hooks[phase][0].powershell, undefined);
+      assert.strictEqual(hooks.hooks[phase][0].bash, undefined);
+    }
+    assert.strictEqual(readFileSync(join(dir, 'user.json'), 'utf8'), foreign);
+    assert.strictEqual(readFileSync(join(h.copilotDir, 'pstack-context.json'), 'utf8'), policy);
+    h.run('--uninstall', '--skip-shell');
+    assert.strictEqual(existsSync(join(dir, 'pstack-context.json')), false);
+    assert.strictEqual(readFileSync(join(dir, 'user.json'), 'utf8'), foreign);
+    assert.strictEqual(readFileSync(join(h.copilotDir, 'pstack-context.json'), 'utf8'), policy);
+    h.cleanup();
+  },
+  'hook collision and invalid policy fail before any installation write'() {
+    for (const scenario of ['foreign-hook', 'invalid-policy']) {
+      const h = withHome();
+      mkdirSync(h.copilotDir, { recursive: true });
+      if (scenario === 'foreign-hook') {
+        mkdirSync(join(h.copilotDir, 'hooks'));
+        writeFileSync(join(h.copilotDir, 'hooks', 'pstack-context.json'), '{"version":1,"hooks":{}}\n');
+      } else writeFileSync(join(h.copilotDir, 'pstack-context.json'), '{"schemaVersion":1,"default":"invalid"}');
+      assert.throws(() => h.run('--skip-trust', '--skip-shell'), /foreign hook file|invalid default policy/);
+      assert.strictEqual(h.read(), null);
+      assert.strictEqual(h.readConfig(), null);
+      assert.strictEqual(h.readProfile(), null);
+      h.cleanup();
+    }
   },
 };
 

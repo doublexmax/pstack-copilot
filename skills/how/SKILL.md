@@ -5,6 +5,9 @@ description: "Use for \"how does X work\", code walkthroughs before changing som
 
 # How
 
+Before each spawn, invoke [context-routing](../context-routing/SKILL.md) and copy its resolved arguments and declaration.
+Use `how explorer` or `how explainer` as the exact role. Classify each delegate's own inputs.
+
 Explore the codebase to answer "how does X work?" questions. Produce architectural explanations at the level of a senior engineer onboarding onto a subsystem, enough to build a working mental model, not so much that it reads like annotated source code.
 
 Each spawn below names a role line in `~/.copilot/pstack-models.md` and a default. Set `model` and `reasoning_effort` to that line's values, or to the default if the file or the line is missing. Omit both when the value is `auto` or `inherit-parent`. If the `task` tool rejects a model ID, use the default and say so. If it rejects the default, use the closest valid ID of the same family from its error message.
