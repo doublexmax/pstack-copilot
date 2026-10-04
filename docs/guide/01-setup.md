@@ -18,6 +18,8 @@ cp ~/.copilot/pstack/agents/*.agent.md ~/.copilot/agents/
 ```
 
 Confirm with `copilot skill list`. The pstack skills appear under `Custom skills:`, which means every repo you open sees them. `~/.copilot/agents/` needs no registration; agents there are discovered from any working directory.
+The copied agents invoke registered skills by name. Skills remain under the separate pstack checkout.
+After updating pstack, repeat the agent copy.
 
 Then turn the mode on by default **and** grant path trust for playbooks:
 
@@ -33,6 +35,13 @@ That one command does four things:
 4. Installs direct-exec Node hooks for [context routing](../context-routing.md). Pstack-managed delegates use a resolved tier. Ordinary delegates remain unchanged.
 
 The block is user-scoped, so a repo you clone next month is covered without any per-repo setup. `--uninstall` removes the managed changes and leaves unrelated content and personal policy untouched. `--skip-shell` leaves profiles and shims alone. `--dry-run` prints what would change.
+
+To install the other integration without native hooks, add `--hooks skip`.
+That flag leaves existing hooks unchanged. It does not disable installed hooks.
+Use `--hooks remove` to remove only the owned hook config and copied entry.
+The default installer or `--hooks install` enables them again.
+`--uninstall` cannot be combined with `--hooks`.
+The [context policy reference](../context-routing.md#disable-native-hooks-without-removing-pstack) covers removal and opt-out limits without the native tracker.
 
 If your `config.json` has JSONC comments, use `--skip-trust` to leave that file untouched.
 The installer validates the trust configuration before it writes anything.

@@ -335,7 +335,8 @@ the installer manages four user-scoped changes:
 4. `~/.copilot/hooks/pstack-context.json` binds pstack-managed launches to the
    canonical context resolver. it uses direct Node execution, not a shell.
    ordinary unmanaged delegates stay unchanged. decisions have machine-readable
-   records, and `skip poteto mode` opts the session out of routing too.
+   records, and `skip poteto mode` opts the session out of routing too when hooks
+   are enabled.
 
 three properties worth knowing:
 
@@ -350,8 +351,13 @@ three properties worth knowing:
 instructions, hooks, trust entry, and wrappers, not your context or model policy.
 `--skip-shell` leaves profiles and shims alone. `--skip-trust` leaves `config.json`
 unchanged, including JSONC comments. `COPILOT_HOME` isolates the target directory.
+`--hooks skip` leaves existing hooks unchanged while refreshing the other integration.
+`--hooks remove` removes only the owned hook config and copied entry.
+the default installer or `--hooks install` enables them again.
+`--uninstall` cannot be combined with `--hooks`.
 `skip poteto mode`
 stands the mode down for a session without changing your preferences.
+without native hooks, that command does not update the durable opt-out marker.
 
 hook timeouts and disabled hooks can bypass native routing. callers also copy
 the resolver's explicit tier. this never changes an already-running parent's

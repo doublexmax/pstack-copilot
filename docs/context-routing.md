@@ -78,6 +78,9 @@ It persists when you resume the same session.
 Submit the whole command `/poteto-mode` to re-enter.
 Quoted text, code, substrings, and extended commands do not toggle this state.
 Opt-out follows the host session ID. A separately identified child or new session does not automatically inherit it.
+This durable tracker requires native hooks.
+With hooks disabled, the commands remain conversational instructions, but they do not update the native opt-out marker.
+Same-session resume has no new native opt-out proof.
 
 Aliases on `task` use a known effective parent model or report `alias-parent-unresolved`.
 An omitted kickoff model does not establish which model the host will choose.
@@ -92,6 +95,7 @@ It refuses a foreign file at that reserved path and preserves other hooks.
 Repeated installation is byte-identical for owned files.
 Uninstall removes the managed hook and instruction block, not your policy or model map.
 After updating pstack or moving the checkout, rerun the installer to refresh the copied entry and its checkout path.
+Refresh the copied agents too. They invoke registered skills by name, not by a path beside the agent copies.
 
 For an already trusted installation with JSONC configuration, preserve trust settings and shell files.
 
@@ -102,6 +106,37 @@ node "$env:USERPROFILE\.copilot\pstack\scripts\install-always-on.mjs" --skip-tru
 Use `--dry-run` first to inspect planned writes.
 `COPILOT_HOME` also isolates installation and native decision records.
 The installer never changes `settings.json` context tiers or subagent defaults.
+
+### Disable native hooks without removing pstack
+
+`--hooks` selects one action.
+
+| Action | Effect |
+| --- | --- |
+| `install` | Install or refresh hooks along with the other integration. This is the default. |
+| `skip` | Refresh the other integration without reading or changing hook files. Existing hooks remain active. |
+| `remove` | Remove only the owned hook config and copied entry. Preserve instructions, registered skills, policy, models, trust, wrappers, agents, and session markers. |
+
+To disable installed native hooks, remove them.
+
+```powershell
+node "$env:USERPROFILE\.copilot\pstack\scripts\install-always-on.mjs" --hooks remove --dry-run
+node "$env:USERPROFILE\.copilot\pstack\scripts\install-always-on.mjs" --hooks remove
+```
+
+Removal refuses foreign files at either reserved hook path.
+It works without the resolver checkout and does not parse trust or context policy.
+Repeated removal changes nothing.
+`--uninstall` removes all managed integration and rejects `--hooks`.
+Hook-only removal rejects `--skip-shell` and `--skip-trust` because it never touches those files.
+Every action accepts `--dry-run`, which writes nothing.
+
+Use `--hooks skip` on later instruction refreshes to keep native hooks disabled.
+The default installer or `--hooks install` enables them again.
+Context-only `set-policy` never installs hooks.
+Explicit skill invocation and the resolver's arguments and declaration still work without hooks.
+Native correction, decision records, and opt-out tracking do not.
+Removal leaves existing session markers untouched. After re-enabling hooks, submit `/poteto-mode` in a previously opted-out session to clear its marker.
 
 ## Evidence and limits
 
@@ -116,7 +151,10 @@ The source gate catches missing workflow bindings, not arbitrary agent behavior.
 An unavailable hook executable can also break the host's hook execution.
 Copilot denies tool calls when a command pre-tool hook crashes or its executable cannot start, including unrelated calls.
 The installed entry bypasses unmarked calls before checkout imports or session validation, so a broken pstack checkout does not block them.
-If Node or the copied entry is unavailable, remove only `hooks\pstack-context.json` to restore the ordinary permission flow.
+If Node cannot run the installer, inspect ownership and remove the two reserved hook files manually.
+Removing the owned `hooks\pstack-context.json` stops native invocation.
+Removing the owned `hooks\context-hook.mjs` also removes the copied entry.
+Keep other hook files and pstack configuration.
 These are not universal enforcement guarantees. Copilot App hook behavior is unverified by the CLI receipts.
 Local user hooks do not install themselves in cloud workers.
 Explicit kickoff arguments are wired, but remote execution needs its own capability evidence.

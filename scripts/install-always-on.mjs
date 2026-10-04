@@ -20,12 +20,16 @@ const instructionsEnd = '<!-- pstack:end poteto-mode -->';
 const shellBegin = '# BEGIN pstack path trust';
 const shellEnd = '# END pstack path trust';
 
-const USAGE = `usage: node install-always-on.mjs [--dry-run] [--uninstall] [--skip-shell] [--skip-trust]
+const USAGE = `usage: node install-always-on.mjs [--dry-run] [--uninstall] [--skip-shell] [--skip-trust] [--hooks <install|skip|remove>]
 
 Installs poteto-mode instructions and native pstack context hooks, adds ~/.copilot to config.json
 trustedFolders, and installs a pstack wrapper that runs copilot with
 --add-dir ~/.copilot so playbooks and pstack-models.md are readable.
---skip-trust leaves config.json untouched, including JSONC files.`;
+--skip-trust leaves config.json untouched, including JSONC files.
+--hooks install is the default; skip leaves existing hooks unchanged.
+--hooks remove changes only owned hook files, not instructions, trust, or wrappers.
+--uninstall removes all managed integration and cannot be combined with --hooks.
+--hooks remove accepts --dry-run but cannot be combined with --skip-shell or --skip-trust.`;
 
 function parseManagedBlock(text, begin, end) {
   const beginAt = text.indexOf(begin);
@@ -369,26 +373,51 @@ function installShell(removing, dryRun, skipShell) {
 try {
   const args = process.argv.slice(2);
   const allowed = new Set(['--dry-run', '--uninstall', '--skip-shell', '--skip-trust', '--help', '-h']);
-  const unknown = args.find((arg) => !allowed.has(arg));
-  if (unknown) throw new Error(`unknown option: ${unknown}\n${USAGE}`);
-  if (args.includes('--help') || args.includes('-h')) {
+  const flags = new Set();
+  let hooks;
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === '--hooks') {
+      if (hooks !== undefined) throw new Error(`duplicate option: --hooks\n${USAGE}`);
+      hooks = args[++i];
+      if (!['install', 'skip', 'remove'].includes(hooks)) {
+        throw new Error(`--hooks requires install, skip, or remove\n${USAGE}`);
+      }
+      continue;
+    }
+    if (!allowed.has(arg)) throw new Error(`unknown option: ${arg}\n${USAGE}`);
+    const flag = arg === '-h' ? '--help' : arg;
+    if (flags.has(flag)) throw new Error(`duplicate option: ${flag}\n${USAGE}`);
+    flags.add(flag);
+  }
+  if (flags.has('--uninstall') && hooks !== undefined) {
+    throw new Error(`--uninstall cannot be combined with --hooks\n${USAGE}`);
+  }
+  if (hooks === 'remove' && (flags.has('--skip-shell') || flags.has('--skip-trust'))) {
+    throw new Error(`--hooks remove changes only hooks; --skip-shell and --skip-trust do not apply\n${USAGE}`);
+  }
+  if (flags.has('--help')) {
     console.log(USAGE);
     process.exit(0);
   }
 
-  const dryRun = args.includes('--dry-run');
-  const removing = args.includes('--uninstall');
-  const skipShell = args.includes('--skip-shell');
-  const skipTrust = args.includes('--skip-trust');
+  const dryRun = flags.has('--dry-run');
+  const removing = flags.has('--uninstall');
+  const skipShell = flags.has('--skip-shell');
+  const skipTrust = flags.has('--skip-trust');
 
-  if (!skipTrust) readJson(configFile);
-  const nativeHooks = await planNativeHooks(removing);
-
-  installInstructions(removing, dryRun);
-  installNativeHooks(nativeHooks, dryRun);
-  if (skipTrust) console.log('skipping trustedFolders (--skip-trust)');
-  else installTrustedFolder(removing, dryRun);
-  installShell(removing, dryRun, skipShell);
+  if (hooks === 'remove') {
+    installNativeHooks(await planNativeHooks(true), dryRun);
+  } else {
+    if (!skipTrust) readJson(configFile);
+    const nativeHooks = hooks === 'skip' ? null : await planNativeHooks(removing);
+    installInstructions(removing, dryRun);
+    if (nativeHooks) installNativeHooks(nativeHooks, dryRun);
+    else console.log('skipping native context hooks (--hooks skip)');
+    if (skipTrust) console.log('skipping trustedFolders (--skip-trust)');
+    else installTrustedFolder(removing, dryRun);
+    installShell(removing, dryRun, skipShell);
+  }
 } catch (error) {
   console.error(`error: ${error.message}`);
   process.exitCode = 1;

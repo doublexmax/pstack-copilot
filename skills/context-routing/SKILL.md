@@ -8,7 +8,9 @@ description: Resolve pstack delegate context from persistent policy, explicit wo
 Run this contract before each pstack-managed delegate, including direct workflow invocations.
 Do not ask the user to request a larger window.
 If the session opted out with the whole command `skip poteto mode`, leave launches unmanaged and their arguments unchanged.
-The whole command `/poteto-mode` re-enters. Opt-out persists on same-session resume.
+The whole command `/poteto-mode` re-enters.
+Native hooks persist opt-out on same-session resume.
+With hooks disabled, these commands do not update the native marker. Follow the conversational opt-out, but do not claim durable tracking.
 
 ## Resolve before the launch
 
@@ -69,6 +71,8 @@ Post-hook arguments and effective `subagent.configured` metadata prove dispatch;
 
 Disabled hooks, timeouts, unmarked launches, and an unavailable hook runtime can bypass native checks.
 Copying the resolver's explicit arguments remains necessary.
+`install-always-on.mjs --hooks remove` disables only the owned native hooks.
+`--hooks skip` leaves existing hooks unchanged; it does not disable them.
 Local hooks do not transfer to a cloud worker. Give remote descendants access to this contract and resolver before they delegate.
 This contract never changes an already-running parent or per-agent defaults.
 Larger context is not a quality promise. Available input also includes system instructions, history, and tool output.
