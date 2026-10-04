@@ -15,7 +15,8 @@ export function checkOperation(event, { project, home, writable, model }) {
     if (event.toolName !== 'apply_patch') {
       return writablePath(args.path) ? null : 'Writes are restricted to the requested project file.';
     }
-    const patch = Object.values(args).filter((value) => typeof value === 'string').join('\n');
+    const patch = typeof args === 'string' ? args
+      : Object.values(args).filter((value) => typeof value === 'string').join('\n');
     const paths = [...patch.matchAll(/^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$/gm)];
     return paths.length > 0 && paths.every((match) => writablePath(match[1].trim()))
       ? null : 'Patch paths are restricted to the requested project file.';

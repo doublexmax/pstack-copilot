@@ -191,7 +191,7 @@ function run(f) {
     '--allow-tool', 'task', '--allow-tool', 'skill', '--allow-tool', 'view', '--allow-tool', 'glob',
     '--allow-tool', 'rg', '--allow-tool', 'powershell', '--allow-tool', 'read_powershell',
     '--allow-tool', 'read_agent', '--allow-tool', 'sql', '--allow-tool', 'update_todo', '--allow-tool', 'write',
-    '--allow-tool', 'apply_patch', '--allow-tool', 'create', '--allow-tool', 'edit',
+    '--allow-tool', 'apply_patch', '--allow-tool', 'create', '--allow-tool', 'edit', '--allow-tool', 'shell(node:*)',
     '--add-dir', f.home, '--output-format', 'json', '--log-level', 'debug', '--log-dir', join(f.dir, 'logs'),
     '-p', f.scenario.prompt,
   ];
@@ -265,7 +265,7 @@ function validateAmounts(f) {
   const code = [
     "import assert from 'node:assert/strict';",
     `import { formatAmount } from ${JSON.stringify(module)};`,
-    "for (const [cents, dollars] of [[0,'$0.00'],[1,'$0.01'],[10,'$0.10'],[105,'$1.05'],[-1,'-$0.01'],[-105,'-$1.05'],[123456,'$1234.56'],[9007199254740991,'$90071992547409.91']]) assert.equal(formatAmount(cents), dollars);",
+    "for (const [cents, dollars] of [[0,'$0.00'],[1,'$0.01'],[10,'$0.10'],[105,'$1.05'],[-1,'$-0.01'],[-105,'$-1.05'],[123456,'$1234.56'],[9007199254740991,'$90071992547409.91'],[-9007199254740991,'$-90071992547409.91']]) assert.equal(formatAmount(cents), dollars);",
     "for (const cents of [1.5, NaN, Infinity, '105', null, 9007199254740992]) assert.throws(() => formatAmount(cents));",
   ].join('\n');
   const env = { ...f.env };
@@ -275,9 +275,9 @@ function validateAmounts(f) {
   const entry = spawnSync(process.execPath, ['src/receipts.mjs'],
     { cwd: f.project, env, encoding: 'utf8', timeout: 10000 });
   const result = {
-    status: amount.status === 0 && entry.status === 0 && entry.stdout === 'INV-17 $1.05\nREF-2 -$0.01\n' ? 'PASS' : 'ISSUES',
+    status: amount.status === 0 && entry.status === 0 && entry.stdout === 'INV-17 $1.05\nREF-2 $-0.01\n' ? 'PASS' : 'ISSUES',
     amountExit: amount.status, amountError: amount.stderr, entryExit: entry.status,
-    entryOutput: entry.stdout, expectedEntryOutput: 'INV-17 $1.05\nREF-2 -$0.01\n',
+    entryOutput: entry.stdout, expectedEntryOutput: 'INV-17 $1.05\nREF-2 $-0.01\n',
   };
   save(join(f.dir, 'artifact-checks.json'), result);
   return result;
