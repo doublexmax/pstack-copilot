@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { inspectOrganicRouting } from './context-organic-evidence.mjs';
+import * as evidence from './context-organic-evidence.mjs';
+
+const { inspectOrganicRouting } = evidence;
 
 const timestamp = '2026-10-04T19:00:00.000Z';
 const start = { type: 'session.start', data: {
@@ -44,6 +46,37 @@ test('a timeout or missing output is not a successful direct result', () => {
     const report = inspectOrganicRouting({ events: [start], completed, output });
     assert.equal(report.outcome, 'inconclusive-output');
   }
+});
+
+test('the final summary remains inconclusive when a completed request has no usable output', () => {
+  const answered = inspectOrganicRouting({ events: [start], completed: true, output: 'Delivery notes.' });
+  for (const output of ['', ' \r\n\t ', undefined]) {
+    const empty = inspectOrganicRouting({ events: [start], completed: true, output });
+    assert.equal(empty.completion, 'completed');
+    assert.equal(empty.outcome, 'inconclusive-output');
+    assert.equal(evidence.organicEvidenceStatus({
+      sourceStable: true, integrityStable: true, reports: [answered, empty],
+    }), 'INCONCLUSIVE');
+  }
+});
+
+test('the final summary preserves integrity failures and answered-run status', () => {
+  const answered = inspectOrganicRouting({ events: [start], completed: true, output: 'Delivery notes.' });
+  const empty = inspectOrganicRouting({ events: [start], completed: true, output: '' });
+  const partial = inspectOrganicRouting({ events: [start], completed: false, output: 'Partial notes.' });
+  const summary = (reports, sourceStable = true, integrityStable = true) =>
+    evidence.organicEvidenceStatus({ reports, sourceStable, integrityStable });
+  assert.equal(summary([answered]), 'RECORDED');
+  assert.equal(summary([answered, partial]), 'INCONCLUSIVE');
+  assert.equal(summary([]), 'INCONCLUSIVE');
+  assert.equal(summary([empty], false), 'ISSUES');
+  assert.equal(summary([empty], true, false), 'ISSUES');
+  const unbound = inspectOrganicRouting({
+    events: [start, { type: 'subagent.started', agentId: 'reader', data: { toolCallId: 'unbound' } }],
+    completed: true, output: 'Delivery notes.',
+  });
+  assert.equal(unbound.outcome, 'inconclusive-classification');
+  assert.equal(summary([unbound]), 'RECORDED');
 });
 
 test('an unbound native delegate cannot be reported as direct completion', () => {
