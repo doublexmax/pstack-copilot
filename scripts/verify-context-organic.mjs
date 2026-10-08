@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readEvents } from './copilot-dispatch-evidence.mjs';
-import { inspectOrganicRouting } from './context-organic-evidence.mjs';
+import { inspectOrganicRouting, organicEvidenceStatus } from './context-organic-evidence.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const options = {};
@@ -296,7 +296,7 @@ const sourceStable = JSON.stringify(sourceBefore) === JSON.stringify(sourceAfter
 const reports = results.map((result) => result.report);
 const integrityStable = reports.every((report) => report.integrity.integrationStable && report.integrity.scopeStable);
 const evidence = {
-  status: !sourceStable || !integrityStable ? 'ISSUES' : reports.every((report) => report.completion === 'completed') ? 'RECORDED' : 'INCONCLUSIVE',
+  status: organicEvidenceStatus({ sourceStable, integrityStable, reports }),
   observedAt: new Date().toISOString(), cli, model, reasoningEffort: 'max',
   headBefore, headAfter: execFileSync('git', ['-C', ROOT, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
   sourceBefore, sourceAfter, sourceStable, reports,

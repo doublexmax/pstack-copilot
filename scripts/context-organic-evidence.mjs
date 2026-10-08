@@ -1,3 +1,10 @@
+export function organicEvidenceStatus({ sourceStable, integrityStable, reports }) {
+  if (!sourceStable || !integrityStable) return 'ISSUES';
+  return reports.length > 0 && reports.every((report) =>
+    report.completion === 'completed' && report.outcome !== 'inconclusive-output')
+    ? 'RECORDED' : 'INCONCLUSIVE';
+}
+
 export function inspectOrganicRouting({ events, observations = [], decisions = [], completed, output }) {
   const start = events.find((event) => event.type === 'session.start');
   const requests = events.filter((event) => event.type === 'assistant.message')

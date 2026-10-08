@@ -194,6 +194,7 @@ Every attempt records opened files, declarations, reasons, input references, ori
 Source and isolated integration hashes bind each receipt to its artifact.
 The amount output has independent literal checks. The delivery answer has separate expected findings for artifact review.
 `RECORDED` means the run completed, not that every classification or prose answer passed review.
+It also requires usable output from every request. Process completion alone is not usable evidence.
 Timeouts and missing output remain `INCONCLUSIVE`.
 Direct completion supplies no delegate-classification evidence.
 Bounded decomposition is valid even for a cross-component request.
