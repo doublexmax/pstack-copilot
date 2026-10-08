@@ -57,10 +57,14 @@ role at once, clamped to each model's maximum.
 
 ## Long-context work
 
-Copilot exposes `context_tier: "long_context"` on the `task` tool, separately from the
-model. Set it when a delegate must read a large corpus rather than reaching for a
-different model. `claude-opus-5.5`, `gpt-5.6-sol`, `grok-4.7`, and `gemini-3.8-flash` all
-support it.
+Context is independent of model and reasoning effort. Before every delegate, use
+[context-routing](./skills/context-routing/SKILL.md) to resolve the persistent policy
+against the actual workload and current host/model evidence.
+`context.default.json` selects adaptive behavior. Personal choices live in
+`pstack-context.json` under the active Copilot configuration directory.
+Bounded work uses `default`; eligible large-corpus work uses `long_context`.
+Do not infer selectable tiers from nominal capacity or reasoning `max`.
+This does not resize the parent or change any model/effort role line.
 
 ## Panel composition
 

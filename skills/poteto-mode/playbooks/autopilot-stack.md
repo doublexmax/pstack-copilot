@@ -1,5 +1,8 @@
 ### Autopilot-stack
 
+Before each owner session or verifier, invoke [context-routing](../../context-routing/SKILL.md).
+Resolve `create_session` for cloud kickoff and copy `toolArguments.kickoff` plus the declaration. Local verifiers copy task arguments.
+
 **You own the chain, never the landing. Build and verify the queue with full autonomy, then hand the operator one linear PR chain to review and land.** For "autopilot-stack", "stack them, don't ship", "build the chain, I'll land it". The sibling of **Autopilot-full**. The owner loop and the verification gate are the same; only the terminal differs. There a clean verdict authorizes the owner's merge. Here it appends a link to the one reviewed chain, and nothing auto-ships. ADO chain mechanics are in `../references/ado.md`.
 
 1. **Run the owner loop unchanged.** One cloud session per PR (`create_session` with `execution_location: "cloud"`) owns its change end to end: build, the first push, a ready PR opened before self-proof, self-proof (gates, CI, receipts), skeptical review-bot triage per `../references/bugbot-triage.md`, a slop-strip with the **unslop** skill, `/no-comments` (the **no-comments** skill), and babysit to green per `playbooks/babysit.md`. Owners parallelize when the work is self-contained. Within about 15 minutes, every owner starts a `decisions.tsv` trail per the **show-me-your-work** skill, pushes its first branch snapshot, and opens the PR ready, never draft. After that it pushes again after every verifiable unit. Keep the trail uncommitted and return it in the report. Owners also keep the `children.tsv` of Autopilot-full step 2.

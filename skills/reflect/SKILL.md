@@ -5,6 +5,9 @@ description: Spawn three parallel review subagents over the active transcript, s
 
 # Reflect
 
+Before each reviewer or synthesizer launch, invoke [context-routing](../context-routing/SKILL.md).
+Use `reflect tooling` or `reflect judgment, divergent, synth` and copy its resolved arguments and declaration for the transcript scope.
+
 Mine the current conversation for durable learnings, then route them into skill edits.
 
 ## When to invoke

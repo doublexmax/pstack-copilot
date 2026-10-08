@@ -5,6 +5,9 @@ description: "Use for \"interrogate\", \"adversarial review\", \"multi-model rev
 
 # Interrogate
 
+Before each reviewer launch, invoke [context-routing](../context-routing/SKILL.md) with `interrogate reviewers`.
+Copy the exact panel member's resolved arguments and declaration. A bounded diff does not become large-corpus work merely because this is a review.
+
 Spawn one reviewer per configured model to adversarially review code changes. Each model gets the same prompt and rubric. The adversarial signal comes from model diversity, not assigned personas.
 
 The deliverable is a synthesized verdict. Do NOT auto-apply changes.

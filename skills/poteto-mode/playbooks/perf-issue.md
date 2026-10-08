@@ -1,5 +1,8 @@
 ### Perf issue
 
+Before a delegate launches, invoke [context-routing](../../context-routing/SKILL.md) with `perf-issue`.
+Copy its resolved arguments and declaration for the trace or change scope.
+
 **You own the measurement story. Plan, review, verify the numbers.** Tie every fix to a measurement, don't read source instead of measuring.
 
 1. Capture a baseline trace on the matching surface via the project's `.github/skills/verify-*` skill when one exists, otherwise the repo's own profiler/harness or a generated verify skill. Vet the baseline, and each later number, with the **benchmark-checklist** skill.

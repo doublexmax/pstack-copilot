@@ -18,6 +18,8 @@ cp ~/.copilot/pstack/agents/*.agent.md ~/.copilot/agents/
 ```
 
 Confirm with `copilot skill list`. The pstack skills appear under `Custom skills:`, which means every repo you open sees them. `~/.copilot/agents/` needs no registration; agents there are discovered from any working directory.
+The copied agents invoke registered skills by name. Skills remain under the separate pstack checkout.
+After updating pstack, repeat the agent copy.
 
 Then turn the mode on by default **and** grant path trust for playbooks:
 
@@ -25,13 +27,26 @@ Then turn the mode on by default **and** grant path trust for playbooks:
 node ~/.copilot/pstack/scripts/install-always-on.mjs
 ```
 
-That one command does three things:
+That one command does four things:
 
 1. Splices a short block into `~/.copilot/copilot-instructions.md`, which Copilot loads into the system prompt of every session in every directory. From then on you describe the task and the mode is already on.
 2. Adds the absolute `~/.copilot` path to `trustedFolders` in `~/.copilot/config.json`, preserving any folders you already trusted.
 3. Installs a `pstack` CLI wrapper (`~/.copilot/bin/` shims plus a marked block in your PowerShell profile or shell rc) that runs `copilot --add-dir ~/.copilot ...`, so headless runs can read playbooks and `pstack-models.md`.
+4. Installs direct-exec Node hooks for [context routing](../context-routing.md). Pstack-managed delegates use a resolved tier. Ordinary delegates remain unchanged.
 
-The block is user-scoped, so a repo you clone next month is covered without any per-repo setup. `--uninstall` reverses all three and leaves unrelated content untouched. `--skip-shell` installs only always-on and `trustedFolders`. `--dry-run` prints what would change.
+The block is user-scoped, so a repo you clone next month is covered without any per-repo setup. `--uninstall` removes the managed changes and leaves unrelated content and personal policy untouched. `--skip-shell` leaves profiles and shims alone. `--dry-run` prints what would change.
+
+To install the other integration without native hooks, add `--hooks skip`.
+That flag leaves existing hooks unchanged. It does not disable installed hooks.
+Use `--hooks remove` to remove only the owned hook config and copied entry.
+The default installer or `--hooks install` enables them again.
+`--uninstall` cannot be combined with `--hooks`.
+The [context policy reference](../context-routing.md#disable-native-hooks-without-removing-pstack) covers removal and opt-out limits without the native tracker.
+
+If your `config.json` has JSONC comments, use `--skip-trust` to leave that file untouched.
+The installer validates the trust configuration before it writes anything.
+Keep the existing trust grant or pass `--add-dir` when you start Copilot.
+`COPILOT_HOME` selects a different Copilot configuration directory for an isolated installation.
 
 ## Let pstack read its own playbooks
 
@@ -73,6 +88,12 @@ Run:
 [`/setup-pstack`](../../skills/setup-pstack/SKILL.md) detects the models you have access to, shows you each role (code delegates, judgment, the review panels), and asks what you want. Answer the questions. It writes `~/.copilot/pstack-models.md`, a small rule every pstack skill reads.
 
 You only override what you care about. A role with no line in the rule keeps the skill's default. To restore a default, delete that role's line. A rerun of `/setup-pstack` keeps any role whose model differs from the default. A rule written before 0.15.3 pins the old default models, so delete those role lines, or delete the file, then run `/setup-pstack` again.
+
+Setup also configures an independent adaptive context policy.
+Ask for context-only setup to preserve every model and effort choice.
+The policy lives in `pstack-context.json` under the active Copilot home.
+Bounded delegates use default context. Large-corpus delegates use long context only with current exact-model and host evidence.
+The parent tier does not change.
 
 You might be wondering what happens if you use Auto. Set a role to `inherit-parent` or `auto` and pstack omits the subagent `model` field, so the subagent inherits your parent chat model. Both values mean the same thing, and neither is a model slug. For a panel role the value is a list, and one subagent runs per entry, so the list length sets the panel size. Setup also configures `swarm workers`, the default model for every `/swarm` worker unless a race names a model for each arm.
 

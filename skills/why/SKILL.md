@@ -5,6 +5,9 @@ description: "Use for 'why does X work this way', 'why we picked Y', design rati
 
 # Why
 
+Before each spawn, invoke [context-routing](../context-routing/SKILL.md) and copy its resolved arguments and declaration.
+Use `why investigators` or `why synthesizer` as the exact role. Classify the evidence each delegate must hold together.
+
 Investigate the motivation and intent behind code.
 
 Companion to the `how` skill. `how` answers what the code does and how it works. `why` answers what forces led to its shape.

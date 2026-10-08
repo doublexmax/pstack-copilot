@@ -1,6 +1,6 @@
 ---
 name: setup-pstack
-description: Configure which models pstack uses per role and at what reasoning budget. Detects the models available to the task tool and writes a personal override file that the skills read. Use for setup-pstack, "configure pstack models", "pstack budget", or changing pstack's model choices.
+description: Configure pstack models, reasoning budget, and persistent delegate context policy. Use for setup-pstack, "configure pstack models", "pstack budget", "configure pstack context", or "context-only setup".
 ---
 
 # Setup pstack
@@ -8,6 +8,9 @@ description: Configure which models pstack uses per role and at what reasoning b
 Write `~/.copilot/pstack-models.md`, a personal override file that sets pstack's model per
 role. The skills read it and fall back to `models.default.md` in the pstack fork when a
 line is absent, so this is an override layer, not a requirement.
+
+Context policy is independent. Read [context-routing](../context-routing/SKILL.md) for its canonical resolver and personal directory.
+For a context-only request, run only **Context policy** below. Do not ask for a budget, rewrite the model map, or change parent/per-agent tier settings.
 
 Copilot has no user-global always-applied rule, so this file is not auto-injected. Every
 pstack skill that delegates opens it explicitly as its first step. That is the contract:
@@ -112,6 +115,8 @@ interrogate reviewers:                  claude-opus-5.5 / max, gpt-5.6-sol / max
 Tell the user the file was written and that skills pick it up on their next run, no restart
 needed. Re-running this skill updates it.
 
+Then run **Context policy**. Existing model and effort choices do not change when that policy changes.
+
 ### 7. Offer a verification skill (optional)
 
 Check whether the project has a way to drive the real app for proof (a `verify-*` skill, or
@@ -119,3 +124,24 @@ an existing harness). If not, offer once: "want a project-local verification ski
 agents can drive the app the way a user does and prove changes work? I can generate one
 with the create-verification-skill skill." On yes, invoke it. On no, move on without
 pushing.
+
+## Context policy
+
+Run `<pstack>\scripts\context-routing.mjs show` to read the current independent policy.
+If the user already chose a policy, use that choice. Otherwise ask one question with these choices:
+
+- `Adaptive, long context for supported large-corpus work (Recommended)`
+- `Default context for every delegate`
+- `Require long context for every delegate; block when support is unproven`
+
+Use `adaptive`, `default`, or `long_context` for the corresponding mode.
+Write only the personal context file through the canonical command:
+
+```powershell
+node "<pstack>\scripts\context-routing.mjs" set-policy --default adaptive
+```
+
+For a requested exact-role override, add `--role-policy "role=policy"`.
+Keep combined role labels and the existing 17-role model map intact.
+Report the returned policy file and mode. Direct workflows and always-on routing read it automatically.
+This does not resize the current session. Unknown support is diagnostic under adaptive policy and blocks an explicit long requirement.

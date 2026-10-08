@@ -5,6 +5,9 @@ description: "Sketch types, signatures, and module structure before code, then s
 
 # Architect
 
+Before each runner launch, invoke [context-routing](../context-routing/SKILL.md) with `architect runners`.
+Copy its resolved arguments and declaration for that panel member, independently of the other members.
+
 Design before implementing. Sketch types, function signatures, class shapes, and module boundaries with `not implemented` bodies and pseudocode. Synthesize across multiple model perspectives, then fill in code against the chosen sketch. If implementation proves the sketch wrong, throw it out and redesign.
 
 ## Start
