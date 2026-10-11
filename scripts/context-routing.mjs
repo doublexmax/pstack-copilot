@@ -171,7 +171,7 @@ function declaration(raw, roles, target) {
 }
 
 function decide(context, declared, model, target) {
-  const effectiveModel = model ?? (target === 'task' ? declared.parentModel ?? null : null);
+  const effectiveModel = model ?? null;
   const mode = context.policy.roles[declared.role] ?? context.policy.default;
   const base = {
     role: declared.role,
@@ -189,7 +189,7 @@ function decide(context, declared, model, target) {
   }
   if (declared.modelSupport.status === 'unavailable') return blocked('model-unavailable');
   if (effectiveModel === null) {
-    base.diagnostics.push(target === 'task' ? 'alias-parent-unresolved' : 'kickoff-model-unresolved');
+    base.diagnostics.push(target === 'task' ? 'task-model-unresolved' : 'kickoff-model-unresolved');
   }
   if (declared.modelSupport.status === 'unknown') base.diagnostics.push('model-support-unknown');
   if (declared.modelSupport.status === 'unsupported') base.diagnostics.push('model-long-context-unsupported');
@@ -233,7 +233,7 @@ export function resolveRole(request, { root = ROOT, home = copilotHome() } = {})
       choice = { model: request.model, reasoning_effort: request.effort };
     }
   } else if (request.effort !== undefined) throw new Error('reasoning effort needs an explicit model');
-  const effectiveModel = choice.model ?? (target === 'task' ? request.parentModel ?? null : null);
+  const effectiveModel = choice.model ?? null;
   const declared = declaration({
     role: request.role,
     workload: request.workload,

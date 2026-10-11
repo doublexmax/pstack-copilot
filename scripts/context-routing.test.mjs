@@ -10,12 +10,13 @@ import { configurePolicy, loadContextPolicy, resolveRole, routeToolCall } from '
 const root = fileURLToPath(new URL('../', import.meta.url));
 const script = fileURLToPath(new URL('./context-routing.mjs', import.meta.url));
 
-function fixture(t) {
+function fixture(t, mode = 'adaptive') {
   const dir = mkdtempSync(join(tmpdir(), 'pstack-context-'));
   const home = join(dir, 'home');
   mkdirSync(home);
   copyFileSync(join(root, 'models.default.md'), join(dir, 'models.default.md'));
   copyFileSync(join(root, 'context.default.json'), join(dir, 'context.default.json'));
+  if (mode !== null) writeFileSync(join(home, 'pstack-context.json'), JSON.stringify({ schemaVersion: 1, default: mode }));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   return {
     root: dir, home,
@@ -57,17 +58,17 @@ function event(result, args = {}) {
   };
 }
 
-test('missing optional files use adaptive policy and literal default arguments for bounded work', (t) => {
-  const f = fixture(t);
+test('missing optional files require long context even for bounded work', (t) => {
+  const f = fixture(t, null);
   const result = resolveRole(request(), f);
   assert.deepEqual(result.toolArguments, {
-    model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: 'default',
+    model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: 'long_context',
   });
   assert.deepEqual(result.decision, {
     role: 'feature, refactoring', effectiveModel: 'gpt-6.1-sol', workload: 'bounded',
-    policy: 'adaptive', evidence: [
+    policy: 'always_long', evidence: [
       join(f.root, 'context.default.json'), 'Current task context_tier schema', 'Current exact-model task schema',
-    ], diagnostics: [], status: 'resolved', tier: 'default', reason: 'bounded-work',
+    ], diagnostics: [], status: 'resolved', tier: 'long_context', reason: 'policy-long',
   });
 });
 
@@ -191,18 +192,19 @@ test('legacy model configuration and mixed panels resolve every member independe
   assert.equal(readFileSync(join(f.home, 'pstack-models.md'), 'utf8'), models);
 });
 
-test('both aliases preserve absent model/effort and use known parent identity or explicit unresolved identity', (t) => {
+test('both aliases preserve omitted model and effort and leave task and kickoff identities unresolved', (t) => {
   const f = fixture(t);
   for (const alias of ['auto', 'inherit-parent']) {
-    const known = resolveRole(request({
+    const parentKnown = resolveRole(request({
       model: alias, effort: undefined, parentModel: 'gpt-6.1-sol', workload: 'large-corpus',
     }), f);
-    assert.deepEqual(known.toolArguments, { context_tier: 'long_context' });
-    assert.equal(known.decision.effectiveModel, 'gpt-6.1-sol');
+    assert.deepEqual(parentKnown.toolArguments, { context_tier: 'default' });
+    assert.equal(parentKnown.decision.effectiveModel, null);
+    assert.equal(parentKnown.decision.reason, 'task-model-unresolved');
     const unknown = resolveRole(request({ model: alias, effort: undefined, workload: 'large-corpus' }), f);
     assert.deepEqual(unknown.toolArguments, { context_tier: 'default' });
     assert.equal(unknown.decision.effectiveModel, null);
-    assert.equal(unknown.decision.reason, 'alias-parent-unresolved');
+    assert.equal(unknown.decision.reason, 'task-model-unresolved');
     const kickoff = resolveRole(request({
       target: 'create_session', model: alias, effort: undefined, parentModel: 'gpt-6.1-sol', workload: 'large-corpus',
     }), f);

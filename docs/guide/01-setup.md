@@ -91,20 +91,29 @@ Run:
 
 You only override what you care about. A role with no line in the rule keeps the skill's default. To restore a default, delete that role's line. A rerun of `/setup-pstack` keeps any role whose model differs from the default. A rule written before 0.15.3 pins the old default models, so delete those role lines, or delete the file, then run `/setup-pstack` again.
 
-You might be wondering what happens if you use Auto. Set a role to `inherit-parent` or `auto` and pstack omits the subagent `model` field, so the subagent inherits your parent chat model. Both values mean the same thing, and neither is a model slug. For a panel role the value is a list, and one subagent runs per entry, so the list length sets the panel size. Setup also configures `swarm workers`, the default model for every `/swarm` worker unless a race names a model for each arm.
+Set a role to `inherit-parent` or `auto` to omit the subagent model and effort fields.
+Copilot selects the child model, which can come from a per-agent or custom-agent preference rather than the parent.
+Both values mean the same thing, and neither is a model slug.
+The default `always_long` policy blocks these unresolved model choices.
+Choose an explicit role model or change the context policy through `/setup-pstack`.
+For a panel role the value is a list, and one subagent runs per entry, so the list length sets the panel size.
+Setup also configures `swarm workers`, the default model for every `/swarm` worker unless a race names a model for each arm.
 
 ## Configure delegated context
 
 Ask `/setup-pstack` for context-only setup to preserve your model and effort choices.
-The default policy is adaptive. Small inputs use `default`, even when the task spans several files.
-Use `long_context` for a large body of material that one delegate must compare together.
+The shipped default is `always_long`. Supported delegates use long context regardless of workload size.
+Existing personal policy choices take precedence.
+To change only the policy, ask `/setup-pstack` to use `adaptive`, `default`, or `always_long`.
+Under adaptive policy, small inputs use `default`, even when the task spans several files.
+Adaptive selects `long_context` for a large body of material that one delegate must compare together.
 Pstack requires current support evidence for the exact model and launch tool.
 It never changes the parent tier or per-agent defaults.
 
 To set the global policy directly, run:
 
 ```powershell
-node "$env:USERPROFILE\.copilot\pstack\scripts\context-routing.mjs" set-policy --default adaptive
+node "$env:USERPROFILE\.copilot\pstack\scripts\context-routing.mjs" set-policy --default always_long
 ```
 
 Use `show` to print the effective policy and its source.
@@ -115,7 +124,7 @@ For example:
 ```json
 {
 	"schemaVersion": 1,
-	"default": "adaptive",
+	"default": "always_long",
 	"roles": {
 		"how explainer": "default"
 	}
@@ -126,14 +135,16 @@ An omitted global policy inherits `context.default.json`. Exact role overrides t
 
 | Policy | Behavior |
 | --- | --- |
-| `adaptive` | Default for bounded work. Long for supported large-corpus work. Unknown or unsupported long-context support selects default. |
+| `adaptive` | Default for bounded work. Long for supported large-corpus work. Unknown child identity or unsupported long context selects default. |
 | `default` | Default context for every workload. |
-| `always_long` | Long context for every workload. Unproven support blocks the launch. |
+| `always_long` | The shipped default. Long context for every workload. Unresolved child identity or unproven support blocks the launch. |
 
 Use `set-policy --default always_long` to require long context.
 `always_long` selects Copilot's `long_context` tier. The policy name and tier name are separate.
 If a preview policy used `"long_context"` as its global or role policy value, replace that value with `"always_long"`.
 A known unavailable model blocks in every mode. Pstack never replaces the selected model.
+An omitted task model does not prove parent inheritance, even when the parent supports long context.
+Model aliases therefore use default context under adaptive policy and block under `always_long`.
 Malformed policy, duplicate keys, and unknown role overrides fail with an error.
 
 Managed launches copy the resolver's arguments and declaration.
@@ -151,6 +162,7 @@ node scripts\verify-context-routing.mjs --cli "<copilot.exe>" --out "<new-eviden
 ```
 
 The verifier uses an isolated Copilot home and compares requested, post-hook, and effective tiers.
+Add `--policy adaptive` or `--policy default` to verify another policy without changing your personal setup.
 Its controlled workloads prove dispatch, not better answers or autonomous workload classification.
 
 ## Accept the verification offer, or don't

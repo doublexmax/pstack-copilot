@@ -5,14 +5,14 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFi
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inspectDispatch, readEvents } from './copilot-dispatch-evidence.mjs';
-import { resolveRole } from './context-routing.mjs';
+import { configurePolicy, loadContextPolicy, resolveRole } from './context-routing.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const options = {};
 for (let i = 2; i < process.argv.length; i += 2) {
   const name = process.argv[i];
-  if (!['--cli', '--out', '--model', '--case'].includes(name) || !process.argv[i + 1]) {
-    throw new Error('usage: node verify-context-routing.mjs --cli <binary> --out <new-directory> [--model <id>] [--case bounded|small-corpus|large-corpus|opt-out|correction|unmanaged]');
+  if (!['--cli', '--out', '--model', '--case', '--policy'].includes(name) || !process.argv[i + 1]) {
+    throw new Error('usage: node verify-context-routing.mjs --cli <binary> --out <new-directory> [--model <id>] [--policy adaptive|default|always_long] [--case bounded|small-corpus|large-corpus|opt-out|correction|unmanaged]');
   }
   if (options[name]) throw new Error(`duplicate option ${name}`);
   options[name] = process.argv[i + 1];
@@ -31,6 +31,7 @@ const observer = join(ROOT, 'scripts', 'context-proof-observer.mjs');
 const installer = join(ROOT, 'scripts', 'install-always-on.mjs');
 const cases = options['--case'] ? [options['--case']] : ['bounded', 'small-corpus', 'large-corpus', 'opt-out'];
 assert.ok(cases.every((name) => ['bounded', 'small-corpus', 'large-corpus', 'opt-out', 'correction', 'unmanaged'].includes(name)), 'unknown verification case');
+assert.ok(!options['--policy'] || ['adaptive', 'default', 'always_long'].includes(options['--policy']), 'unknown context policy');
 
 function artifactFiles() {
   const paths = execFileSync('git', ['-C', ROOT, 'ls-files', '--cached', '--others', '--exclude-standard'], { encoding: 'utf8' })
@@ -53,6 +54,8 @@ function prepare(name) {
     .replace(/^how explainer:\s*.+$/m, `how explainer: ${model} / max`)
     .replace(/^how explorer:\s*.+$/m, `how explorer: ${model} / max`);
   writeFileSync(join(home, 'pstack-models.md'), `${models}\n`);
+  if (options['--policy']) configurePolicy({ defaultMode: options['--policy'] }, { home });
+  const policy = loadContextPolicy({ home }).policy.default;
   for (const file of readdirSync(join(ROOT, 'agents'))) {
     if (file.endsWith('.agent.md')) copyFileSync(join(ROOT, 'agents', file), join(home, 'agents', file));
   }
@@ -76,7 +79,7 @@ function prepare(name) {
       args: [observer, 'post', observations, resolver], timeoutSec: 30 }],
   } };
   writeFileSync(join(home, 'hooks', 'zz-pstack-proof.json'), `${JSON.stringify(proofHooks, null, 2)}\n`);
-  return { dir, home, env, observations, protocolOnly: name === 'correction',
+  return { dir, home, env, observations, policy, protocolOnly: name === 'correction',
     modelBytes: readFileSync(join(home, 'pstack-models.md')), settingsBytes: readFileSync(join(home, 'settings.json')),
     entryBytes: readFileSync(join(home, 'hooks', 'context-hook.mjs')) };
 }
@@ -146,20 +149,20 @@ for (const name of cases) {
     }, { home: f.home }) : null;
     const args = {
       agent_type: 'general-purpose', mode: 'sync', model, reasoning_effort: 'max',
-      context_tier: name === 'correction' ? 'default' : 'long_context',
+      context_tier: name === 'correction' && plan.decision.tier === 'long_context' ? 'default' : 'long_context',
       name: name === 'correction' ? 'pstack-correction-proof' : 'ordinary-proof',
       description: 'Read the contracts',
       prompt: `${plan ? `${plan.declaration}\n` : ''}Read models.default.md, context.default.json, and scripts\\context-hook.mjs with view. Return NATIVE_PROOF. Do not delegate, invoke skills, run a shell, or write files.`,
     };
     const result = run(f, 'native-probe',
       `This is read-only native protocol verification, not a workflow. The correction input is intentionally wrong to exercise the hook. Use task exactly once with this exact JSON argument object. Do not repair it yourself, add a declaration, use skills, run a shell, or write files. Wait for the result. ${JSON.stringify(args)}`);
-    const tier = 'long_context';
+    const tier = plan ? plan.decision.tier : 'long_context';
     const report = inspectDispatch({ events: result.events, observations: observations(f), expectedModel: model, expectedTier: tier });
     assert.ok(report.delegates.every((delegate) => delegate.requestedTier
-      === (name === 'correction' ? 'default' : 'long_context')));
+      === (name === 'correction' && tier === 'long_context' ? 'default' : 'long_context')));
     if (name === 'correction') {
       assert.ok(decisions(f, result.sessionId).some((record) => record.name === args.name
-        && record.status === 'resolved' && record.reason === 'eligible-large-corpus'));
+        && record.status === 'resolved' && record.reason === plan.decision.reason));
     }
     writeFileSync(join(f.dir, 'dispatch-evidence.json'), `${JSON.stringify(report, null, 2)}\n`);
     reports.push({ case: name, ...report, ...(name === 'correction'
@@ -170,7 +173,8 @@ for (const name of cases) {
     const workload = name === 'large-corpus' ? 'large-corpus' : 'bounded';
     const report = inspectDispatch({
       events: result.events, observations: observations(f), expectedModel: model,
-      expectedTier: workload === 'bounded' ? 'default' : 'long_context',
+      expectedTier: f.policy === 'always_long' || f.policy === 'adaptive' && workload === 'large-corpus'
+        ? 'long_context' : 'default',
     });
     const history = result.events.filter((event) => event.type === 'tool.execution_start');
     assert.ok(history.some((event) => event.data.toolName === 'skill' && event.data.arguments.skill === 'context-routing'),
@@ -185,7 +189,7 @@ for (const name of cases) {
         && record.workload === workload && record.tier === delegate.effectiveTier), 'missing delegate-bound workload decision');
     }
     writeFileSync(join(f.dir, 'dispatch-evidence.json'), `${JSON.stringify(report, null, 2)}\n`);
-    reports.push({ case: name, ...report, decisionDirectory: join(f.home, 'pstack-context-decisions', result.sessionId) });
+    reports.push({ case: name, policy: f.policy, ...report, decisionDirectory: join(f.home, 'pstack-context-decisions', result.sessionId) });
   } else {
     console.log('running whole-command opt-out, resume, and explicit re-entry');
     const skipped = run(f, 'skip', 'skip poteto mode');

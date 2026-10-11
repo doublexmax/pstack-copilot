@@ -22,8 +22,9 @@ With hooks disabled, these commands do not update the native marker. Follow the 
    Select panel members separately with zero-based `--member`.
    Use `judgment and prose` for an ad-hoc reviewer unless the workflow names another role.
    Preserve the workflow's selected model and effort. For an explicit race or fallback, pass both `--model` and `--effort`.
-   Aliases `auto` and `inherit-parent` omit both launch fields. Pass `--parent-model` only when the effective parent model is known.
-   An omitted kickoff model does not prove inheritance from the parent, so kickoff aliases remain explicitly unresolved.
+   Aliases `auto` and `inherit-parent` omit both launch fields and leave the child model unresolved.
+   Copilot may select a per-agent preference or a custom-agent model before falling back to the parent.
+   `--parent-model` records parent metadata only. It never establishes the child's identity or long-context support.
 3. Classify the delegate's actual inputs, not its role, prompt length, or model family.
    `bounded` covers a named helper, limited diff, or independent slice.
    A small joint read across several files is still bounded. File count or cross-component scope alone does not justify long context.
@@ -62,9 +63,11 @@ node "<pstack>\scripts\context-routing.mjs" resolve `
 Adaptive selects `default` for bounded work.
 It selects `long_context` for eligible large-corpus work.
 The `default` policy selects the default tier regardless of workload.
-The `always_long` policy selects `long_context` regardless of workload, with proven host and exact-model support.
+The shipped default is `always_long`. It selects `long_context` regardless of workload, with proven host and exact-model support.
 Under adaptive policy, unknown or unsupported model support selects `default` with an explicit diagnostic.
 Known unavailable models block. `always_long` blocks when support is unproven.
+An omitted child model stays unresolved even with parent capability evidence. Adaptive selects default; `always_long` blocks.
+To use `always_long` with an aliased role, choose an explicit role model through `/setup-pstack`, or change the context policy there.
 The exact role override wins over the global policy.
 
 Native CLI hooks call the same resolver and can correct a missing or mismatched tier on a managed launch.

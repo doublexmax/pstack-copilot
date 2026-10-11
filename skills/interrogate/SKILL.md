@@ -46,7 +46,7 @@ Launch all reviewers in a single message using the `task` tool. Use the `interro
 
 For each reviewer:
 - `agent_type`: `"general-purpose"`
-- `model`: the configured `interrogate reviewers` entry, or the table default with no configured line. For an `auto` or `inherit-parent` entry, omit `model` and `reasoning_effort` so that reviewer runs on the parent model.
+- `model`: the configured `interrogate reviewers` entry, or the table default with no configured line. For an `auto` or `inherit-parent` entry, omit `model` and `reasoning_effort` so Copilot selects the child model. This does not prove parent inheritance.
 - read-only posture: the prompt forbids file writes; the parent applies every edit
 
 If the `task` tool rejects a configured entry, run that reviewer on the table default of its family and say so. Families go by prefix: `claude-*`, `gpt-*`, `grok-*`, and `gemini-*`. With no family match, use Reviewer A's default. If it rejects a table default, check the valid IDs listed on the `task` tool's `model` parameter, pick the closest equivalent (prefer the highest supported `reasoning_effort` of the same family), spawn with it, and open a separate PR to update the default table. Do not block the review on the ID issue. Never treat an alias entry as a rejected ID or apply either fallback to it.

@@ -59,10 +59,12 @@ two steps:
 1. run [`/setup-pstack`](./skills/setup-pstack/SKILL.md) and choose which models you want.
 2. describe your task. the mode is already on.
 
-delegate context is adaptive too. bounded work uses the default tier. joint
-large-corpus work uses long context only with current support evidence for that
-model and host. [`/setup-pstack`](./skills/setup-pstack/SKILL.md) can configure context
-without rewriting your model or effort choices. see
+delegate context defaults to `always_long`, which requires supported long context
+for the selected child model. [`/setup-pstack`](./skills/setup-pstack/SKILL.md)
+can switch to `adaptive` or `default` without rewriting model or effort choices.
+adaptive uses default context for bounded inputs and long context for supported
+large-corpus work. omitted child models stay unresolved, so aliases block
+`always_long` rather than borrowing the parent's capability evidence. see
 [the setup guide](./docs/guide/01-setup.md#configure-delegated-context).
 
 `/poteto-mode` still works if you skipped the always-on step or want to name it

@@ -25,8 +25,9 @@ maximums, not downgrades.
 
 ## Per-role defaults
 
-Aliases: `inherit-parent` and `auto` both mean the role runs on the parent chat model.
-Implement them by omitting `model` and `reasoning_effort` on the `task` call.
+Aliases `inherit-parent` and `auto` both omit `model` and `reasoning_effort` on the `task` call.
+Copilot selects the child model from its preferences or the parent. Omission does not prove parent inheritance.
+An unresolved child model blocks the default `always_long` policy. Select an explicit role model or change policy through `/setup-pstack`.
 
 ```
 feature, refactoring:                   grok-4.7 / xhigh
@@ -60,9 +61,11 @@ role at once, clamped to each model's maximum.
 Context is independent of model and reasoning effort. Before every delegate, use
 [context-routing](./skills/context-routing/SKILL.md) to resolve the persistent policy
 against the actual workload and current host/model evidence.
-`context.default.json` selects adaptive behavior. Personal choices live in
+`context.default.json` selects `always_long`. Personal choices live in
 `pstack-context.json` under the active Copilot configuration directory.
-Bounded work uses `default`; eligible large-corpus work uses `long_context`.
+The default requires supported long context for every workload.
+Users can select `default` or `adaptive` through `/setup-pstack`.
+Under adaptive policy, bounded work uses `default`; eligible large-corpus work uses `long_context`.
 Do not infer selectable tiers from nominal capacity or reasoning `max`.
 This does not resize the parent or change any model/effort role line.
 

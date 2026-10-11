@@ -68,7 +68,7 @@ export async function checkResolver(root) {
     };
     const paths = { root, home: join(root, 'scripts', 'contract-fixture-home') };
     for (const [workload, tier, reason] of [
-      ['bounded', 'default', 'bounded-work'], ['large-corpus', 'long_context', 'eligible-large-corpus'],
+      ['bounded', 'long_context', 'policy-long'], ['large-corpus', 'long_context', 'policy-long'],
     ]) {
       const result = resolveRole({ ...base, workload }, paths);
       const expected = { model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: tier };

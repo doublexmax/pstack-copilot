@@ -60,8 +60,10 @@ any role the user changed by family, list, or alias (`inherit-parent`, `auto`).
 **(c) Show the roles and confirm.** Show every role with its model and effort, marking any
 ID not in the detected set as needing a choice. Also list each line step 2 dropped. Ask
 whether to accept as-is or change specific roles, offering the detected models plus
-`inherit-parent` and `auto`. Both aliases mean the role runs on the parent chat model,
-which is how Auto users stay on Auto.
+`inherit-parent` and `auto`. Both aliases omit model and effort so Copilot selects the
+child's model. Per-agent or custom-agent preferences can take precedence over the parent.
+The default `always_long` policy blocks an unresolved child model. Use an explicit role
+model, or choose `adaptive` or `default` in **Context policy** below.
 
 For panel roles (arena runners, architect runners, interrogate reviewers) the value is a
 list, and one subagent runs per entry, alias entries included, so the list length sets the
@@ -88,8 +90,8 @@ effort, then one line per role, using the same labels `models.default.md` uses a
 ```
 # pstack model configuration. One line per role.
 # Delete a line to fall back to models.default.md in the pstack fork.
-# `inherit-parent` or `auto`: the role runs on the parent chat model. Omit `model` and
-# `reasoning_effort` on the task call. Alias entries in a panel list still count toward fan-out.
+# `inherit-parent` or `auto`: omit `model` and `reasoning_effort` on the task call.
+# Copilot selects the child model. Alias entries in a panel list still count toward fan-out.
 # budget: unlimited (max)
 feature, refactoring:                   grok-4.7 / xhigh
 bug-fix:                                grok-4.7 / xhigh
@@ -128,21 +130,23 @@ pushing.
 ## Context policy
 
 Run `<pstack>\scripts\context-routing.mjs show` to read the current independent policy.
+The shipped default is `always_long`. Existing personal choices take precedence.
+Requests to change only the policy use this section without rerunning model or budget setup.
 If the user already chose a policy, use that choice. Otherwise ask one question with these choices:
 
-- `Adaptive, long context for supported large-corpus work (Recommended)`
+- `Always long context; block when support is unproven (Recommended)`
+- `Adaptive, long context for supported large-corpus work`
 - `Default context for every delegate`
-- `Always long context; block when support is unproven`
 
 Use `adaptive`, `default`, or `always_long` for the corresponding policy.
 `long_context` is the Copilot tier selected by `always_long`, not a policy name.
 Write only the personal context file through the canonical command:
 
 ```powershell
-node "<pstack>\scripts\context-routing.mjs" set-policy --default adaptive
+node "<pstack>\scripts\context-routing.mjs" set-policy --default always_long
 ```
 
 For a requested exact-role override, add `--role-policy "role=policy"`.
 Keep combined role labels and the existing 17-role model map intact.
 Report the returned policy file and mode. Direct workflows and always-on routing read it automatically.
-This does not resize the current session. Unknown support is diagnostic under adaptive policy and blocks an explicit long requirement.
+This does not resize the current session. Unknown child identity or support selects default under adaptive policy and blocks `always_long`.
