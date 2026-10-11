@@ -26,7 +26,10 @@ With hooks disabled, these commands do not update the native marker. Follow the 
    An omitted kickoff model does not prove inheritance from the parent, so kickoff aliases remain explicitly unresolved.
 3. Classify the delegate's actual inputs, not its role, prompt length, or model family.
    `bounded` covers a named helper, limited diff, or independent slice.
+   A small joint read across several files is still bounded. File count or cross-component scope alone does not justify long context.
    `large-corpus` covers evidence that the delegate must hold and compare together across a large body of material.
+   State the size or extent of that material and why a bounded read or independent slices cannot answer the question.
+   Do not widen a task, add delegates, or repeat work to obtain a long-context decision.
    Give a concrete `--why` and one `--input` per input reference. A corpus needs input references.
 4. Read this session's actual tool schema or current host metadata.
    Set `--host-context supported` only if this launch tool exposes the context field.
@@ -77,4 +80,4 @@ Local hooks do not transfer to a cloud worker. Give remote descendants access to
 This contract never changes an already-running parent or per-agent defaults.
 Larger context is not a quality promise. Available input also includes system instructions, history, and tool output.
 
-See [the policy reference](../../docs/context-routing.md) for setup, errors, and the real CLI verification command.
+See [the setup guide](../../docs/guide/01-setup.md#configure-delegated-context) for policy configuration and the CLI verification command.

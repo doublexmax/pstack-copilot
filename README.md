@@ -63,7 +63,7 @@ delegate context is adaptive too. bounded work uses the default tier. joint
 large-corpus work uses long context only with current support evidence for that
 model and host. [`/setup-pstack`](./skills/setup-pstack/SKILL.md) can configure context
 without rewriting your model or effort choices. see
-[the context policy reference](./docs/context-routing.md).
+[the setup guide](./docs/guide/01-setup.md#configure-delegated-context).
 
 `/poteto-mode` still works if you skipped the always-on step or want to name it
 explicitly.
@@ -361,8 +361,8 @@ without native hooks, that command does not update the durable opt-out marker.
 
 hook timeouts and disabled hooks can bypass native routing. callers also copy
 the resolver's explicit tier. this never changes an already-running parent's
-window or per-agent defaults. [context routing](./docs/context-routing.md) names
-the managed scope, re-entry command, capability limits, and fresh CLI proof.
+window or per-agent defaults. [context routing](./skills/context-routing/SKILL.md)
+defines the launch contract and its limits.
 
 the always-on source text lives at
 [`always-on/copilot-instructions.md`](./always-on/copilot-instructions.md).

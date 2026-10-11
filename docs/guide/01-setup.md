@@ -32,7 +32,7 @@ That one command does four things:
 1. Splices a short block into `~/.copilot/copilot-instructions.md`, which Copilot loads into the system prompt of every session in every directory. From then on you describe the task and the mode is already on.
 2. Adds the absolute `~/.copilot` path to `trustedFolders` in `~/.copilot/config.json`, preserving any folders you already trusted.
 3. Installs a `pstack` CLI wrapper (`~/.copilot/bin/` shims plus a marked block in your PowerShell profile or shell rc) that runs `copilot --add-dir ~/.copilot ...`, so headless runs can read playbooks and `pstack-models.md`.
-4. Installs direct-exec Node hooks for [context routing](../context-routing.md). Pstack-managed delegates use a resolved tier. Ordinary delegates remain unchanged.
+4. Installs direct-exec Node hooks for [context routing](../../skills/context-routing/SKILL.md). Pstack-managed delegates use a resolved tier. Ordinary delegates remain unchanged.
 
 The block is user-scoped, so a repo you clone next month is covered without any per-repo setup. `--uninstall` removes the managed changes and leaves unrelated content and personal policy untouched. `--skip-shell` leaves profiles and shims alone. `--dry-run` prints what would change.
 
@@ -41,7 +41,9 @@ That flag leaves existing hooks unchanged. It does not disable installed hooks.
 Use `--hooks remove` to remove only the owned hook config and copied entry.
 The default installer or `--hooks install` enables them again.
 `--uninstall` cannot be combined with `--hooks`.
-The [context policy reference](../context-routing.md#disable-native-hooks-without-removing-pstack) covers removal and opt-out limits without the native tracker.
+Hook removal preserves your instructions, policy, models, trust, wrappers, and session markers.
+Explicit routing still works, but native correction and durable opt-out tracking do not.
+After re-enabling hooks, submit `/poteto-mode` to clear a previous session opt-out.
 
 If your `config.json` has JSONC comments, use `--skip-trust` to leave that file untouched.
 The installer validates the trust configuration before it writes anything.
@@ -89,13 +91,59 @@ Run:
 
 You only override what you care about. A role with no line in the rule keeps the skill's default. To restore a default, delete that role's line. A rerun of `/setup-pstack` keeps any role whose model differs from the default. A rule written before 0.15.3 pins the old default models, so delete those role lines, or delete the file, then run `/setup-pstack` again.
 
-Setup also configures an independent adaptive context policy.
-Ask for context-only setup to preserve every model and effort choice.
-The policy lives in `pstack-context.json` under the active Copilot home.
-Bounded delegates use default context. Large-corpus delegates use long context only with current exact-model and host evidence.
-The parent tier does not change.
-
 You might be wondering what happens if you use Auto. Set a role to `inherit-parent` or `auto` and pstack omits the subagent `model` field, so the subagent inherits your parent chat model. Both values mean the same thing, and neither is a model slug. For a panel role the value is a list, and one subagent runs per entry, so the list length sets the panel size. Setup also configures `swarm workers`, the default model for every `/swarm` worker unless a race names a model for each arm.
+
+## Configure delegated context
+
+Ask `/setup-pstack` for context-only setup to preserve your model and effort choices.
+The default policy is adaptive. Small inputs use `default`, even when the task spans several files.
+Use `long_context` for a large body of material that one delegate must compare together.
+Pstack requires current support evidence for the exact model and launch tool.
+It never changes the parent tier or per-agent defaults.
+
+To set the global policy directly, run:
+
+```powershell
+node "$env:USERPROFILE\.copilot\pstack\scripts\context-routing.mjs" set-policy --default adaptive
+```
+
+Use `show` to print the effective policy and its source.
+Use `--role-policy "how explainer=default"` with `set-policy` for an exact role override.
+Personal policy lives in `pstack-context.json` under `COPILOT_HOME`, or your user `.copilot` directory when that variable is unset.
+For example:
+
+```json
+{
+	"schemaVersion": 1,
+	"default": "adaptive",
+	"roles": {
+		"how explainer": "default"
+	}
+}
+```
+
+An omitted global policy inherits `context.default.json`. Exact role overrides take precedence.
+`default` always selects default context. `long_context` requires proven support or blocks the launch.
+Adaptive falls back to default when long-context support is unknown or unsupported.
+A known unavailable model blocks in every mode. Pstack never replaces the selected model.
+Malformed policy, duplicate keys, and unknown role overrides fail with an error.
+
+Managed launches copy the resolver's arguments and declaration.
+Native hooks also check them and record decisions in `pstack-context-decisions\<sessionId>`.
+Submit the whole command `skip poteto mode` to opt out, or `/poteto-mode` to re-enter.
+Native hooks preserve that opt-out across same-session resume.
+Disabled hooks and timeouts can bypass native checks, so callers still need explicit routing.
+If the hook executable cannot start, Copilot can deny unrelated tool calls too. Remove the owned hooks with `--hooks remove`.
+Local hooks do not transfer to cloud workers. Remote launches need their own capability evidence.
+
+For fresh CLI dispatch evidence, run from the checkout:
+
+```powershell
+node scripts\verify-context-routing.mjs --cli "<copilot.exe>" --out "<new-evidence-directory>"
+```
+
+The verifier uses an isolated Copilot home and compares requested, post-hook, and effective tiers.
+Its controlled workloads prove dispatch, not better answers or autonomous workload classification.
 
 ## Accept the verification offer, or don't
 
