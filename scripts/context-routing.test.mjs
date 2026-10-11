@@ -211,6 +211,48 @@ test('both aliases preserve absent model/effort and use known parent identity or
   }
 });
 
+test('parent capability cannot authorize an omitted model selected by built-in or custom-agent preferences', (t) => {
+  const f = fixture(t);
+  f.write('settings.json', {
+    subagents: { agents: {
+      'general-purpose': { model: 'gpt-5.4-mini' },
+      'receipt-reader': { model: 'gpt-5.4-mini' },
+    } },
+  });
+  for (const mode of ['adaptive', 'default', 'always_long']) {
+    configurePolicy({ defaultMode: mode }, f);
+    const known = resolveRole(request({ parentModel: 'gpt-6.1-sol', workload: 'large-corpus' }), f);
+    for (const agent_type of ['general-purpose', 'receipt-reader']) {
+      const routed = routeToolCall(event(known, {
+        agent_type, model: undefined, reasoning_effort: undefined, context_tier: 'long_context',
+      }), f);
+      assert.equal(routed.decision.effectiveModel, null);
+      if (mode === 'always_long') {
+        assert.deepEqual(routed.output, {
+          permissionDecision: 'deny', permissionDecisionReason: 'pstack context routing: required-long-unproven',
+        });
+      } else {
+        assert.deepEqual(routed.output, { modifiedArgs: event(known, {
+          agent_type, model: undefined, reasoning_effort: undefined, context_tier: 'default',
+        }).toolArgs });
+      }
+    }
+    for (const alias of ['auto', 'inherit-parent']) {
+      const resolved = resolveRole(request({
+        model: alias, effort: undefined, parentModel: 'gpt-6.1-sol', workload: 'large-corpus',
+      }), f);
+      assert.equal(resolved.decision.effectiveModel, null);
+      if (mode === 'always_long') {
+        assert.equal(resolved.decision.status, 'blocked');
+        assert.equal(resolved.decision.reason, 'required-long-unproven');
+        assert.equal(Object.hasOwn(resolved, 'toolArguments'), false);
+      } else {
+        assert.deepEqual(resolved.toolArguments, { context_tier: 'default' });
+      }
+    }
+  }
+});
+
 test('parent settings do not enable long context for a bounded child', (t) => {
   const f = fixture(t);
   f.write('settings.json', { contextTier: 'long_context', subagents: { agents: { 'general-purpose': { contextTier: 'long_context' } } } });
