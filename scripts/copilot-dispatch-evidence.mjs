@@ -30,6 +30,7 @@ export function inspectDispatch({ events, observations, expectedModel, expectedT
       && event.toolArgs.prompt === request.arguments.prompt);
     assert.ok(observed, 'missing independent postToolUse arguments');
     assert.equal(configured.data.model, expectedModel, 'the effective delegate model changed');
+    assert.equal(configured.data.reasoningEffort, request.arguments.reasoning_effort, 'the effective delegate reasoning effort changed');
     assert.equal(configured.data.contextTier, expectedTier, 'the runtime did not apply the expected tier');
     assert.equal(observed.toolArgs.context_tier, expectedTier, 'postToolUse did not observe the expected tier');
     assert.deepEqual(observed.toolArgs, { ...request.arguments, context_tier: expectedTier },

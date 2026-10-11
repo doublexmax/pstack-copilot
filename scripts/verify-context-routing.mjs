@@ -12,7 +12,7 @@ const options = {};
 for (let i = 2; i < process.argv.length; i += 2) {
   const name = process.argv[i];
   if (!['--cli', '--out', '--model', '--case'].includes(name) || !process.argv[i + 1]) {
-    throw new Error('usage: node verify-context-routing.mjs --cli <binary> --out <new-directory> [--model <id>] [--case bounded|large-corpus|opt-out|correction|unmanaged]');
+    throw new Error('usage: node verify-context-routing.mjs --cli <binary> --out <new-directory> [--model <id>] [--case bounded|small-corpus|large-corpus|opt-out|correction|unmanaged]');
   }
   if (options[name]) throw new Error(`duplicate option ${name}`);
   options[name] = process.argv[i + 1];
@@ -29,8 +29,8 @@ mkdirSync(out, { recursive: true });
 const resolver = join(ROOT, 'scripts', 'context-routing.mjs');
 const observer = join(ROOT, 'scripts', 'context-proof-observer.mjs');
 const installer = join(ROOT, 'scripts', 'install-always-on.mjs');
-const cases = options['--case'] ? [options['--case']] : ['bounded', 'large-corpus', 'opt-out'];
-assert.ok(cases.every((name) => ['bounded', 'large-corpus', 'opt-out', 'correction', 'unmanaged'].includes(name)), 'unknown verification case');
+const cases = options['--case'] ? [options['--case']] : ['bounded', 'small-corpus', 'large-corpus', 'opt-out'];
+assert.ok(cases.every((name) => ['bounded', 'small-corpus', 'large-corpus', 'opt-out', 'correction', 'unmanaged'].includes(name)), 'unknown verification case');
 
 function artifactFiles() {
   const paths = execFileSync('git', ['-C', ROOT, 'ls-files', '--cached', '--others', '--exclude-standard'], { encoding: 'utf8' })
@@ -130,6 +130,7 @@ const readonly = [
 ].join(' ');
 const prompts = {
   bounded: `/how Explain only parseManagedBlock in scripts\\install-always-on.mjs. Its input and output contract is the whole task. Do not broaden to other helpers. ${readonly}`,
+  'small-corpus': `/how Explain how context.default.json, models.default.md, and scripts\\context-routing.mjs determine the effective context policy and model choice. Trace the interaction between these three files without reviewing other workflows. ${readonly}`,
   'large-corpus': `/how Trace the context and model-selection contract jointly across models.default.md, always-on\\copilot-instructions.md, agents\\poteto.agent.md, agents\\poteto-worker.agent.md, the full how/why/architect/arena/swarm/interrogate/reflect/context-routing skills, all poteto-mode delegation playbooks, and the context resolver/hook/installer. This is one cross-document corpus comparison. The delegate must hold these contracts together, not partition them into independent helper tasks. The parent only loads routing and launches the reader; it must not audit the corpus itself before delegation. Return three evidenced invariants, not a general code-quality review. ${readonly}`,
 };
 const reports = [];
@@ -166,9 +167,10 @@ for (const name of cases) {
   } else if (name !== 'opt-out') {
     console.log(`running ${name} with an isolated Copilot home`);
     const result = run(f, 'workflow', prompts[name]);
+    const workload = name === 'large-corpus' ? 'large-corpus' : 'bounded';
     const report = inspectDispatch({
       events: result.events, observations: observations(f), expectedModel: model,
-      expectedTier: name === 'bounded' ? 'default' : 'long_context',
+      expectedTier: workload === 'bounded' ? 'default' : 'long_context',
     });
     const history = result.events.filter((event) => event.type === 'tool.execution_start');
     assert.ok(history.some((event) => event.data.toolName === 'skill' && event.data.arguments.skill === 'context-routing'),
@@ -180,7 +182,7 @@ for (const name of cases) {
     for (const delegate of report.delegates) {
       assert.ok(records.some((record) => record.event === 'preToolUse' && record.status === 'resolved'
         && record.name === delegate.name && record.effectiveModel === delegate.model
-        && record.workload === name && record.tier === delegate.effectiveTier), 'missing delegate-bound workload decision');
+        && record.workload === workload && record.tier === delegate.effectiveTier), 'missing delegate-bound workload decision');
     }
     writeFileSync(join(f.dir, 'dispatch-evidence.json'), `${JSON.stringify(report, null, 2)}\n`);
     reports.push({ case: name, ...report, decisionDirectory: join(f.home, 'pstack-context-decisions', result.sessionId) });

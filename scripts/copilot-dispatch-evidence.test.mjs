@@ -53,6 +53,7 @@ test('rejects missing, failed, or unrelated post-hook evidence', () => {
     (data) => { data.events[4].data.success = false; },
     (data) => { data.observations[0].toolArgs.model = 'different-model'; },
     (data) => { data.events[0].data.contextTier = 'long_context'; },
+    (data) => { data.events[3].data.reasoningEffort = 'low'; },
     (data) => { data.events[3].agentId = 'another-agent'; },
   ]) {
     const data = fixture();
