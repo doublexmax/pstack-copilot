@@ -48,8 +48,31 @@ test('native mutation preserves payload and writes a concise durable decision', 
   assert.deepEqual(runHook('preToolUse', event, f), routed);
   assert.equal(readdirSync(dir).length, 1);
   const observed = runHook('postToolUse', { ...event, toolArgs: routed.output.modifiedArgs }, f);
+  assert.deepEqual(observed.output, {});
   assert.equal(observed.record.observation, 'matched');
   assert.equal(observed.record.observedTier, 'long_context');
+  const recorded = readdirSync(dir).map((file) => JSON.parse(readFileSync(join(dir, file), 'utf8')));
+  assert.deepEqual(recorded.find((value) => value.event === 'postToolUse'), observed.record);
+});
+
+test('post-tool mismatches and denials surface concise errors and persist the full decision', (t) => {
+  const f = fixture(t);
+  const mismatch = runHook('postToolUse', launch(f), f);
+  assert.deepEqual(mismatch.output, {
+    additionalContext: 'Pstack context mismatch: expected long_context, observed default.',
+  });
+  assert.equal(mismatch.record.observation, 'mismatch');
+  const event = launch(f);
+  const denied = runHook('postToolUse', { ...event, toolArgs: {
+    ...event.toolArgs, model: 'gpt-5.4-mini',
+  } }, f);
+  assert.deepEqual(denied.output, {
+    additionalContext: 'Pstack context routing denied: model-support-evidence-mismatch.',
+  });
+  assert.equal(denied.record.status, 'blocked');
+  const dir = join(f.home, 'pstack-context-decisions', event.sessionId);
+  const records = readdirSync(dir).map((file) => JSON.parse(readFileSync(join(dir, file), 'utf8')));
+  assert.deepEqual(records.find((value) => value.reason === 'model-support-evidence-mismatch'), denied.record);
 });
 
 test('managed missing/invalid declarations deny but ordinary delegates ignore invalid policy', (t) => {
@@ -74,6 +97,11 @@ test('whole-command opt-out persists on resume, bypasses routing, and explicit r
   const state = join(f.home, 'session-state', 'session-1', 'files', 'pstack-context-opt-out');
   assert.equal(existsSync(state), true);
   assert.deepEqual(runHook('preToolUse', event, f).output, {});
+  const optedOutPost = runHook('postToolUse', {
+    ...event, toolArgs: { name: 'pstack-reader', prompt: 'PSTACK_CONTEXT_V1 bad', context_tier: 'long_context' },
+  }, { ...f, routing: undefined });
+  assert.deepEqual(optedOutPost.output, {});
+  assert.equal(optedOutPost.record.scope, 'opt-out');
   const resumed = runHook('sessionStart', envelope({ source: 'resume' }), f);
   assert.equal(resumed.record.scope, 'opt-out');
   assert.deepEqual(runHook('preToolUse', event, f).output, {});

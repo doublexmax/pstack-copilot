@@ -134,7 +134,12 @@ export function runHook(phase, event, { root = ROOT, home = copilotHome(), routi
     result.observation = result.decision.status === 'resolved' && result.observedTier === result.decision.tier
       ? 'matched' : 'mismatch';
     const logged = record(home, phase, event, result);
-    return { output: { additionalContext: `Pstack context observation ${JSON.stringify(logged)}` }, record: logged };
+    const output = result.decision.status === 'blocked'
+      ? { additionalContext: `Pstack context routing denied: ${result.decision.error ?? result.decision.reason}.` }
+      : result.observation === 'mismatch'
+      ? { additionalContext: `Pstack context mismatch: expected ${result.decision.tier}, observed ${result.observedTier ?? 'no tier'}.` }
+      : {};
+    return { output, record: logged };
   }
   return respond(home, phase, event, result);
 }

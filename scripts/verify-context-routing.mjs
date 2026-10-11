@@ -157,7 +157,7 @@ for (const name of cases) {
     const result = run(f, 'native-probe',
       `This is read-only native protocol verification, not a workflow. The correction input is intentionally wrong to exercise the hook. Use task exactly once with this exact JSON argument object. Do not repair it yourself, add a declaration, use skills, run a shell, or write files. Wait for the result. ${JSON.stringify(args)}`);
     const tier = plan ? plan.decision.tier : 'long_context';
-    const report = inspectDispatch({ events: result.events, observations: observations(f), expectedModel: model, expectedTier: tier });
+    const report = inspectDispatch({ events: result.events, observations: observations(f), expectedModel: model, expectedTier: tier, expectedAttempts: 1 });
     assert.ok(report.delegates.every((delegate) => delegate.requestedTier
       === (name === 'correction' && tier === 'long_context' ? 'default' : 'long_context')));
     if (name === 'correction') {
@@ -172,7 +172,7 @@ for (const name of cases) {
     const result = run(f, 'workflow', prompts[name]);
     const workload = name === 'large-corpus' ? 'large-corpus' : 'bounded';
     const report = inspectDispatch({
-      events: result.events, observations: observations(f), expectedModel: model,
+      events: result.events, observations: observations(f), expectedModel: model, expectedAttempts: 1,
       expectedTier: f.policy === 'always_long' || f.policy === 'adaptive' && workload === 'large-corpus'
         ? 'long_context' : 'default',
     });
@@ -204,7 +204,7 @@ for (const name of cases) {
     const resumed = run(f, 'resumed-probe', probe, skipped.sessionId);
     assert.equal(resumed.sessionId, skipped.sessionId, 'resume changed session identity');
     assert.ok(existsSync(marker), 'resume cleared the opt-out');
-    const report = inspectDispatch({ events: resumed.events, observations: observations(f), expectedModel: model, expectedTier: 'long_context' });
+    const report = inspectDispatch({ events: resumed.events, observations: observations(f), expectedModel: model, expectedTier: 'long_context', expectedAttempts: 1 });
     assert.ok(report.delegates.every((delegate) => delegate.requestedTier === 'long_context'), 'opt-out changed requested arguments');
     assert.ok(decisions(f, skipped.sessionId).some((record) => record.event === 'preToolUse' && record.scope === 'opt-out'), 'native hook ignored session opt-out');
     const entered = run(f, 're-entry', '/poteto-mode', skipped.sessionId);

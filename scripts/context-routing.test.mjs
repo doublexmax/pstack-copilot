@@ -195,18 +195,12 @@ test('legacy model configuration and mixed panels resolve every member independe
 test('both aliases preserve omitted model and effort and leave task and kickoff identities unresolved', (t) => {
   const f = fixture(t);
   for (const alias of ['auto', 'inherit-parent']) {
-    const parentKnown = resolveRole(request({
-      model: alias, effort: undefined, parentModel: 'gpt-6.1-sol', workload: 'large-corpus',
-    }), f);
-    assert.deepEqual(parentKnown.toolArguments, { context_tier: 'default' });
-    assert.equal(parentKnown.decision.effectiveModel, null);
-    assert.equal(parentKnown.decision.reason, 'task-model-unresolved');
     const unknown = resolveRole(request({ model: alias, effort: undefined, workload: 'large-corpus' }), f);
     assert.deepEqual(unknown.toolArguments, { context_tier: 'default' });
     assert.equal(unknown.decision.effectiveModel, null);
     assert.equal(unknown.decision.reason, 'task-model-unresolved');
     const kickoff = resolveRole(request({
-      target: 'create_session', model: alias, effort: undefined, parentModel: 'gpt-6.1-sol', workload: 'large-corpus',
+      target: 'create_session', model: alias, effort: undefined, workload: 'large-corpus',
     }), f);
     assert.deepEqual(kickoff.toolArguments, { kickoff: { context_tier: 'default' } });
     assert.equal(kickoff.decision.reason, 'kickoff-model-unresolved');
@@ -223,7 +217,7 @@ test('parent capability cannot authorize an omitted model selected by built-in o
   });
   for (const mode of ['adaptive', 'default', 'always_long']) {
     configurePolicy({ defaultMode: mode }, f);
-    const known = resolveRole(request({ parentModel: 'gpt-6.1-sol', workload: 'large-corpus' }), f);
+    const known = resolveRole(request({ workload: 'large-corpus' }), f);
     for (const agent_type of ['general-purpose', 'receipt-reader']) {
       const routed = routeToolCall(event(known, {
         agent_type, model: undefined, reasoning_effort: undefined, context_tier: 'long_context',
@@ -241,7 +235,7 @@ test('parent capability cannot authorize an omitted model selected by built-in o
     }
     for (const alias of ['auto', 'inherit-parent']) {
       const resolved = resolveRole(request({
-        model: alias, effort: undefined, parentModel: 'gpt-6.1-sol', workload: 'large-corpus',
+        model: alias, effort: undefined, workload: 'large-corpus',
       }), f);
       assert.equal(resolved.decision.effectiveModel, null);
       if (mode === 'always_long') {
@@ -279,16 +273,12 @@ test('managed task and kickoff binding preserves all other arguments and is idem
   });
 });
 
-test('unmanaged and opted-out calls remain unchanged even when policy or declarations are malformed', (t) => {
+test('unmanaged calls remain unchanged even when policy is malformed', (t) => {
   const f = fixture(t);
   f.write('pstack-context.json', '{');
   const ordinary = { toolName: 'task', toolArgs: { name: 'ordinary', prompt: 'Read the helper.', context_tier: 'long_context' } };
   assert.deepEqual(routeToolCall(ordinary, f), {
     scope: 'unmanaged', reason: 'no-pstack-declaration', output: {},
-  });
-  const optedOut = { toolName: 'task', toolArgs: { name: 'pstack-reader', prompt: 'PSTACK_CONTEXT_V1 bad', context_tier: 'long_context' } };
-  assert.deepEqual(routeToolCall(optedOut, { ...f, optedOut: true }), {
-    scope: 'opt-out', reason: 'session-opt-out', output: {},
   });
 });
 
@@ -365,7 +355,7 @@ test('the executable resolver returns tool arguments and rejects invalid CLI opt
   assert.deepEqual(JSON.parse(result.stdout).toolArguments, {
     model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: 'default',
   });
-  for (const extra of [['--role', 'bug-fix'], ['--member', '1.5'], ['--nope', 'value'], ['--default', 'adaptive']]) {
+  for (const extra of [['--role', 'bug-fix'], ['--member', '1.5'], ['--nope', 'value'], ['--default', 'adaptive'], ['--parent-model', 'gpt-6.1-sol']]) {
     const failed = f.run(...args, ...extra);
     assert.equal(failed.status, 1);
     assert.equal(failed.stdout, '');

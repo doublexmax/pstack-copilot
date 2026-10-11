@@ -7,18 +7,21 @@ export function readEvents(file) {
   return bytes.toString(encoding).replace(/^\uFEFF/, '').trim().split(/\r?\n/).filter(Boolean).map(JSON.parse);
 }
 
-export function inspectDispatch({ events, observations, expectedModel, expectedTier, parentTier = 'default' }) {
+export function inspectDispatch({ events, observations, expectedModel, expectedTier, expectedAttempts, parentTier = 'default' }) {
   const start = events.find((event) => event.type === 'session.start');
   assert.ok(start, 'missing session.start metadata');
   assert.equal(start.data.contextTier, parentTier, 'the parent tier changed');
   const requests = events.filter((event) => event.type === 'assistant.message' && !event.agentId)
     .flatMap((event) => event.data.toolRequests ?? []).filter((request) => request.name === 'task');
   assert.ok(requests.length > 0, 'the workflow did not request a delegate');
+  if (expectedAttempts !== undefined) {
+    assert.equal(requests.length, expectedAttempts, 'unexpected number of delegate attempts');
+  }
   const delegates = [];
   for (const request of requests) {
     const started = events.find((event) => event.type === 'subagent.started'
       && event.data.toolCallId === request.toolCallId);
-    if (!started) continue;
+    assert.ok(started, `delegate ${request.toolCallId} (${request.arguments.name}) did not start`);
     const configured = events.find((event) => event.type === 'subagent.configured'
       && event.agentId === started.agentId);
     assert.ok(configured, 'missing effective subagent configuration');
@@ -48,7 +51,6 @@ export function inspectDispatch({ events, observations, expectedModel, expectedT
       completedAt: completed.timestamp,
     });
   }
-  assert.ok(delegates.length > 0, 'no successful configured delegate matched the request');
   return {
     sessionId: start.data.sessionId,
     copilotVersion: start.data.copilotVersion,

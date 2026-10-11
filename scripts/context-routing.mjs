@@ -148,7 +148,7 @@ export function loadContextPolicy({ root = ROOT, home = copilotHome() } = {}) {
 }
 
 function declaration(raw, roles, target) {
-  fields(raw, ['role', 'workload', 'why', 'inputs', 'host', 'modelSupport', 'parentModel'], 'declaration');
+  fields(raw, ['role', 'workload', 'why', 'inputs', 'host', 'modelSupport'], 'declaration');
   if (!roles.has(raw.role)) throw new Error(`declaration: unknown role ${raw.role}`);
   if (!['bounded', 'large-corpus'].includes(raw.workload)) throw new Error('declaration: invalid workload');
   text(raw.why, 'declaration.why');
@@ -166,7 +166,6 @@ function declaration(raw, roles, target) {
   if (raw.modelSupport.model !== null) modelId(raw.modelSupport.model, 'declaration.modelSupport.model');
   if (!SUPPORT.has(raw.modelSupport.status)) throw new Error('declaration.modelSupport: invalid support status');
   text(raw.modelSupport.source, 'declaration.modelSupport.source');
-  if (raw.parentModel !== undefined) modelId(raw.parentModel, 'declaration.parentModel');
   return raw;
 }
 
@@ -249,7 +248,6 @@ export function resolveRole(request, { root = ROOT, home = copilotHome() } = {})
       status: request.support ?? 'unknown',
       source: request.source ?? 'No current model support evidence',
     },
-    ...(request.parentModel === undefined ? {} : { parentModel: request.parentModel }),
   }, context.roles, target);
   const decision = decide(context, declared, choice.model ?? null, target);
   decision.diagnostics.push(...models.diagnostics);
@@ -261,9 +259,8 @@ export function resolveRole(request, { root = ROOT, home = copilotHome() } = {})
   return result;
 }
 
-export function routeToolCall(event, { root = ROOT, home = copilotHome(), optedOut = false } = {}) {
+export function routeToolCall(event, { root = ROOT, home = copilotHome() } = {}) {
   if (!TARGETS.has(event.toolName)) return { scope: 'unmanaged', reason: 'not-a-delegate', output: {} };
-  if (optedOut) return { scope: 'opt-out', reason: 'session-opt-out', output: {} };
   object(event.toolArgs, 'toolArgs');
   const launch = event.toolName === 'task' ? event.toolArgs : event.toolArgs.kickoff;
   const prompt = typeof launch?.prompt === 'string' ? launch.prompt : '';
@@ -310,7 +307,7 @@ function parseArgs(argv) {
   const values = { inputs: [], roles: {} };
   const names = {
     '--role': 'role', '--workload': 'workload', '--why': 'why', '--member': 'member',
-    '--model': 'model', '--effort': 'effort', '--parent-model': 'parentModel',
+    '--model': 'model', '--effort': 'effort',
     '--support': 'support', '--source': 'source', '--host-context': 'hostContext',
     '--host-source': 'hostSource', '--target': 'target', '--default': 'defaultMode',
   };
@@ -341,7 +338,7 @@ function parseArgs(argv) {
     values.hostContext = values.hostContext === 'supported' ? true : values.hostContext === 'unsupported' ? false : null;
   }
   const allowed = command === 'resolve'
-    ? ['inputs', 'roles', 'role', 'workload', 'why', 'member', 'model', 'effort', 'parentModel', 'support', 'source', 'hostContext', 'hostSource', 'target']
+    ? ['inputs', 'roles', 'role', 'workload', 'why', 'member', 'model', 'effort', 'support', 'source', 'hostContext', 'hostSource', 'target']
     : command === 'set-policy' ? ['inputs', 'roles', 'defaultMode'] : ['inputs', 'roles'];
   for (const key of Object.keys(values)) if (!allowed.includes(key)) throw new Error(`${command} does not accept ${key}`);
   if (command !== 'resolve' && values.inputs.length) throw new Error(`${command} does not accept --input`);

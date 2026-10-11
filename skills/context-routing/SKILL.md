@@ -24,7 +24,6 @@ With hooks disabled, these commands do not update the native marker. Follow the 
    Preserve the workflow's selected model and effort. For an explicit race or fallback, pass both `--model` and `--effort`.
    Aliases `auto` and `inherit-parent` omit both launch fields and leave the child model unresolved.
    Copilot may select a per-agent preference or a custom-agent model before falling back to the parent.
-   `--parent-model` records parent metadata only. It never establishes the child's identity or long-context support.
 3. Classify the delegate's actual inputs, not its role, prompt length, or model family.
    `bounded` covers a named helper, limited diff, or independent slice.
    A small joint read across several files is still bounded. File count or cross-component scope alone does not justify long context.
@@ -75,6 +74,7 @@ They never grant tool permissions. Unmanaged calls remain untouched.
 Missing or malformed declarations deny only calls that claim the reserved pstack scope.
 Decisions appear in `pstack-context-decisions\<sessionId>` under the active Copilot home.
 Read the decision and report a downgrade or denial with its reason.
+Successful launches record decisions without injecting the full record into the conversation. Denials and mismatches remain visible.
 Post-hook arguments and effective `subagent.configured` metadata prove dispatch; original tool requests can retain pre-hook values.
 
 Disabled hooks, timeouts, unmarked launches, and an unavailable hook runtime can bypass native checks.
