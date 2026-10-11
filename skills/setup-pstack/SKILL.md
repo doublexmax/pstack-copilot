@@ -132,9 +132,10 @@ If the user already chose a policy, use that choice. Otherwise ask one question 
 
 - `Adaptive, long context for supported large-corpus work (Recommended)`
 - `Default context for every delegate`
-- `Require long context for every delegate; block when support is unproven`
+- `Always long context; block when support is unproven`
 
-Use `adaptive`, `default`, or `long_context` for the corresponding mode.
+Use `adaptive`, `default`, or `always_long` for the corresponding policy.
+`long_context` is the Copilot tier selected by `always_long`, not a policy name.
 Write only the personal context file through the canonical command:
 
 ```powershell

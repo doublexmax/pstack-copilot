@@ -61,8 +61,10 @@ node "<pstack>\scripts\context-routing.mjs" resolve `
 
 Adaptive selects `default` for bounded work.
 It selects `long_context` for eligible large-corpus work.
-Unknown or unsupported model support selects `default` with an explicit diagnostic.
-Known unavailable models block. Explicit long policy blocks when support is unproven.
+The `default` policy selects the default tier regardless of workload.
+The `always_long` policy selects `long_context` regardless of workload, with proven host and exact-model support.
+Under adaptive policy, unknown or unsupported model support selects `default` with an explicit diagnostic.
+Known unavailable models block. `always_long` blocks when support is unproven.
 The exact role override wins over the global policy.
 
 Native CLI hooks call the same resolver and can correct a missing or mismatched tier on a managed launch.

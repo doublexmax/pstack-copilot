@@ -83,7 +83,7 @@ test('supported joint large-corpus work gets long context without changing the m
 test('exact role policy overrides the global mode', (t) => {
   const f = fixture(t);
   f.write('pstack-context.json', {
-    schemaVersion: 1, default: 'long_context', roles: { 'feature, refactoring': 'default' },
+    schemaVersion: 1, default: 'always_long', roles: { 'feature, refactoring': 'default' },
   });
   const result = resolveRole(request({ workload: 'large-corpus' }), f);
   assert.deepEqual(result.toolArguments, {
@@ -92,19 +92,50 @@ test('exact role policy overrides the global mode', (t) => {
   assert.equal(result.decision.reason, 'policy-default');
 });
 
-test('explicit long policy still needs current host and model support', (t) => {
+test('always_long ignores workload size but still needs current host and model support', (t) => {
   const f = fixture(t);
-  f.write('pstack-context.json', { schemaVersion: 1, default: 'long_context' });
-  const supported = resolveRole(request(), f);
-  assert.deepEqual(supported.toolArguments, {
-    model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: 'long_context',
-  });
-  assert.equal(supported.decision.reason, 'policy-long');
+  f.write('pstack-context.json', { schemaVersion: 1, default: 'always_long' });
+  for (const workload of ['bounded', 'large-corpus']) {
+    const supported = resolveRole(request({ workload }), f);
+    assert.deepEqual(supported.toolArguments, {
+      model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: 'long_context',
+    });
+    assert.equal(supported.decision.policy, 'always_long');
+    assert.equal(supported.decision.reason, 'policy-long');
+    assert.deepEqual(routeToolCall(event(supported, { context_tier: 'default' }), f).output, {
+      modifiedArgs: event(supported).toolArgs,
+    });
+  }
   for (const support of ['unknown', 'unsupported']) {
     const result = resolveRole(request({ support }), f);
     assert.equal(result.decision.status, 'blocked');
     assert.equal(result.decision.reason, 'required-long-unproven');
     assert.equal(Object.hasOwn(result, 'toolArguments'), false);
+  }
+});
+
+test('fixed policies select the same tier for tasks and every kickoff target regardless of workload', (t) => {
+  const f = fixture(t);
+  for (const [mode, tier] of [['default', 'default'], ['always_long', 'long_context']]) {
+    configurePolicy({ defaultMode: mode }, f);
+    for (const workload of ['bounded', 'large-corpus']) {
+      for (const target of ['task', 'create_session', 'open_pr_session', 'open_issue_session']) {
+        const result = resolveRole(request({ target, workload }), f);
+        const args = { model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: tier };
+        assert.deepEqual(result.toolArguments, target === 'task' ? args : { kickoff: args });
+      }
+    }
+  }
+  f.write('pstack-context.json', { schemaVersion: 1, roles: { 'feature, refactoring': 'always_long' } });
+  assert.deepEqual(resolveRole(request(), f).toolArguments, {
+    model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: 'long_context',
+  });
+  for (const invalid of [
+    { schemaVersion: 1, default: 'long_context' },
+    { schemaVersion: 1, roles: { 'feature, refactoring': 'long_context' } },
+  ]) {
+    f.write('pstack-context.json', invalid);
+    assert.throws(() => loadContextPolicy(f), /expected adaptive, default, or always_long/);
   }
 });
 

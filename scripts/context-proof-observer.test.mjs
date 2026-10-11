@@ -20,7 +20,7 @@ test('read-only verification permits only the exact resolver read commands', () 
   assert.deepEqual(call(`node "${resolver}" show`), {});
   assert.deepEqual(call(`node "${resolver}" resolve --role "how explainer" --workload bounded`), {});
   for (const command of [
-    `node "${resolver}" set-policy --default long_context`,
+    `node "${resolver}" set-policy --default always_long`,
     `node "${resolver}" show\nnode -e "process.exit()"`,
     `node "${resolver}" show; Get-ChildItem`,
     `node "${resolver}" show | Get-Content`,

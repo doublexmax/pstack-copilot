@@ -123,8 +123,16 @@ For example:
 ```
 
 An omitted global policy inherits `context.default.json`. Exact role overrides take precedence.
-`default` always selects default context. `long_context` requires proven support or blocks the launch.
-Adaptive falls back to default when long-context support is unknown or unsupported.
+
+| Policy | Behavior |
+| --- | --- |
+| `adaptive` | Default for bounded work. Long for supported large-corpus work. Unknown or unsupported long-context support selects default. |
+| `default` | Default context for every workload. |
+| `always_long` | Long context for every workload. Unproven support blocks the launch. |
+
+Use `set-policy --default always_long` to require long context.
+`always_long` selects Copilot's `long_context` tier. The policy name and tier name are separate.
+If a preview policy used `"long_context"` as its global or role policy value, replace that value with `"always_long"`.
 A known unavailable model blocks in every mode. Pstack never replaces the selected model.
 Malformed policy, duplicate keys, and unknown role overrides fail with an error.
 

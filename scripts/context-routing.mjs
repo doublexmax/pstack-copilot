@@ -4,7 +4,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const MODES = new Set(['adaptive', 'default', 'long_context']);
+const MODES = new Set(['adaptive', 'default', 'always_long']);
 const TIERS = new Set(['default', 'long_context']);
 const SUPPORT = new Set(['supported', 'unsupported', 'unknown', 'unavailable']);
 const ALIASES = new Set(['auto', 'inherit-parent']);
@@ -114,12 +114,14 @@ function policy(raw, label, roles) {
   const value = json(raw, label);
   fields(value, ['schemaVersion', 'default', 'roles'], label);
   if (value.schemaVersion !== 1) throw new Error(`${label}: schemaVersion must be 1`);
-  if (value.default !== undefined && !MODES.has(value.default)) throw new Error(`${label}: invalid default policy`);
+  if (value.default !== undefined && !MODES.has(value.default)) {
+    throw new Error(`${label}: invalid default policy; expected adaptive, default, or always_long`);
+  }
   if (value.roles !== undefined) {
     object(value.roles, `${label}.roles`);
     for (const [role, mode] of Object.entries(value.roles)) {
       if (!roles.has(role)) throw new Error(`${label}: unknown role ${role}`);
-      if (!MODES.has(mode)) throw new Error(`${label}: invalid policy for ${role}`);
+      if (!MODES.has(mode)) throw new Error(`${label}: invalid policy for ${role}; expected adaptive, default, or always_long`);
     }
   }
   return value;
@@ -194,13 +196,13 @@ function decide(context, declared, model, target) {
   if (mode === 'default') return resolved('default', 'policy-default');
   if (mode === 'adaptive' && declared.workload === 'bounded') return resolved('default', 'bounded-work');
   if (effectiveModel === null) {
-    return mode === 'long_context' ? blocked('required-long-unproven') : resolved('default', base.diagnostics[0]);
+    return mode === 'always_long' ? blocked('required-long-unproven') : resolved('default', base.diagnostics[0]);
   }
   if (declared.modelSupport.status !== 'supported') {
-    return mode === 'long_context' ? blocked('required-long-unproven')
+    return mode === 'always_long' ? blocked('required-long-unproven')
       : resolved('default', declared.modelSupport.status === 'unknown' ? 'model-support-unknown' : 'model-long-context-unsupported');
   }
-  return resolved('long_context', mode === 'long_context' ? 'policy-long' : 'eligible-large-corpus');
+  return resolved('long_context', mode === 'always_long' ? 'policy-long' : 'eligible-large-corpus');
 }
 
 function selectedModels(context, home) {
