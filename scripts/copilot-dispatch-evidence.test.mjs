@@ -47,6 +47,28 @@ test('does not accept a requested tier as proof of the effective tier', () => {
   assert.throws(() => inspectDispatch(data), /runtime did not apply/);
 });
 
+test('rejects a denied or incomplete attempt even when a later delegate succeeds', () => {
+  for (const denied of [false, true]) {
+    const data = fixture();
+    const request = {
+      name: 'task', toolCallId: 'unstarted-call',
+      arguments: { ...data.events[1].data.toolRequests[0].arguments, name: 'pstack-unstarted' },
+    };
+    data.events.splice(1, 0, { type: 'assistant.message', data: { toolRequests: [request] } });
+    if (denied) data.events.splice(2, 0, {
+      type: 'tool.execution_complete', data: { toolCallId: request.toolCallId, success: false },
+    });
+    assert.throws(() => inspectDispatch({ ...data, expectedAttempts: 2 }),
+      /delegate unstarted-call \(pstack-unstarted\) did not start/);
+  }
+});
+
+test('requires the expected number of requested attempts', () => {
+  assert.equal(inspectDispatch({ ...fixture(), expectedAttempts: 1 }).delegates.length, 1);
+  assert.throws(() => inspectDispatch({ ...fixture(), expectedAttempts: 2 }),
+    /unexpected number of delegate attempts/);
+});
+
 test('rejects missing, failed, or unrelated post-hook evidence', () => {
   for (const change of [
     (data) => { data.observations = []; },
