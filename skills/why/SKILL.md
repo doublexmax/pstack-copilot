@@ -12,8 +12,6 @@ Investigate the motivation and intent behind code.
 
 Companion to the `how` skill. `how` answers what the code does and how it works. `why` answers what forces led to its shape.
 
-Each spawn below names a role line in `~/.copilot/pstack-models.md` and a default. Set `model` and `reasoning_effort` to that line's values, or to the default if the file or the line is missing. Omit both when the value is `auto` or `inherit-parent`. If the `task` tool rejects a model ID, use the default and say so. If it rejects the default, use the closest valid ID of the same family from its error message.
-
 ## Operating Posture
 
 Operate as a **careful, cautious, and precise investigator**. Be honest about what you know vs what you're inferring. Read `references/epistemics.md` for the full confidence framework and phrasing guide. The synthesizer must follow it.
@@ -86,7 +84,7 @@ Launch all matching investigators in a single message so they run concurrently. 
 
 Subagent config (each):
 - `agent_type`: `"general-purpose"`
-- `model`: your configured why-investigators model (default `grok-4.7 / xhigh`)
+- role: `why investigators`
 - **Do not use `agent_type: "explore"` here.** It has no MCP access, which disables MCP-backed investigators entirely. The source control investigator would survive it, but keep the roster uniform. Investigators still shouldn't write anything. That's a posture the prompt enforces, not a sandbox.
 
 Each investigator gets:
@@ -130,7 +128,7 @@ If your scope assessment suggests a single-commit trivial target where the PR de
 Spawn one synthesizer subagent:
 
 - `agent_type`: `"general-purpose"`
-- `model`: your configured why-synthesizer model (default `claude-opus-5.5 / max`)
+- role: `why synthesizer`
 - Not `explore`. The synthesizer's quality check spot-verifies citations, which can require MCP access.
 
 The synthesizer gets:

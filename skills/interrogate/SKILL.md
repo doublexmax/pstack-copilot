@@ -35,21 +35,14 @@ Write one clear paragraph. If you're unsure about the intent, ask the user befor
 
 ## Step 3, Spawn Reviewers
 
-Launch all reviewers in a single message using the `task` tool. Use the `interrogate reviewers` list from `~/.copilot/pstack-models.md` when present, one reviewer per entry, extending or shrinking the Reviewer A/B/C/D labels below to the configured entry count; otherwise use the table defaults.
-
-| Subagent | Default model |
-|----------|---------------|
-| Reviewer A | `claude-opus-5.5 / max` |
-| Reviewer B | `gpt-5.6-sol / max` |
-| Reviewer C | `grok-4.7 / xhigh` |
-| Reviewer D | `gemini-3.8-flash / high` |
+Inspect `interrogate reviewers` with the resolver's `show --role`. Launch all reviewers in a single message using the `task` tool, one reviewer per entry. Extend or shrink the reviewer labels to the returned list length, including aliases.
 
 For each reviewer:
 - `agent_type`: `"general-purpose"`
-- `model`: the configured `interrogate reviewers` entry, or the table default with no configured line. For an `auto` or `inherit-parent` entry, omit `model` and `reasoning_effort` so Copilot selects the child model. This does not prove parent inheritance.
+- Resolve that reviewer's zero-based `--member` and copy its launch arguments.
 - read-only posture: the prompt forbids file writes; the parent applies every edit
 
-If the `task` tool rejects a configured entry, run that reviewer on the table default of its family and say so. Families go by prefix: `claude-*`, `gpt-*`, `grok-*`, and `gemini-*`. With no family match, use Reviewer A's default. If it rejects a table default, check the valid IDs listed on the `task` tool's `model` parameter, pick the closest equivalent (prefer the highest supported `reasoning_effort` of the same family), spawn with it, and open a separate PR to update the default table. Do not block the review on the ID issue. Never treat an alias entry as a rejected ID or apply either fallback to it.
+If the `task` tool rejects a configured entry, use that family's checked-in `interrogate reviewers` default and report it. Families go by prefix: `claude-*`, `gpt-*`, `grok-*`, and `gemini-*`. With no family match, use the first checked-in member. If that default is rejected, use the closest valid ID and its highest supported effort from the same family, then open a separate PR to update the model map. Re-resolve the fallback pair. Do not block the review on the ID issue or treat aliases as rejected IDs.
 
 Read `references/reviewer-prompt.md` and fill in the template with:
 1. The stated intent

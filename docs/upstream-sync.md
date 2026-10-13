@@ -102,7 +102,7 @@ file-level specifics.
 | `.cursor-plugin/plugin.json` and `/add-plugin` | a `skillDirectories` entry in `~/.copilot/settings.json` |
 | `subagent_type`, `run_in_background`, `readonly`, `environment` on `Task` | `agent_type`, `mode`, `context_tier` on `task`, plus `create_session` for cloud work |
 | one model slug per role | `model` and `reasoning_effort`, two fields |
-| `~/.cursor/rules/pstack-models.mdc`, always applied | `~/.copilot/pstack-models.md`, read explicitly by each skill |
+| `~/.cursor/rules/pstack-models.mdc`, always applied | `~/.copilot/pstack-models.md`, read by the context resolver |
 | `AskQuestion` | the `ask_user` tool |
 | `AGENTS.md` subagent contract | `agents/*.agent.md` spawned through `task` |
 | `/loop` | autopilot mode, or `save_session_automation` for a fixed tick |

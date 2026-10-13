@@ -1,7 +1,6 @@
 ### Worktree and simulator cleanup
 
-Before a transcript audit delegate launches, invoke [context-routing](../../context-routing/SKILL.md) with `how explorer`.
-Copy its resolved arguments and declaration for the candidate's session slice.
+Use `how explorer` for a transcript audit delegate.
 
 **You own the disk and the safety gate.** Prune merged or abandoned git worktrees and stale iOS simulators to reclaim space. Deletion is irreversible, so every step guards against deleting something in use or holding uncommitted work.
 

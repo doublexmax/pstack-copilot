@@ -1,7 +1,6 @@
 ### Autonomous run
 
-Before a watcher or other delegate launches, invoke [context-routing](../../context-routing/SKILL.md).
-Use the execution playbook's role or `judgment and prose` for a watcher, then copy the resolved arguments and declaration.
+Use the execution playbook's role for implementation and `judgment and prose` for a watcher.
 
 **You own the exit condition. Define done, then drive to it without stopping.** For "going to bed" / "run until done" / "keep going until X".
 

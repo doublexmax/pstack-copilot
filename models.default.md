@@ -2,7 +2,7 @@
 
 This is the checked-in default panel for the Copilot port. `setup-pstack` writes your
 personal overrides to `~/.copilot/pstack-models.md`, outside this repo so `git pull` never
-conflicts with it. Every skill reads the override file first and falls back to these values.
+conflicts with it. The context resolver applies the override file and falls back to these values.
 
 A model choice is two fields on the `task` tool, `model` and `reasoning_effort`.
 Every row below gives both.
@@ -27,7 +27,8 @@ maximums, not downgrades.
 
 Aliases `inherit-parent` and `auto` both omit `model` and `reasoning_effort` on the `task` call.
 Copilot selects the child model from its preferences or the parent. Omission does not prove parent inheritance.
-An unresolved child model blocks the default `always_long` policy. Select an explicit role model or change policy through `/setup-pstack`.
+The shipped `adaptive` policy keeps unresolved choices launchable at the default tier.
+The opt-in `always_long` policy blocks them. Select an explicit role model or change policy through `/setup-pstack`.
 
 ```
 feature, refactoring:                   grok-4.7 / xhigh
@@ -61,12 +62,12 @@ role at once, clamped to each model's maximum.
 Context is independent of model and reasoning effort. Before every delegate, use
 [context-routing](./skills/context-routing/SKILL.md) to resolve the persistent policy
 against the actual workload and current host/model evidence.
-`context.default.json` selects `always_long`. Personal choices live in
+`context.default.json` selects `adaptive`. Personal choices live in
 `pstack-context.json` under the active Copilot configuration directory.
-The default requires supported long context for every workload.
-Users can select `default` or `adaptive` through `/setup-pstack`.
+Users can select `default` or the strict `always_long` policy through `/setup-pstack`.
 Under adaptive policy, bounded work uses `default`; eligible large-corpus work uses `long_context`.
 Do not infer selectable tiers from nominal capacity or reasoning `max`.
+Declared capability and workload sources are agent assertions, not independent verification.
 This does not resize the parent or change any model/effort role line.
 
 ## Panel composition

@@ -291,7 +291,13 @@ export function routeToolCall(event, { root = ROOT, home = copilotHome() } = {})
 
 export function configurePolicy({ defaultMode, roles = {} }, { root = ROOT, home = copilotHome() } = {}) {
   const context = loadContextPolicy({ root, home });
-  const next = { ...context.policy, default: defaultMode ?? context.policy.default, roles: { ...context.policy.roles, ...roles } };
+  const raw = readOptional(context.personalFile);
+  const personal = raw === null ? { schemaVersion: 1 } : policy(raw, context.personalFile, context.roles);
+  const next = {
+    ...personal,
+    ...(defaultMode === undefined ? {} : { default: defaultMode }),
+    ...(Object.keys(roles).length ? { roles: { ...personal.roles, ...roles } } : {}),
+  };
   const body = `${JSON.stringify(next, null, 2)}\n`;
   policy(body, context.personalFile, context.roles);
   if (readOptional(context.personalFile) !== body) {
@@ -339,7 +345,7 @@ function parseArgs(argv) {
   }
   const allowed = command === 'resolve'
     ? ['inputs', 'roles', 'role', 'workload', 'why', 'member', 'model', 'effort', 'support', 'source', 'hostContext', 'hostSource', 'target']
-    : command === 'set-policy' ? ['inputs', 'roles', 'defaultMode'] : ['inputs', 'roles'];
+    : command === 'set-policy' ? ['inputs', 'roles', 'defaultMode'] : ['inputs', 'roles', 'role'];
   for (const key of Object.keys(values)) if (!allowed.includes(key)) throw new Error(`${command} does not accept ${key}`);
   if (command !== 'resolve' && values.inputs.length) throw new Error(`${command} does not accept --input`);
   if (command !== 'set-policy' && Object.keys(values.roles).length) throw new Error(`${command} does not accept --role-policy`);
@@ -351,7 +357,14 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const { command, values } = parseArgs(process.argv.slice(2));
     const result = command === 'resolve' ? resolveRole(values)
       : command === 'set-policy' ? configurePolicy(values) : loadContextPolicy();
-    console.log(JSON.stringify(command === 'show' ? { policy: result.policy, policyFile: result.policyFile } : result));
+    if (command === 'show' && values.role !== undefined) {
+      const selected = selectedModels(result, copilotHome());
+      const models = selected.choices.get(values.role);
+      if (!models) throw new Error(`unknown role ${values.role}`);
+      console.log(JSON.stringify({ role: values.role, models, diagnostics: selected.diagnostics }));
+    } else {
+      console.log(JSON.stringify(command === 'show' ? { policy: result.policy, policyFile: result.policyFile } : result));
+    }
     if (result.decision?.status === 'blocked') process.exitCode = 1;
   } catch (error) {
     console.error(JSON.stringify({ status: 'error', error: error.message }));

@@ -47,6 +47,22 @@ test('does not accept a requested tier as proof of the effective tier', () => {
   assert.throws(() => inspectDispatch(data), /runtime did not apply/);
 });
 
+test('omitted model and effort preserve Copilot selection and report the effective configuration', () => {
+  const data = fixture();
+  delete data.events[1].data.toolRequests[0].arguments.model;
+  delete data.events[1].data.toolRequests[0].arguments.reasoning_effort;
+  delete data.observations[0].toolArgs.model;
+  delete data.observations[0].toolArgs.reasoning_effort;
+  data.expectedModel = 'gpt-5.4-mini';
+  data.events[3].data.model = 'gpt-5.4-mini';
+  data.events[3].data.reasoningEffort = 'low';
+  const report = inspectDispatch(data);
+  assert.equal(report.delegates[0].model, 'gpt-5.4-mini');
+  assert.equal(report.delegates[0].reasoningEffort, 'low');
+  data.observations[0].toolArgs.reasoning_effort = 'max';
+  assert.throws(() => inspectDispatch(data), /hook changed unrelated tool arguments/);
+});
+
 test('rejects a denied or incomplete attempt even when a later delegate succeeds', () => {
   for (const denied of [false, true]) {
     const data = fixture();

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { checkBindings, checkResolver, REQUIRED_BINDINGS } from './check-context-routing.mjs';
+import { checkBindings, REQUIRED_BINDINGS } from './check-context-routing.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 
@@ -88,29 +88,10 @@ test('instructions to launch an app for a task are not delegate instructions', (
   writeFileSync(file, 'Launch the CLI and exercise its feature. This app task is not a delegation.\n');
   assert.deepEqual(checkBindings(dir), []);
 });
-test('the behavioral source gate rejects an empty resolver rather than trusting a reference', async (t) => {
+test('playbooks inherit the shared delegate contract instead of requiring repeated preambles', (t) => {
   const dir = fixture(t);
-  mkdirSync(join(dir, 'scripts'));
-  writeFileSync(join(dir, 'scripts', 'context-routing.mjs'), 'export function resolveRole() { return undefined; }\n');
-  assert.deepEqual(await checkResolver(dir), ['context resolver: bounded did not return the required literal arguments and reason']);
-});
-
-test('the gate calls the real resolver and observes both literal dispatch outputs', async (t) => {
-  const dir = fixture(t);
-  mkdirSync(join(dir, 'scripts'));
-  for (const name of ['models.default.md', 'context.default.json', 'scripts/context-routing.mjs']) {
-    copyFileSync(join(root, name), join(dir, name));
-  }
-  assert.deepEqual(await checkResolver(dir), []);
-});
-
-test('a missing policy file fails the behavioral package gate', async (t) => {
-  const dir = fixture(t);
-  mkdirSync(join(dir, 'scripts'));
-  for (const name of ['models.default.md', 'scripts/context-routing.mjs']) {
-    copyFileSync(join(root, name), join(dir, name));
-  }
-  const errors = await checkResolver(dir);
-  assert.equal(errors.length, 1);
-  assert.match(errors[0], /context\.default\.json/);
+  const file = join(dir, 'skills', 'poteto-mode', 'playbooks', 'feature.md');
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, 'Delegate implementation using the feature, refactoring role.\n');
+  assert.deepEqual(checkBindings(dir), []);
 });

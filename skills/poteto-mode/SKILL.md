@@ -95,12 +95,12 @@ Read the leaf skill in full for any principle you apply. Each entry names when i
 
 **Use `agent_type: "poteto-worker"` for any subagent you spawn inside a playbook step** (code-writing delegates, ad-hoc helpers). The `poteto` agent and `poteto-worker` route through the same wrapper. Routed workflow skills (`how`, `why`, `interrogate`, `reflect`, `swarm`) set their own `agent_type` for diverse-model review. Respect what the skill prescribes, don't override to `poteto-worker`.
 
-**Defaults for every `task` call.** Read `models.default.md` in the pstack fork, then apply per-role overrides from `~/.copilot/pstack-models.md`. That override file is optional; a missing or unreadable one is not an error and needs no comment. Then:
+**Defaults for every `task` call.** The context resolver owns model-map parsing and personal override precedence. Use the playbook's role and copy its returned launch arguments. Then:
 
 - `mode: "background"` so fan-out is real parallelism. Launch every member of a wave in one message. After launching, keep doing your own independent work rather than polling `read_agent`.
-- `model` and `reasoning_effort` set explicitly per role. Copilot splits what upstream encoded in one slug into these two fields. A role of `inherit-parent` or `auto` means omit both.
+- Copy `model`, `reasoning_effort`, and `context_tier` from the resolver. An alias omits model and effort.
 - File pointers, not inlined context. Subagents share your filesystem, so hand them paths.
-- `context_tier` comes from **context-routing** for this delegate's policy, workload, and exact-model evidence. A panel resolves each member separately.
+- A panel resolves each member separately.
 - No read-only flag exists. Where upstream said `readonly`, either use `agent_type: "explore"` for pure repo reading, or keep `general-purpose` and forbid writes in the prompt. Prefer the latter whenever the delegate needs MCP access or a specific model, because `explore` has neither.
 - Subagents can be multi-turn. `write_agent` sends a follow-up into the same context and `read_agent` collects it. Reach for that only under the reuse test below.
 

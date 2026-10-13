@@ -59,12 +59,12 @@ two steps:
 1. run [`/setup-pstack`](./skills/setup-pstack/SKILL.md) and choose which models you want.
 2. describe your task. the mode is already on.
 
-delegate context defaults to `always_long`, which requires supported long context
-for the selected child model. [`/setup-pstack`](./skills/setup-pstack/SKILL.md)
-can switch to `adaptive` or `default` without rewriting model or effort choices.
-adaptive uses default context for bounded inputs and long context for supported
-large-corpus work. omitted child models stay unresolved, so aliases block
-`always_long` rather than borrowing the parent's capability evidence. see
+delegate context defaults to `adaptive`. bounded inputs and unresolved child models
+use default context. supported large-corpus work can use long context.
+[`/setup-pstack`](./skills/setup-pstack/SKILL.md) can switch to `default` or the strict
+`always_long` opt-in without rewriting model or effort choices.
+`always_long` blocks aliases and unproven long-context support.
+capability and workload declarations are agent assertions, not independent proof. see
 [the setup guide](./docs/guide/01-setup.md#configure-delegated-context).
 
 `/poteto-mode` still works if you skipped the always-on step or want to name it
@@ -298,7 +298,7 @@ copilot already has a great plan mode which works great with pstack. but persona
 
 type [`/automate-me`](./skills/automate-me/SKILL.md). it mines your recent transcripts, drafts a `<your-name>-mode` skill from how you've actually worked, and routes through pstack underneath. you keep pstack as the base and end up with your own routing skill alongside `poteto-mode`.
 
-models are configurable too. type [`/setup-pstack`](./skills/setup-pstack/SKILL.md). it detects the models you have access to and writes `~/.copilot/pstack-models.md`, a small override file mapping each role (code, judgment, the review panels) to a model. every skill that delegates opens it by path and falls back to sensible defaults when a line is absent, so you override only what you want.
+models are configurable too. type [`/setup-pstack`](./skills/setup-pstack/SKILL.md). it detects the models you have access to and writes `~/.copilot/pstack-models.md`, a small override file mapping each role (code, judgment, the review panels) to a model. the context resolver reads it and falls back to checked-in defaults when a line is absent, so you override only what you want.
 
 an override file written before this sync pins the old default models. delete those role lines, or delete the file, then run [`/setup-pstack`](./skills/setup-pstack/SKILL.md) again. a rerun keeps any role whose model differs from the default.
 

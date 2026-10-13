@@ -58,17 +58,26 @@ function event(result, args = {}) {
   };
 }
 
-test('missing optional files require long context even for bounded work', (t) => {
+test('missing optional files preserve bounded launches with explicit models and aliases', (t) => {
   const f = fixture(t, null);
   const result = resolveRole(request(), f);
   assert.deepEqual(result.toolArguments, {
-    model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: 'long_context',
+    model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: 'default',
   });
   assert.deepEqual(result.decision, {
     role: 'feature, refactoring', effectiveModel: 'gpt-6.1-sol', workload: 'bounded',
-    policy: 'always_long', evidence: [
+    policy: 'adaptive', evidence: [
       join(f.root, 'context.default.json'), 'Current task context_tier schema', 'Current exact-model task schema',
-    ], diagnostics: [], status: 'resolved', tier: 'long_context', reason: 'policy-long',
+    ], diagnostics: [], status: 'resolved', tier: 'default', reason: 'bounded-work',
+  });
+  for (const alias of ['auto', 'inherit-parent']) {
+    const resolved = resolveRole(request({ model: alias, effort: undefined, support: 'unknown' }), f);
+    assert.deepEqual(resolved.toolArguments, { context_tier: 'default' });
+    assert.equal(resolved.decision.effectiveModel, null);
+    assert.deepEqual(routeToolCall(event(resolved), f).output, { modifiedArgs: event(resolved).toolArgs });
+  }
+  assert.deepEqual(resolveRole(request({ support: 'unsupported' }), f).toolArguments, {
+    model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: 'default',
   });
 });
 
@@ -343,6 +352,34 @@ test('policy-only configuration is idempotent and preserves a full 17-role model
   assert.equal(readFileSync(join(f.home, 'settings.json'), 'utf8'), '{"contextTier":"default"}\n');
 });
 
+test('role-only updates persist only personal overrides and keep inheriting shipped changes', (t) => {
+  const f = fixture(t, null);
+  writeFileSync(join(f.root, 'context.default.json'), JSON.stringify({
+    schemaVersion: 1, default: 'always_long', roles: { 'how explainer': 'default' },
+  }));
+  for (const personal of [null, { schemaVersion: 1 }, { schemaVersion: 1, roles: { 'bug-fix': 'adaptive' } }]) {
+    if (personal === null) rmSync(join(f.home, 'pstack-context.json'), { force: true });
+    else f.write('pstack-context.json', personal);
+    const changed = configurePolicy({ roles: { 'swarm workers': 'default' } }, f);
+    assert.deepEqual(JSON.parse(readFileSync(changed.policyFile, 'utf8')), {
+      schemaVersion: 1, ...(personal ?? {}), roles: { ...personal?.roles, 'swarm workers': 'default' },
+    });
+    assert.equal(loadContextPolicy(f).policy.default, 'always_long');
+  }
+  writeFileSync(join(f.root, 'context.default.json'), JSON.stringify({
+    schemaVersion: 1, default: 'adaptive', roles: { 'how explainer': 'always_long' },
+  }));
+  assert.deepEqual(loadContextPolicy(f).policy, {
+    schemaVersion: 1, default: 'adaptive',
+    roles: { 'how explainer': 'always_long', 'bug-fix': 'adaptive', 'swarm workers': 'default' },
+  });
+  f.write('pstack-context.json', { schemaVersion: 1, default: 'default' });
+  configurePolicy({}, f);
+  assert.deepEqual(JSON.parse(readFileSync(join(f.home, 'pstack-context.json'), 'utf8')), {
+    schemaVersion: 1, default: 'default',
+  });
+});
+
 test('the executable resolver returns tool arguments and rejects invalid CLI options', (t) => {
   const f = fixture(t);
   const args = [
@@ -355,10 +392,37 @@ test('the executable resolver returns tool arguments and rejects invalid CLI opt
   assert.deepEqual(JSON.parse(result.stdout).toolArguments, {
     model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: 'default',
   });
+
   for (const extra of [['--role', 'bug-fix'], ['--member', '1.5'], ['--nope', 'value'], ['--default', 'adaptive'], ['--parent-model', 'gpt-6.1-sol']]) {
     const failed = f.run(...args, ...extra);
     assert.equal(failed.status, 1);
     assert.equal(failed.stdout, '');
     assert.equal(JSON.parse(failed.stderr).status, 'error');
   }
+});
+
+test('role discovery and resolution use the same configured panel, including aliases', (t) => {
+  const f = fixture(t);
+  f.write('pstack-models.md', 'arena runners: gpt-6.1-sol / high, auto\n');
+  const shown = f.run('show', '--role', 'arena runners');
+  assert.equal(shown.status, 0, shown.stderr);
+  assert.deepEqual(JSON.parse(shown.stdout), {
+    role: 'arena runners', models: [{ model: 'gpt-6.1-sol', reasoning_effort: 'high' }, { alias: 'auto' }], diagnostics: [],
+  });
+  for (const [member, expected] of [
+    [0, { model: 'gpt-6.1-sol', reasoning_effort: 'high', context_tier: 'default' }],
+    [1, { context_tier: 'default' }],
+  ]) {
+    const resolved = f.run('resolve', '--role', 'arena runners', '--member', String(member),
+      '--workload', 'bounded', '--why', 'Read one helper.', '--host-context', 'supported', '--host-source', 'Current schema');
+    assert.equal(resolved.status, 0, resolved.stderr);
+    assert.deepEqual(JSON.parse(resolved.stdout).toolArguments, expected);
+  }
+  const defaults = f.run('show', '--role', 'how explainer');
+  assert.equal(defaults.status, 0, defaults.stderr);
+  assert.deepEqual(JSON.parse(defaults.stdout).models, [{ model: 'claude-opus-5.5', reasoning_effort: 'max' }]);
+  const invalid = f.run('show', '--role', 'not a role');
+  assert.equal(invalid.status, 1);
+  assert.equal(invalid.stdout, '');
+  assert.match(JSON.parse(invalid.stderr).error, /unknown role/);
 });

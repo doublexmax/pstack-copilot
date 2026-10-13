@@ -85,9 +85,10 @@ export function runHook(phase, event, { root = ROOT, home = copilotHome(), routi
   if (!Number.isSafeInteger(event.timestamp) || event.timestamp < 0) throw new Error('invalid hook timestamp');
   if (phase === 'userPromptSubmitted') {
     const command = applyCommand(event.prompt, state);
+    if (command === null) return { output: {} };
     const result = {
       scope: existsSync(state) ? 'opt-out' : 'session',
-      reason: command === 'off' ? 'session-opt-out' : command === 'on' ? 'explicit-re-entry' : 'not-a-routing-command',
+      reason: command === 'off' ? 'session-opt-out' : 'explicit-re-entry',
     };
     return respond(home, phase, event, result);
   }

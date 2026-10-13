@@ -19,9 +19,14 @@ With hooks disabled, these commands do not update the native marker. Follow the 
    The resolver reads `context.default.json`, the existing model map, and the optional personal `pstack-context.json`.
    `COPILOT_HOME` selects the personal directory. Without it, use the normal user `.copilot` directory.
 2. Name the exact configured role. Keep combined labels such as `feature, refactoring` intact.
+   Run `node "<pstack>\scripts\context-routing.mjs" show --role "<role>"` to inspect its selected model choices.
+   The resolver owns model-map parsing, personal overrides, and checked-in defaults. Do not select them again in the workflow.
    Select panel members separately with zero-based `--member`.
    Use `judgment and prose` for an ad-hoc reviewer unless the workflow names another role.
-   Preserve the workflow's selected model and effort. For an explicit race or fallback, pass both `--model` and `--effort`.
+   Keep workflow-specific panel selection and fallback rules. For an explicit race or fallback, pass both `--model` and `--effort`.
+   If the tool rejects a configured model ID, use the role's checked-in default and report the fallback.
+   If that default is rejected, use the closest valid ID of the same family from the tool error.
+   Re-resolve the fallback pair before retrying. Do not treat aliases as rejected IDs or rewrite the user's model map.
    Aliases `auto` and `inherit-parent` omit both launch fields and leave the child model unresolved.
    Copilot may select a per-agent preference or a custom-agent model before falling back to the parent.
 3. Classify the delegate's actual inputs, not its role, prompt length, or model family.
@@ -62,12 +67,17 @@ node "<pstack>\scripts\context-routing.mjs" resolve `
 Adaptive selects `default` for bounded work.
 It selects `long_context` for eligible large-corpus work.
 The `default` policy selects the default tier regardless of workload.
-The shipped default is `always_long`. It selects `long_context` regardless of workload, with proven host and exact-model support.
+The shipped default is `adaptive`. Existing aliases remain launchable at the default tier.
+`always_long` is a strict opt-in. It selects `long_context` regardless of workload, with declared host and exact-model support.
 Under adaptive policy, unknown or unsupported model support selects `default` with an explicit diagnostic.
 Known unavailable models block. `always_long` blocks when support is unproven.
 An omitted child model stays unresolved even with parent capability evidence. Adaptive selects default; `always_long` blocks.
 To use `always_long` with an aliased role, choose an explicit role model through `/setup-pstack`, or change the context policy there.
 The exact role override wins over the global policy.
+
+Capability sources and workload reasons are caller assertions, not independently verified facts.
+The hook checks declaration structure, model identity, and policy consistency. It cannot prove the sources or classification are true.
+Do not present a routing decision as proof of autonomous routing quality.
 
 Native CLI hooks call the same resolver and can correct a missing or mismatched tier on a managed launch.
 They never grant tool permissions. Unmanaged calls remain untouched.
@@ -75,6 +85,7 @@ Missing or malformed declarations deny only calls that claim the reserved pstack
 Decisions appear in `pstack-context-decisions\<sessionId>` under the active Copilot home.
 Read the decision and report a downgrade or denial with its reason.
 Successful launches record decisions without injecting the full record into the conversation. Denials and mismatches remain visible.
+Ordinary user prompts create no decision records. Opt-out and re-entry commands still do.
 Post-hook arguments and effective `subagent.configured` metadata prove dispatch; original tool requests can retain pre-hook values.
 
 Disabled hooks, timeouts, unmarked launches, and an unavailable hook runtime can bypass native checks.

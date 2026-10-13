@@ -47,19 +47,17 @@ If no session resolves, write a tight digest of the conversation and pass that i
 
 One message, three `task` calls, `agent_type: "general-purpose"`, `mode: "background"`, explicit `model` and `reasoning_effort` on each. Do not use `agent_type: "explore"`. Reviewers need MCP access for context lookups (tickets, chat threads, observability traces referenced in the transcript), and `explore` has none. The prompt forbids file writes; the parent applies edits.
 
-Each reviewer and the synthesizer name a role line in `~/.copilot/pstack-models.md` and a default. Set `model` and `reasoning_effort` to that line's values, or to the default if the file or the line is missing. Omit both when the value is `auto` or `inherit-parent`. If the `task` tool rejects a model ID, use the default and say so. If it rejects the default, use the closest valid ID of the same family from its error message.
-
-| Lens | Role line | Default `model` | Prompt template |
-|---|---|---|---|
-| Judgment | `reflect judgment, divergent, synth` | `claude-opus-5.5 / max` | `references/judgment-reviewer.md` |
-| Tooling | `reflect tooling` | `gpt-5.6-sol / max` | `references/tooling-reviewer.md` |
-| Divergent | `reflect judgment, divergent, synth` | `claude-opus-5.5 / max` | `references/divergent-reviewer.md` |
+| Lens | Resolver role | Prompt template |
+|---|---|---|
+| Judgment | `reflect judgment, divergent, synth` | `references/judgment-reviewer.md` |
+| Tooling | `reflect tooling` | `references/tooling-reviewer.md` |
+| Divergent | `reflect judgment, divergent, synth` | `references/divergent-reviewer.md` |
 
 Pass each template verbatim, substituting the transcript path or digest where marked. Reviewers return findings in the `task` response body, collected with `read_agent`.
 
 ### 3. Synthesize
 
-One `task` call, `agent_type: "general-purpose"`, with `model` and `reasoning_effort` from the `reflect judgment, divergent, synth` line (default `claude-opus-5.5 / max`). Not `explore`; the synthesizer's quality check includes spot-verifying citations, which can require MCP access. Use `references/synthesizer.md` verbatim, with each reviewer's full output inlined where marked. The synthesizer returns a structured Accepted / Rejected / Backlog list.
+One `task` call with `agent_type: "general-purpose"` and resolved arguments for `reflect judgment, divergent, synth`. Not `explore`; the synthesizer's quality check includes spot-verifying citations, which can require MCP access. Use `references/synthesizer.md` verbatim, with each reviewer's full output inlined where marked. The synthesizer returns a structured Accepted / Rejected / Backlog list.
 
 ### 4. Structural enforcement check
 

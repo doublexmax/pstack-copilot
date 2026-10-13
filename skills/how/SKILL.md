@@ -10,8 +10,6 @@ Use `how explorer` or `how explainer` as the exact role. Classify each delegate'
 
 Explore the codebase to answer "how does X work?" questions. Produce architectural explanations at the level of a senior engineer onboarding onto a subsystem, enough to build a working mental model, not so much that it reads like annotated source code.
 
-Each spawn below names a role line in `~/.copilot/pstack-models.md` and a default. Set `model` and `reasoning_effort` to that line's values, or to the default if the file or the line is missing. Omit both when the value is `auto` or `inherit-parent`. If the `task` tool rejects a model ID, use the default and say so. If it rejects the default, use the closest valid ID of the same family from its error message.
-
 Every spawn below takes a read-only posture. The prompt forbids file writes, and the parent applies every edit.
 
 ## Step 1. Assess Complexity
@@ -28,7 +26,7 @@ When in doubt, take the simple path.
 Decompose the question into 2 to 4 exploration angles, each a distinct slice of the subsystem. Spawn all explorers in a single message:
 
 - `agent_type`: `"general-purpose"`
-- `model`: the `how explorer` line, default `grok-4.7 / xhigh`
+- role: `how explorer`
 - `mode`: `"background"`
 
 Each explorer gets the prompt in `references/explorer-prompt.md` with its angle filled in. Then go to Step 3.
@@ -38,7 +36,7 @@ Each explorer gets the prompt in `references/explorer-prompt.md` with its angle 
 Spawn one `task` subagent that explores and explains in one pass:
 
 - `agent_type`: `"general-purpose"`
-- `model`: the `how explainer` line, default `claude-opus-5.5 / max`
+- role: `how explainer`
 - `mode`: `"background"`
 
 Build its prompt from `references/explainer-prompt.md` without the explorer-findings section. Go to Step 4.
@@ -48,7 +46,7 @@ Build its prompt from `references/explainer-prompt.md` without the explorer-find
 Once all explorers have returned, spawn one `task` subagent to synthesize their findings into one explanation:
 
 - `agent_type`: `"general-purpose"`
-- `model`: the `how explainer` line, default `claude-opus-5.5 / max`
+- role: `how explainer`
 - `mode`: `"background"`
 
 Build its prompt from `references/explainer-prompt.md` with every explorer's findings filled in.

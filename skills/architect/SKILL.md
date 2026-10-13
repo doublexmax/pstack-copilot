@@ -32,7 +32,7 @@ Skip Phase A only when the work is genuinely greenfield with no surrounding syst
 
 Run the **arena** skill with the design-sketch task and the Phase A grounding artifacts. Pass `references/runner-prompt.md` as each runner's prompt. Each candidate produces a design package shaped per `references/rationale-template.md`.
 
-Take the runners from the `architect runners` line in `~/.copilot/pstack-models.md`, in place of the `arena runners` line. If the file or that line is missing, use `claude-opus-5.5 / max`, `gpt-5.6-sol / max`, `grok-4.7 / xhigh`, `gemini-3.8-flash / high`. Alias and rejected entries follow the runner rules in the **arena** skill's Phase A.
+Use `architect runners` in place of `arena runners` when inspecting and resolving the panel. Rejected entries follow the runner rules in the **arena** skill's Phase A.
 
 Design it twice. Require at least two structurally distinct candidates before synthesis, even when the first looks sufficient. This is the **exhaust-the-design-space** principle skill made concrete. Whole-shape alternatives, not point fixes inside one shape.
 

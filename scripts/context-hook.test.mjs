@@ -118,10 +118,17 @@ test('quoted prose, code, and extended commands do not change session opt-out', 
     'Explain "skip poteto mode".', '```\nskip poteto mode\n```', 'skip poteto mode for this example',
     'Please run /poteto-mode.', '/poteto-mode explain this',
   ]) {
-    assert.equal(runHook('userPromptSubmitted', envelope({ prompt }), f).record.reason, 'not-a-routing-command');
+    assert.deepEqual(runHook('userPromptSubmitted', envelope({ prompt }), f), { output: {} });
   }
   const state = join(f.home, 'session-state', 'session-1', 'files', 'pstack-context-opt-out');
   assert.equal(existsSync(state), false);
+  assert.equal(existsSync(join(f.home, 'pstack-context-decisions')), false);
+  runHook('userPromptSubmitted', envelope({ prompt: 'skip poteto mode' }), f);
+  const records = join(f.home, 'pstack-context-decisions', 'session-1');
+  const before = readdirSync(records);
+  assert.deepEqual(runHook('userPromptSubmitted', envelope({ prompt: 'Read one helper.' }), f), { output: {} });
+  assert.deepEqual(readdirSync(records), before);
+  assert.equal(existsSync(state), true);
   runHook('sessionStart', envelope({ initialPrompt: 'skip poteto mode', source: 'startup' }), f);
   assert.equal(existsSync(state), true);
   runHook('sessionStart', envelope({ initialPrompt: 'An example of /poteto-mode', source: 'resume' }), f);
