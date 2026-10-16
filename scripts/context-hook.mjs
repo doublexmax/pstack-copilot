@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -42,6 +42,7 @@ function applyCommand(prompt, file) {
 
 function record(home, phase, event, result) {
   const value = {
+    ...result.dispatch,
     schemaVersion: 1,
     event: phase,
     sessionId: event.sessionId,
@@ -49,7 +50,9 @@ function record(home, phase, event, result) {
     tool: event.toolName ?? null,
     scope: result.scope,
     name: event.toolArgs?.name ?? null,
-    ...(result.decision ?? { reason: result.reason }),
+    ...(result.decision ?? (result.dispatch ? {} : { reason: result.reason })),
+    ...(result.launchKey === undefined ? {} : { launchKey: result.launchKey }),
+    ...(result.dispatchRecord === undefined ? {} : { dispatchRecord: result.dispatchRecord }),
     ...(result.observedTier === undefined ? {} : { observedTier: result.observedTier, observation: result.observation }),
   };
   const body = `${JSON.stringify(value)}\n`;
@@ -70,7 +73,7 @@ function respond(home, phase, event, result) {
   try {
     return { output: result.output ?? {}, record: record(home, phase, event, result) };
   } catch (error) {
-    if (!['unmanaged', 'opt-out'].includes(result.scope)) throw error;
+    if (result.scope !== 'opt-out') throw error;
     return {
       output: result.output ?? {},
       record: { scope: result.scope, status: 'unrecorded', reason: 'diagnostics-write-failed' },
@@ -79,8 +82,51 @@ function respond(home, phase, event, result) {
   }
 }
 
+function launchKey(event) {
+  const args = event.toolName === 'task'
+    ? { ...event.toolArgs, context_tier: undefined }
+    : { ...event.toolArgs, kickoff: { ...event.toolArgs.kickoff, context_tier: undefined } };
+  const body = JSON.stringify([event.toolName, args], (key, value) =>
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? Object.fromEntries(Object.keys(value).sort().map((name) => [name, value[name]])) : value);
+  return createHash('sha256').update(body).digest('hex');
+}
+
+function observe(home, event) {
+  const dir = join(home, 'pstack-context-decisions', event.sessionId);
+  const key = launchKey(event);
+  const records = existsSync(dir) ? readdirSync(dir).filter((name) => name.endsWith('.json'))
+    .map((name) => ({ name, value: JSON.parse(readFileSync(join(dir, name), 'utf8')) })) : [];
+  const consumed = new Set(records.filter(({ value }) => value.event === 'postToolUse'
+    && value.timestamp !== event.timestamp).map(({ value }) => value.dispatchRecord));
+  const candidates = records.filter(({ name, value }) => value.event === 'preToolUse'
+    && value.launchKey === key && value.timestamp <= event.timestamp && !consumed.has(name)
+    && (value.status === 'resolved' || value.scope === 'opt-out'));
+  if (candidates.length !== 1) {
+    const reason = candidates.length ? 'ambiguous-dispatch-decision' : 'missing-dispatch-decision';
+    return {
+      output: { additionalContext: `Pstack context observation unverified: ${reason}.` },
+      record: record(home, 'postToolUse', event, {
+        scope: 'managed', launchKey: key, decision: { status: 'unverified', reason },
+      }),
+    };
+  }
+  const { name, value: dispatch } = candidates[0];
+  const launch = event.toolName === 'task' ? event.toolArgs : event.toolArgs.kickoff;
+  const observedTier = launch.context_tier ?? null;
+  const observation = observedTier === dispatch.tier ? 'matched' : 'mismatch';
+  const result = { scope: dispatch.scope, dispatch, dispatchRecord: name,
+    ...(dispatch.scope === 'opt-out' ? {} : { observedTier, observation }) };
+  return {
+    output: dispatch.scope !== 'opt-out' && observation === 'mismatch'
+      ? { additionalContext: `Pstack context mismatch: expected ${dispatch.tier}, observed ${observedTier ?? 'no tier'}.` } : {},
+    record: record(home, 'postToolUse', event, result),
+  };
+}
+
 export function runHook(phase, event, { root = ROOT, home = copilotHome(), routing } = {}) {
   if (!PHASES.has(phase)) throw new Error(`unknown hook event ${phase}`);
+  if (['preToolUse', 'postToolUse'].includes(phase) && !managed(event)) return { output: {} };
   const state = statePath(home, event.sessionId);
   if (!Number.isSafeInteger(event.timestamp) || event.timestamp < 0) throw new Error('invalid hook timestamp');
   if (phase === 'userPromptSubmitted') {
@@ -98,7 +144,7 @@ export function runHook(phase, event, { root = ROOT, home = copilotHome(), routi
       const result = { scope: 'opt-out', reason: 'session-opt-out' };
       return respond(home, phase, event, {
         ...result,
-        output: { additionalContext: 'Pstack context routing is off for this session. Leave delegate arguments unchanged. Submit the whole command /poteto-mode to re-enter. This opt-out persists on resume.' },
+        output: { additionalContext: `Pstack context routing is off for this session, including resume. Submit /poteto-mode to re-enter. State: ${state}.` },
       });
     }
     const context = routing.loadContextPolicy({ root, home });
@@ -107,14 +153,12 @@ export function runHook(phase, event, { root = ROOT, home = copilotHome(), routi
       output: { additionalContext: [
         'Pstack context routing is available. Before each pstack-managed task or session kickoff, invoke the context-routing skill.',
         `Policy file is ${context.policyFile}. Default policy is ${context.policy.default}.`,
-        'Use the canonical resolver and copy its literal toolArguments and PSTACK_CONTEXT_V1 declaration. Native hooks also check managed launches.',
-        'Reserve pstack- task names for managed launches. Unmanaged calls remain unchanged. The whole command skip poteto mode opts this session out; /poteto-mode re-enters.',
         `Machine-readable decisions are in ${join(home, 'pstack-context-decisions', event.sessionId)}.`,
-        'This does not change the parent context tier. Disabled hooks and hook timeouts can bypass native checks.',
       ].join('\n') },
       record: record(home, phase, event, result),
     };
   }
+  if (phase === 'postToolUse') return observe(home, event);
   const optedOut = existsSync(state);
   let result;
   try {
@@ -128,21 +172,7 @@ export function runHook(phase, event, { root = ROOT, home = copilotHome(), routi
       output: { permissionDecision: 'deny', permissionDecisionReason: `pstack context routing: ${error.message}` },
     };
   }
-  if (phase === 'postToolUse') {
-    if (result.scope !== 'managed') return respond(home, phase, event, { ...result, output: {} });
-    const launch = event.toolName === 'task' ? event.toolArgs : event.toolArgs.kickoff;
-    result.observedTier = launch?.context_tier ?? null;
-    result.observation = result.decision.status === 'resolved' && result.observedTier === result.decision.tier
-      ? 'matched' : 'mismatch';
-    const logged = record(home, phase, event, result);
-    const output = result.decision.status === 'blocked'
-      ? { additionalContext: `Pstack context routing denied: ${result.decision.error ?? result.decision.reason}.` }
-      : result.observation === 'mismatch'
-      ? { additionalContext: `Pstack context mismatch: expected ${result.decision.tier}, observed ${result.observedTier ?? 'no tier'}.` }
-      : {};
-    return { output, record: logged };
-  }
-  return respond(home, phase, event, result);
+  return respond(home, phase, event, { ...result, launchKey: launchKey(event) });
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -160,7 +190,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       && existsSync(statePath(home, event.sessionId));
     const needsRouting = (!optedOut || wholeCommand(event.initialPrompt) === 'on')
       && (phase === 'sessionStart' && wholeCommand(event.initialPrompt) !== 'off'
-      || ['preToolUse', 'postToolUse'].includes(phase));
+      || phase === 'preToolUse');
     const routing = needsRouting
       ? await import(pathToFileURL(join(root, 'scripts', 'context-routing.mjs')).href) : undefined;
     const result = runHook(phase, event, { root, home, routing });

@@ -11,13 +11,16 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const options = {};
 for (let i = 2; i < process.argv.length; i += 2) {
   const name = process.argv[i];
-  if (!['--cli', '--out', '--model', '--case', '--policy'].includes(name) || !process.argv[i + 1]) {
-    throw new Error('usage: node verify-context-routing.mjs --cli <binary> --out <new-directory> [--model <id>] [--policy adaptive|default|always_long] [--case bounded|small-corpus|large-corpus|opt-out|correction|unmanaged]');
+  if (!['--cli', '--out', '--model', '--effort', '--case', '--policy'].includes(name) || !process.argv[i + 1]) {
+    throw new Error('usage: node verify-context-routing.mjs --cli <binary> --out <new-directory> [--model <id> --effort <effort>] [--policy adaptive|default|always_long] [--case bounded|small-corpus|large-corpus|opt-out|correction|unmanaged]');
   }
   if (options[name]) throw new Error(`duplicate option ${name}`);
   options[name] = process.argv[i + 1];
 }
 assert.ok(options['--cli'] && options['--out'], '--cli and --out are required');
+assert.ok(!options['--model'] || options['--effort'], '--model requires --effort supported by that model');
+const effort = options['--effort'] ?? 'max';
+assert.ok(['none', 'low', 'medium', 'high', 'xhigh', 'max'].includes(effort), 'invalid reasoning effort');
 assert.ok(process.env.COPILOT_GITHUB_TOKEN || process.env.GH_TOKEN || process.env.GITHUB_TOKEN,
   'provide authentication in the process environment; the verifier never reads or writes credentials');
 const cli = resolve(options['--cli']);
@@ -51,8 +54,8 @@ function prepare(name) {
   mkdirSync(join(home, 'agents'), { recursive: true });
   writeFileSync(join(home, 'settings.json'), `${JSON.stringify({ skillDirectories: [join(ROOT, 'skills')], contextTier: 'default' }, null, 2)}\n`);
   const models = readFileSync(join(ROOT, 'models.default.md'), 'utf8').match(/```\r?\n([\s\S]*?)\r?\n```/)[1]
-    .replace(/^how explainer:\s*.+$/m, `how explainer: ${model} / max`)
-    .replace(/^how explorer:\s*.+$/m, `how explorer: ${model} / max`);
+    .replace(/^how explainer:\s*.+$/m, `how explainer: ${model} / ${effort}`)
+    .replace(/^how explorer:\s*.+$/m, `how explorer: ${model} / ${effort}`);
   writeFileSync(join(home, 'pstack-models.md'), `${models}\n`);
   if (options['--policy']) configurePolicy({ defaultMode: options['--policy'] }, { home });
   const policy = loadContextPolicy({ home }).policy.default;
@@ -86,7 +89,7 @@ function prepare(name) {
 
 function run(f, label, prompt, resume) {
   const args = [
-    '--model', model, '--reasoning-effort', 'max', '--context', 'default',
+    '--model', model, '--reasoning-effort', effort, '--context', 'default',
     ...(f.protocolOnly ? ['--no-custom-instructions'] : []),
     '--no-auto-update', '--no-remote', '--no-remote-export', '--no-ask-user', '--disable-builtin-mcps',
     '--available-tools', 'task', 'skill', 'view', 'glob', 'rg', 'powershell', 'read_agent', 'sql',
@@ -142,13 +145,13 @@ for (const name of cases) {
   if (name === 'correction' || name === 'unmanaged') {
     console.log(`running native ${name} dispatch`);
     const plan = name === 'correction' ? resolveRole({
-      role: 'how explainer', model, effort: 'max', workload: 'large-corpus',
+      role: 'how explainer', model, effort, workload: 'large-corpus',
       why: 'Compare the model, policy, and hook contracts together.', inputs: ['models.default.md', 'context.default.json', 'scripts\\context-hook.mjs'],
       hostContext: true, hostSource: 'Current CLI task context field, verified by natural workflow dispatch',
       support: 'supported', source: 'Exact-model long-context task support verified on this CLI by natural corpus dispatch',
     }, { home: f.home }) : null;
     const args = {
-      agent_type: 'general-purpose', mode: 'sync', model, reasoning_effort: 'max',
+      agent_type: 'general-purpose', mode: 'sync', model, reasoning_effort: effort,
       context_tier: name === 'correction' && plan.decision.tier === 'long_context' ? 'default' : 'long_context',
       name: name === 'correction' ? 'pstack-correction-proof' : 'ordinary-proof',
       description: 'Read the contracts',
@@ -161,8 +164,11 @@ for (const name of cases) {
     assert.ok(report.delegates.every((delegate) => delegate.requestedTier
       === (name === 'correction' && tier === 'long_context' ? 'default' : 'long_context')));
     if (name === 'correction') {
-      assert.ok(decisions(f, result.sessionId).some((record) => record.name === args.name
+      const records = decisions(f, result.sessionId);
+      assert.ok(records.some((record) => record.name === args.name
         && record.status === 'resolved' && record.reason === plan.decision.reason));
+      assert.ok(records.some((record) => record.event === 'postToolUse' && record.name === args.name
+        && record.observation === 'matched' && record.dispatchRecord), 'missing dispatch-bound native observation');
     }
     writeFileSync(join(f.dir, 'dispatch-evidence.json'), `${JSON.stringify(report, null, 2)}\n`);
     reports.push({ case: name, ...report, ...(name === 'correction'
@@ -187,6 +193,8 @@ for (const name of cases) {
       assert.ok(records.some((record) => record.event === 'preToolUse' && record.status === 'resolved'
         && record.name === delegate.name && record.effectiveModel === delegate.model
         && record.workload === workload && record.tier === delegate.effectiveTier), 'missing delegate-bound workload decision');
+      assert.ok(records.some((record) => record.event === 'postToolUse' && record.name === delegate.name
+        && record.observation === 'matched' && record.dispatchRecord), 'missing dispatch-bound native observation');
     }
     writeFileSync(join(f.dir, 'dispatch-evidence.json'), `${JSON.stringify(report, null, 2)}\n`);
     reports.push({ case: name, policy: f.policy, ...report, decisionDirectory: join(f.home, 'pstack-context-decisions', result.sessionId) });
@@ -197,7 +205,7 @@ for (const name of cases) {
     assert.ok(existsSync(marker), 'whole-command opt-out did not persist');
     const probe = [
       'Use task exactly once with agent_type general-purpose, mode sync,',
-      `model ${model}, reasoning_effort max, context_tier long_context, name pstack-opt-out-proof,`,
+      `model ${model}, reasoning_effort ${effort}, context_tier long_context, name pstack-opt-out-proof,`,
       'description Read one file, and prompt Read models.default.md with view and return OPT_OUT_PROOF.',
       'Do not invoke any skills or add a pstack declaration. Do not write files or run a shell. Wait for its result.',
     ].join(' ');
@@ -219,7 +227,7 @@ const filesAfter = artifactFiles();
 assert.deepEqual(filesAfter, filesBefore, 'feature source files changed during verification; the run is not artifact-bound');
 const evidence = {
   status: 'PASS', observedAt: new Date().toISOString(),
-  cli, model, branch: execFileSync('git', ['-C', ROOT, 'branch', '--show-current'], { encoding: 'utf8' }).trim(),
+  cli, model, effort, branch: execFileSync('git', ['-C', ROOT, 'branch', '--show-current'], { encoding: 'utf8' }).trim(),
   headCommit: headBefore,
   headAfter: execFileSync('git', ['-C', ROOT, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
   reports, files: filesBefore, filesAfter, sourceStable: true,

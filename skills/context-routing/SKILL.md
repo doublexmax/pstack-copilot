@@ -80,6 +80,8 @@ The hook checks declaration structure, model identity, and policy consistency. I
 Do not present a routing decision as proof of autonomous routing quality.
 
 Native CLI hooks call the same resolver and can correct a missing or mismatched tier on a managed launch.
+The pre-hook persists the dispatch-time decision. The post-hook observes that decision without rereading current policy or importing the resolver.
+Missing dispatch records or indistinguishable in-flight launches produce an unverified observation, not a newly computed denial.
 They never grant tool permissions. Unmanaged calls remain untouched.
 Missing or malformed declarations deny only calls that claim the reserved pstack scope.
 Decisions appear in `pstack-context-decisions\<sessionId>` under the active Copilot home.
@@ -87,6 +89,7 @@ Read the decision and report a downgrade or denial with its reason.
 Successful launches record decisions without injecting the full record into the conversation. Denials and mismatches remain visible.
 Ordinary user prompts create no decision records. Opt-out and re-entry commands still do.
 Post-hook arguments and effective `subagent.configured` metadata prove dispatch; original tool requests can retain pre-hook values.
+The binding checker is a structural lint for instructions and links, not proof that agents follow this contract.
 
 Disabled hooks, timeouts, unmarked launches, and an unavailable hook runtime can bypass native checks.
 Copying the resolver's explicit arguments remains necessary.

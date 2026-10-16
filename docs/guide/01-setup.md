@@ -87,7 +87,7 @@ Run:
 /setup-pstack
 ```
 
-[`/setup-pstack`](../../skills/setup-pstack/SKILL.md) detects the models you have access to, shows you each role (code delegates, judgment, the review panels), and asks what you want. Answer the questions. It writes `~/.copilot/pstack-models.md`, which the context resolver reads.
+[`/setup-pstack`](../../skills/setup-pstack/SKILL.md) detects the models you have access to, shows you each role (code delegates, judgment, the review panels), and asks what you want. Answer the questions. It writes `pstack-models.md` under `COPILOT_HOME`, or `~/.copilot` when unset. The context resolver reads the same file.
 
 You only override what you care about. A role with no line in the rule keeps the skill's default. To restore a default, delete that role's line. A rerun of `/setup-pstack` keeps any role whose model differs from the default. A rule written before 0.15.3 pins the old default models, so delete those role lines, or delete the file, then run `/setup-pstack` again.
 
@@ -118,6 +118,7 @@ node "$env:USERPROFILE\.copilot\pstack\scripts\context-routing.mjs" set-policy -
 ```
 
 Use `show` to print the effective policy and its source.
+It also returns `modelFile` and `personalFile`, the active model and personal policy paths used by setup.
 Use `show --role "how explainer"` to inspect the selected model choices without reimplementing model-map precedence.
 Use `--role-policy "how explainer=default"` with `set-policy` for an exact role override.
 Personal policy lives in `pstack-context.json` under `COPILOT_HOME`, or your user `.copilot` directory when that variable is unset.
@@ -135,6 +136,9 @@ For example:
 
 An omitted global policy inherits `context.default.json`. Exact role overrides take precedence.
 Role-only updates preserve omitted fields. They do not copy inherited defaults or role settings into your personal file.
+To restore a role's inheritance, remove its key from `roles` in the returned `personalFile`.
+To inherit the shipped global default again, remove the `default` key. Keep `schemaVersion: 1` and unrelated choices.
+Do not edit the shipped file when `policyFile` points to it. Changing the global policy does not remove role overrides.
 
 | Policy | Behavior |
 | --- | --- |
@@ -152,6 +156,8 @@ Malformed policy, duplicate keys, and unknown role overrides fail with an error.
 
 Managed launches copy the resolver's arguments and declaration.
 Native hooks also check them and record decisions in `pstack-context-decisions\<sessionId>`.
+Post-launch observations compare against the saved dispatch decision, even if policy changes while the delegate runs.
+Missing or ambiguous dispatch evidence produces an unverified observation. The binding checker only lints instruction structure.
 Submit the whole command `skip poteto mode` to opt out, or `/poteto-mode` to re-enter.
 Native hooks preserve that opt-out across same-session resume.
 Disabled hooks and timeouts can bypass native checks, so callers still need explicit routing.
@@ -166,6 +172,8 @@ node scripts\verify-context-routing.mjs --cli "<copilot.exe>" --out "<new-eviden
 
 The verifier uses an isolated Copilot home and compares requested, post-hook, and effective tiers.
 Add `--policy always_long` or `--policy default` to verify another policy without changing your personal setup.
+To select another model, supply its supported effort too, for example `--model grok-4.7 --effort xhigh`.
+The same effort applies to the verifier's parent and delegates. The CLI validates the model's supported values.
 Its controlled workloads prove dispatch, not better answers or autonomous workload classification.
 
 ## Accept the verification offer, or don't

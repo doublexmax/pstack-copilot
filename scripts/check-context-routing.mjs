@@ -34,7 +34,7 @@ export function checkBindings(root) {
     }
     if (file === canonical) continue;
     const body = readFileSync(file, 'utf8').replace(/^---[\s\S]*?\n---\r?\n/, '');
-    const delegates = /reasoning_effort|create_session|\b(?:spawn|delegate|hand)\b[^\n]*(?:subagent|task|worker|reviewer)|\blaunch\b[^\n]*(?:subagent|delegate|worker|reviewer)/i.test(body);
+    const delegates = /reasoning_effort|\b(?:create_session|open_pr_session|open_issue_session)\b|\b(?:spawn|delegate|hand)\b[^\n]*(?:subagent|task|worker|reviewer)|\blaunch\b[^\n]*(?:subagent|delegate|worker|reviewer)/i.test(body);
     if (!known.has(file) && !delegates) continue;
     if (name === 'always-on/copilot-instructions.md') {
       if (!/invoke the\s*\r?\n?\s*`context-routing` skill/i.test(body)) errors.push(`${name}: missing automatic context-routing trigger`);
@@ -58,5 +58,5 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   if (errors.length) {
     for (const error of errors) console.error(error);
     process.exitCode = 1;
-  } else console.log(`ok: ${REQUIRED_BINDINGS.length} context bindings`);
+  } else console.log(`ok: structural lint for ${REQUIRED_BINDINGS.length} required context bindings`);
 }

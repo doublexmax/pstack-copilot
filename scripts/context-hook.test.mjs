@@ -55,19 +55,21 @@ test('native mutation preserves payload and writes a concise durable decision', 
   assert.deepEqual(recorded.find((value) => value.event === 'postToolUse'), observed.record);
 });
 
-test('post-tool mismatches and denials surface concise errors and persist the full decision', (t) => {
+test('post-tool mismatches use the original decision and pre-tool denials remain visible', (t) => {
   const f = fixture(t);
-  const mismatch = runHook('postToolUse', launch(f), f);
+  const event = launch(f);
+  runHook('preToolUse', event, f);
+  const mismatch = runHook('postToolUse', { ...event, timestamp: event.timestamp + 1 }, f);
   assert.deepEqual(mismatch.output, {
     additionalContext: 'Pstack context mismatch: expected long_context, observed default.',
   });
   assert.equal(mismatch.record.observation, 'mismatch');
-  const event = launch(f);
-  const denied = runHook('postToolUse', { ...event, toolArgs: {
+  const denied = runHook('preToolUse', { ...event, toolArgs: {
     ...event.toolArgs, model: 'gpt-5.4-mini',
   } }, f);
   assert.deepEqual(denied.output, {
-    additionalContext: 'Pstack context routing denied: model-support-evidence-mismatch.',
+    permissionDecision: 'deny',
+    permissionDecisionReason: 'pstack context routing: model-support-evidence-mismatch',
   });
   assert.equal(denied.record.status, 'blocked');
   const dir = join(f.home, 'pstack-context-decisions', event.sessionId);
@@ -85,9 +87,7 @@ test('managed missing/invalid declarations deny but ordinary delegates ignore in
   writeFileSync(join(f.home, 'pstack-context.json'), '{');
   const ordinary = envelope({ toolName: 'task', toolArgs: { name: 'ordinary', prompt: 'Read the file.', context_tier: 'long_context' } });
   const result = runHook('preToolUse', ordinary, f);
-  assert.deepEqual(result.output, {});
-  assert.equal(result.record.scope, 'unmanaged');
-  assert.equal(result.record.reason, 'no-pstack-declaration');
+  assert.deepEqual(result, { output: {} });
 });
 
 test('whole-command opt-out persists on resume, bypasses routing, and explicit re-entry clears it', (t) => {
@@ -97,9 +97,11 @@ test('whole-command opt-out persists on resume, bypasses routing, and explicit r
   const state = join(f.home, 'session-state', 'session-1', 'files', 'pstack-context-opt-out');
   assert.equal(existsSync(state), true);
   assert.deepEqual(runHook('preToolUse', event, f).output, {});
-  const optedOutPost = runHook('postToolUse', {
+  const malformed = {
     ...event, toolArgs: { name: 'pstack-reader', prompt: 'PSTACK_CONTEXT_V1 bad', context_tier: 'long_context' },
-  }, { ...f, routing: undefined });
+  };
+  runHook('preToolUse', malformed, { ...f, routing: undefined });
+  const optedOutPost = runHook('postToolUse', malformed, { ...f, routing: undefined });
   assert.deepEqual(optedOutPost.output, {});
   assert.equal(optedOutPost.record.scope, 'opt-out');
   const resumed = runHook('sessionStart', envelope({ source: 'resume' }), f);
@@ -146,19 +148,15 @@ test('session start injects the canonical policy path without changing tier sett
   assert.equal(readFileSync(join(f.home, 'settings.json'), 'utf8'), settings);
 });
 
-test('diagnostic storage errors do not block unrelated or opted-out delegate calls', (t) => {
+test('diagnostic storage errors do not block opted-out delegate calls', (t) => {
   const f = fixture(t);
   mkdirSync(join(f.home, 'pstack-context-decisions'));
   writeFileSync(join(f.home, 'pstack-context-decisions', 'session-1'), 'not a directory');
-  const ordinary = envelope({ toolName: 'task', toolArgs: { name: 'ordinary', prompt: 'Read one file.' } });
-  const result = runHook('preToolUse', ordinary, f);
-  assert.deepEqual(result.output, {});
-  assert.deepEqual(result.record, { scope: 'unmanaged', status: 'unrecorded', reason: 'diagnostics-write-failed' });
-  assert.match(result.warning, /EEXIST|ENOTDIR/);
   runHook('userPromptSubmitted', envelope({ prompt: 'skip poteto mode' }), f);
   const optedOut = runHook('preToolUse', launch(f), f);
   assert.deepEqual(optedOut.output, {});
-  assert.equal(optedOut.record.scope, 'opt-out');
+  assert.deepEqual(optedOut.record, { scope: 'opt-out', status: 'unrecorded', reason: 'diagnostics-write-failed' });
+  assert.match(optedOut.warning, /EEXIST|ENOTDIR/);
 });
 
 test('the real stdio adapter emits modifiedArgs without an allow decision', (t) => {
@@ -185,13 +183,16 @@ test('the real stdio adapter emits modifiedArgs without an allow decision', (t) 
 test('unmarked native calls bypass broken checkout and session validation before importing anything', (t) => {
   const f = fixture(t);
   const broken = join(f.home, 'missing-checkout');
-  const result = spawnSync(process.execPath, [script, 'preToolUse', broken], {
-    env: { ...process.env, COPILOT_HOME: f.home }, encoding: 'utf8',
-    input: JSON.stringify({ toolName: 'task', toolArgs: { name: 'ordinary', prompt: 'Read one file.' } }),
-  });
-  assert.equal(result.status, 0);
-  assert.deepEqual(JSON.parse(result.stdout), {});
-  assert.deepEqual(JSON.parse(result.stderr), { scope: 'unmanaged', reason: 'no-pstack-declaration' });
+  for (const phase of ['preToolUse', 'postToolUse']) {
+    const result = spawnSync(process.execPath, [script, phase, broken], {
+      env: { ...process.env, COPILOT_HOME: f.home }, encoding: 'utf8',
+      input: JSON.stringify({ toolName: 'task', toolArgs: { name: 'ordinary', prompt: 'Read one file.' } }),
+    });
+    assert.equal(result.status, 0);
+    assert.deepEqual(JSON.parse(result.stdout), {});
+    assert.deepEqual(JSON.parse(result.stderr), { scope: 'unmanaged', reason: 'no-pstack-declaration' });
+  }
+  assert.deepEqual(readdirSync(f.home), []);
 });
 
 test('post-hook observes the accepted alias decision even after policy changes or checkout disappears', (t) => {
@@ -223,4 +224,55 @@ test('post-hook observes the accepted alias decision even after policy changes o
   const observed = records.find((value) => value.event === 'postToolUse');
   assert.equal(observed.policy, 'adaptive');
   assert.equal(observed.observation, 'matched');
+});
+
+test('observations consume dispatch decisions without guessing across identical in-flight launches', (t) => {
+  const f = fixture(t);
+  const first = launch(f);
+  assert.equal(runHook('postToolUse', first, f).record.reason, 'missing-dispatch-decision');
+  const accepted = runHook('preToolUse', first, f);
+  const post = { ...first, timestamp: first.timestamp + 1, toolArgs: accepted.output.modifiedArgs };
+  const observed = runHook('postToolUse', post, f);
+  assert.equal(observed.record.observation, 'matched');
+  assert.deepEqual(runHook('postToolUse', post, f), observed);
+  const second = { ...first, timestamp: first.timestamp + 2 };
+  configurePolicy({ defaultMode: 'default' }, f);
+  const next = runHook('preToolUse', second, f);
+  assert.equal(runHook('postToolUse', {
+    ...second, timestamp: first.timestamp + 3, toolArgs: next.output.modifiedArgs,
+  }, f).record.tier, 'default');
+  runHook('preToolUse', { ...first, timestamp: first.timestamp + 4 }, f);
+  runHook('preToolUse', { ...first, timestamp: first.timestamp + 5 }, f);
+  const ambiguous = runHook('postToolUse', { ...first, timestamp: first.timestamp + 6 }, f);
+  assert.deepEqual(ambiguous.output, {
+    additionalContext: 'Pstack context observation unverified: ambiguous-dispatch-decision.',
+  });
+  assert.equal(ambiguous.record.status, 'unverified');
+});
+
+test('task and kickoff observations retain dispatch policy when policy or opt-out changes in flight', (t) => {
+  const f = fixture(t);
+  for (const target of ['task', 'create_session', 'open_pr_session', 'open_issue_session']) {
+    configurePolicy({ defaultMode: 'always_long' }, f);
+    const plan = resolveRole({
+      role: 'how explainer', target, model: 'gpt-6.1-sol', effort: 'max',
+      workload: 'bounded', why: 'Read one helper.', support: 'supported',
+      source: 'Current exact-model schema', hostContext: true, hostSource: 'Current launch schema',
+    }, f);
+    const prompt = `${plan.declaration}\nRead one helper.`;
+    const event = envelope({ toolName: target, toolArgs: target === 'task'
+      ? { ...plan.toolArguments, name: 'pstack-reader', prompt }
+      : { name: 'Read helper', kickoff: { ...plan.toolArguments.kickoff, prompt } } });
+    const pre = runHook('preToolUse', event, f);
+    configurePolicy({ defaultMode: 'default' }, f);
+    runHook('userPromptSubmitted', envelope({ prompt: 'skip poteto mode' }), f);
+    const post = runHook('postToolUse', {
+      ...event, timestamp: event.timestamp + 1, toolArgs: pre.output.modifiedArgs,
+    }, { home: f.home });
+    assert.deepEqual(post.output, {});
+    assert.equal(post.record.policy, 'always_long');
+    assert.equal(post.record.tier, 'long_context');
+    assert.equal(post.record.observation, 'matched');
+    runHook('userPromptSubmitted', envelope({ prompt: '/poteto-mode' }), f);
+  }
 });

@@ -5,12 +5,17 @@ description: Configure pstack models, reasoning budget, and persistent delegate 
 
 # Setup pstack
 
-Write `~/.copilot/pstack-models.md`, a personal override file that sets pstack's model per
+Write the active `pstack-models.md`, a personal override file that sets pstack's model per
 role. The resolver reads it and falls back to `models.default.md` in the pstack fork when a
 line is absent, so this is an override layer, not a requirement.
 
 Context policy is independent. Read [context-routing](../context-routing/SKILL.md) for its canonical resolver and personal directory.
 For a context-only request, run only **Context policy** below. Do not ask for a budget, rewrite the model map, or change parent/per-agent tier settings.
+
+Run `node "<pstack>\scripts\context-routing.mjs" show` before reading or writing personal settings.
+Use the returned `modelFile` for model setup and `personalFile` for personal context policy.
+These paths respect `COPILOT_HOME`, falling back to the user's `.copilot` directory when unset.
+Do not substitute `~/.copilot` when a different home is active.
 
 Copilot does not auto-inject this file. This skill writes it, and the context resolver
 reads it for every managed launch.
@@ -31,9 +36,9 @@ A model choice is two fields in Copilot, `model` and `reasoning_effort`. Record 
 
 ### 2. Load current state
 
-Read `<pstack>/models.default.md` for the defaults. If `~/.copilot/pstack-models.md`
+Read `<pstack>/models.default.md` for the defaults. If the returned `modelFile`
 already exists, read it and treat its `# budget` line and its role values as the current
-choices. A line whose role is not in step 5, such as `how critics`, is from a retired role.
+choices. A line whose role is absent from `models.default.md`, such as `how critics`, is from a retired role.
 Drop it and say so in step 3c.
 
 ### 3. Budget, map, and confirm
@@ -82,33 +87,15 @@ every delegation that reads it.
 
 ### 5. Write the override file
 
-Write `~/.copilot/pstack-models.md`, a `# budget` line with the chosen label and its target
+Write the returned `modelFile`, a `# budget` line with the chosen label and its target
 effort, then one line per role, using the same labels `models.default.md` uses and the same
-`model / effort` shape. Overwrite the whole file so re-runs stay idempotent. Shape:
+`model / effort` shape. Derive the complete role table from that file, not this example.
+Overwrite the whole file so re-runs stay idempotent. Representative override syntax:
 
 ```
-# pstack model configuration. One line per role.
-# Delete a line to fall back to models.default.md in the pstack fork.
-# `inherit-parent` or `auto`: omit `model` and `reasoning_effort` on the task call.
-# Copilot selects the child model. Alias entries in a panel list still count toward fan-out.
 # budget: unlimited (max)
-feature, refactoring:                   grok-4.7 / xhigh
-bug-fix:                                grok-4.7 / xhigh
-perf-issue:                             grok-4.7 / xhigh
-hillclimb:                              grok-4.7 / xhigh
-judgment and prose:                     claude-opus-5.5 / max
-hardest tasks:                          claude-opus-5.5 / max
-how explorer:                           grok-4.7 / xhigh
-how explainer:                          claude-opus-5.5 / max
-why investigators:                      grok-4.7 / xhigh
-why synthesizer:                        claude-opus-5.5 / max
-reflect tooling:                        gpt-5.6-sol / max
-reflect judgment, divergent, synth:     claude-opus-5.5 / max
-arena runners:                          claude-opus-5.5 / max, gpt-5.6-sol / max, grok-4.7 / xhigh, gemini-3.8-flash / high
-arena cross-judge pool:                 claude-opus-5.5 / max, gpt-5.6-sol / max, grok-4.7 / xhigh, gemini-3.8-flash / high
-swarm workers:                          grok-4.7 / xhigh
-architect runners:                      claude-opus-5.5 / max, gpt-5.6-sol / max, grok-4.7 / xhigh, gemini-3.8-flash / high
-interrogate reviewers:                  claude-opus-5.5 / max, gpt-5.6-sol / max, grok-4.7 / xhigh, gemini-3.8-flash / high
+how explainer: auto
+swarm workers: gpt-6.1-sol / high
 ```
 
 ### 6. Confirm
@@ -147,6 +134,9 @@ node "<pstack>\scripts\context-routing.mjs" set-policy --default adaptive
 
 For a requested exact-role override, use `--role-policy "role=policy"`.
 Omit `--default` unless the user also requests a global change. Role-only updates keep inherited defaults and roles inherited.
+To restore inheritance, remove that exact key from `roles` in the returned `personalFile`.
+If the file or key is absent, it already inherits. To restore the shipped global default, remove only the `default` key.
+Keep `schemaVersion: 1` and all unrelated choices. Never edit the returned `policyFile` when it points to the shipped defaults.
 Keep combined role labels and the existing 17-role model map intact.
 Report the returned policy file and mode. Direct workflows and always-on routing read it automatically.
 This does not resize the current session. Unknown child identity or support selects default under adaptive policy and blocks `always_long`.

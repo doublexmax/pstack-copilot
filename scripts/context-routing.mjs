@@ -144,6 +144,7 @@ export function loadContextPolicy({ root = ROOT, home = copilotHome() } = {}) {
     roles,
     policyFile: personalText === null ? defaultsFile : personalFile,
     personalFile,
+    modelFile: join(home, 'pstack-models.md'),
   };
 }
 
@@ -204,8 +205,8 @@ function decide(context, declared, model, target) {
   return resolved('long_context', mode === 'always_long' ? 'policy-long' : 'eligible-large-corpus');
 }
 
-function selectedModels(context, home) {
-  const file = join(home, 'pstack-models.md');
+function selectedModels(context) {
+  const file = context.modelFile;
   const raw = readOptional(file);
   const diagnostics = [];
   const overrides = raw === null ? new Map() : parseModels(raw, file, context.roles, diagnostics);
@@ -216,7 +217,7 @@ export function resolveRole(request, { root = ROOT, home = copilotHome() } = {})
   const context = loadContextPolicy({ root, home });
   const target = request.target ?? 'task';
   if (!TARGETS.has(target)) throw new Error(`unknown launch target ${target}`);
-  const models = selectedModels(context, home);
+  const models = selectedModels(context);
   const choices = models.choices.get(request.role);
   if (!choices) throw new Error(`unknown role ${request.role}`);
   const member = request.member ?? 0;
@@ -358,12 +359,14 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const result = command === 'resolve' ? resolveRole(values)
       : command === 'set-policy' ? configurePolicy(values) : loadContextPolicy();
     if (command === 'show' && values.role !== undefined) {
-      const selected = selectedModels(result, copilotHome());
+      const selected = selectedModels(result);
       const models = selected.choices.get(values.role);
       if (!models) throw new Error(`unknown role ${values.role}`);
       console.log(JSON.stringify({ role: values.role, models, diagnostics: selected.diagnostics }));
     } else {
-      console.log(JSON.stringify(command === 'show' ? { policy: result.policy, policyFile: result.policyFile } : result));
+      console.log(JSON.stringify(command === 'show' ? {
+        policy: result.policy, policyFile: result.policyFile, personalFile: result.personalFile, modelFile: result.modelFile,
+      } : result));
     }
     if (result.decision?.status === 'blocked') process.exitCode = 1;
   } catch (error) {
