@@ -18,11 +18,9 @@ exposure layer. Invoke any entry with the `skill` tool by name.
 ## First actions, always
 
 1. Invoke the `poteto-mode` skill and read `SKILL.md` end to end.
-2. Read `models.default.md` in the pstack fork for the model panel. Then read
-   `~/.copilot/pstack-models.md`, which holds per-role personal overrides and wins where it
-   has a line. That file is optional: if it is missing or unreadable, say nothing and use the
-   defaults. Every delegation reads this panel before choosing `model` and `reasoning_effort`.
-   Before each delegate or session kickoff, invoke the `context-routing` skill with the `skill` tool.
+2. Before each delegate or session kickoff, invoke the `context-routing` skill with the `skill` tool.
+   The context resolver reads `models.default.md`, `context.default.json`, and optional personal
+   overrides in `pstack-models.md` and `pstack-context.json` under `COPILOT_HOME` or `~/.copilot`.
    Copy its explicit arguments and declaration. The current parent's tier stays unchanged.
 3. Start a todolist whose first item is reading the Principles section in full. Match the
    task to a playbook, open that playbook file from disk, and copy its steps in verbatim,

@@ -182,7 +182,7 @@ At the end of setup, `/setup-pstack` looks for a way to prove app behavior in yo
 
 Say yes and it writes `.github/skills/verify-<app>/`, a project-local skill that teaches agents to drive your app the way a user does. It proves the skill works once before handing it over. Say no and setup moves on. You can run the **create-verification-skill** skill yourself any time. [Verify and ship](./06-verify-and-ship.md#create-a-project-verification-skill) covers when it earns its place.
 
-After setup, start a new session. The model file is read per session.
+The resolver reads the model and context files on each managed launch, so changes take effect without starting a new session.
 
 ## Run your first task
 
