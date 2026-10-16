@@ -1,5 +1,7 @@
 ### Autonomous run
 
+Use the execution playbook's role for implementation and `judgment and prose` for a watcher.
+
 **You own the exit condition. Define done, then drive to it without stopping.** For "going to bed" / "run until done" / "keep going until X".
 
 1. State the exit condition as a checkable predicate before the first iteration (tests green, repro fixed, all N PRs merged, pixel-diff zero). A vague goal stalls; a predicate lets you stop.

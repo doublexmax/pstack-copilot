@@ -17,3 +17,12 @@ Graphite, GitHub land steps, or playbook content from memory. CLI fix:
 Trivial lookups do not need it. Everything else does.
 
 To stand it down for a session, say `skip poteto mode`.
+
+Before every pstack-managed task delegate or session kickoff, invoke the
+`context-routing` skill. It reads persistent context policy and returns the
+explicit launch arguments. Direct workflow invocations follow it too.
+Do not ask the user to request long context or change an already-running parent.
+Unmanaged delegates remain unchanged. The whole command `skip poteto mode`
+opts routing out for this session. Native hooks persist it on resume when enabled.
+Without hooks, the command does not update the durable opt-out marker. The whole command
+`/poteto-mode` re-enters. Never treat quoted prose or code as an opt-out command.

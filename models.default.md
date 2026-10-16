@@ -2,7 +2,7 @@
 
 This is the checked-in default panel for the Copilot port. `setup-pstack` writes your
 personal overrides to `~/.copilot/pstack-models.md`, outside this repo so `git pull` never
-conflicts with it. Every skill reads the override file first and falls back to these values.
+conflicts with it. The context resolver applies the override file and falls back to these values.
 
 A model choice is two fields on the `task` tool, `model` and `reasoning_effort`.
 Every row below gives both.
@@ -25,8 +25,10 @@ maximums, not downgrades.
 
 ## Per-role defaults
 
-Aliases: `inherit-parent` and `auto` both mean the role runs on the parent chat model.
-Implement them by omitting `model` and `reasoning_effort` on the `task` call.
+Aliases `inherit-parent` and `auto` both omit `model` and `reasoning_effort` on the `task` call.
+Copilot selects the child model from its preferences or the parent. Omission does not prove parent inheritance.
+The shipped `adaptive` policy keeps unresolved choices launchable at the default tier.
+The opt-in `always_long` policy blocks them. Select an explicit role model or change policy through `/setup-pstack`.
 
 ```
 feature, refactoring:                   grok-4.7 / xhigh
@@ -57,10 +59,16 @@ role at once, clamped to each model's maximum.
 
 ## Long-context work
 
-Copilot exposes `context_tier: "long_context"` on the `task` tool, separately from the
-model. Set it when a delegate must read a large corpus rather than reaching for a
-different model. `claude-opus-5.5`, `gpt-5.6-sol`, `grok-4.7`, and `gemini-3.8-flash` all
-support it.
+Context is independent of model and reasoning effort. Before every delegate, use
+[context-routing](./skills/context-routing/SKILL.md) to resolve the persistent policy
+against the actual workload and current host/model evidence.
+`context.default.json` selects `adaptive`. Personal choices live in
+`pstack-context.json` under the active Copilot configuration directory.
+Users can select `default` or the strict `always_long` policy through `/setup-pstack`.
+Under adaptive policy, bounded work uses `default`; eligible large-corpus work uses `long_context`.
+Do not infer selectable tiers from nominal capacity or reasoning `max`.
+Declared capability and workload sources are agent assertions, not independent verification.
+This does not resize the parent or change any model/effort role line.
 
 ## Panel composition
 

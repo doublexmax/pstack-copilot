@@ -18,6 +18,8 @@ cp ~/.copilot/pstack/agents/*.agent.md ~/.copilot/agents/
 ```
 
 Confirm with `copilot skill list`. The pstack skills appear under `Custom skills:`, which means every repo you open sees them. `~/.copilot/agents/` needs no registration; agents there are discovered from any working directory.
+The copied agents invoke registered skills by name. Skills remain under the separate pstack checkout.
+After updating pstack, repeat the agent copy.
 
 Then turn the mode on by default **and** grant path trust for playbooks:
 
@@ -25,13 +27,28 @@ Then turn the mode on by default **and** grant path trust for playbooks:
 node ~/.copilot/pstack/scripts/install-always-on.mjs
 ```
 
-That one command does three things:
+That one command does four things:
 
 1. Splices a short block into `~/.copilot/copilot-instructions.md`, which Copilot loads into the system prompt of every session in every directory. From then on you describe the task and the mode is already on.
 2. Adds the absolute `~/.copilot` path to `trustedFolders` in `~/.copilot/config.json`, preserving any folders you already trusted.
 3. Installs a `pstack` CLI wrapper (`~/.copilot/bin/` shims plus a marked block in your PowerShell profile or shell rc) that runs `copilot --add-dir ~/.copilot ...`, so headless runs can read playbooks and `pstack-models.md`.
+4. Installs direct-exec Node hooks for [context routing](../../skills/context-routing/SKILL.md). Pstack-managed delegates use a resolved tier. Ordinary delegates remain unchanged.
 
-The block is user-scoped, so a repo you clone next month is covered without any per-repo setup. `--uninstall` reverses all three and leaves unrelated content untouched. `--skip-shell` installs only always-on and `trustedFolders`. `--dry-run` prints what would change.
+The block is user-scoped, so a repo you clone next month is covered without any per-repo setup. `--uninstall` removes the managed changes and leaves unrelated content and personal policy untouched. `--skip-shell` leaves profiles and shims alone. `--dry-run` prints what would change.
+
+To install the other integration without native hooks, add `--hooks skip`.
+That flag leaves existing hooks unchanged. It does not disable installed hooks.
+Use `--hooks remove` to remove only the owned hook config and copied entry.
+The default installer or `--hooks install` enables them again.
+`--uninstall` cannot be combined with `--hooks`.
+Hook removal preserves your instructions, policy, models, trust, wrappers, and session markers.
+Explicit routing still works, but native correction and durable opt-out tracking do not.
+After re-enabling hooks, submit `/poteto-mode` to clear a previous session opt-out.
+
+If your `config.json` has JSONC comments, use `--skip-trust` to leave that file untouched.
+The installer validates the trust configuration before it writes anything.
+Keep the existing trust grant or pass `--add-dir` when you start Copilot.
+`COPILOT_HOME` selects a different Copilot configuration directory for an isolated installation.
 
 ## Let pstack read its own playbooks
 
@@ -70,11 +87,94 @@ Run:
 /setup-pstack
 ```
 
-[`/setup-pstack`](../../skills/setup-pstack/SKILL.md) detects the models you have access to, shows you each role (code delegates, judgment, the review panels), and asks what you want. Answer the questions. It writes `~/.copilot/pstack-models.md`, a small rule every pstack skill reads.
+[`/setup-pstack`](../../skills/setup-pstack/SKILL.md) detects the models you have access to, shows you each role (code delegates, judgment, the review panels), and asks what you want. Answer the questions. It writes `pstack-models.md` under `COPILOT_HOME`, or `~/.copilot` when unset. The context resolver reads the same file.
 
 You only override what you care about. A role with no line in the rule keeps the skill's default. To restore a default, delete that role's line. A rerun of `/setup-pstack` keeps any role whose model differs from the default. A rule written before 0.15.3 pins the old default models, so delete those role lines, or delete the file, then run `/setup-pstack` again.
 
-You might be wondering what happens if you use Auto. Set a role to `inherit-parent` or `auto` and pstack omits the subagent `model` field, so the subagent inherits your parent chat model. Both values mean the same thing, and neither is a model slug. For a panel role the value is a list, and one subagent runs per entry, so the list length sets the panel size. Setup also configures `swarm workers`, the default model for every `/swarm` worker unless a race names a model for each arm.
+Set a role to `inherit-parent` or `auto` to omit the subagent model and effort fields.
+Copilot selects the child model, which can come from a per-agent or custom-agent preference rather than the parent.
+Both values mean the same thing, and neither is a model slug.
+The shipped `adaptive` policy keeps these unresolved model choices launchable at the default tier.
+The opt-in `always_long` policy blocks them. Choose an explicit role model or change the context policy through `/setup-pstack`.
+For a panel role the value is a list, and one subagent runs per entry, so the list length sets the panel size.
+Setup also configures `swarm workers`, the default model for every `/swarm` worker unless a race names a model for each arm.
+
+## Configure delegated context
+
+Ask `/setup-pstack` for context-only setup to preserve your model and effort choices.
+The shipped default is `adaptive`. Bounded delegates use default context without requiring proven long-context support.
+Existing personal policy choices take precedence.
+To change only the policy, ask `/setup-pstack` to use `adaptive`, `default`, or `always_long`.
+Under adaptive policy, small inputs use `default`, even when the task spans several files.
+Adaptive selects `long_context` for a large body of material that one delegate must compare together.
+Long-context selection requires declared support for the exact model and launch tool.
+These capability sources and workload reasons are agent assertions. The hook enforces consistency, not their truth.
+It never changes the parent tier or per-agent defaults.
+
+To set the global policy directly, run:
+
+```powershell
+node "$env:USERPROFILE\.copilot\pstack\scripts\context-routing.mjs" set-policy --default adaptive
+```
+
+Use `show` to print the effective policy and its source.
+It also returns `modelFile` and `personalFile`, the active model and personal policy paths used by setup.
+Use `show --role "how explainer"` to inspect the selected model choices without reimplementing model-map precedence.
+Use `--role-policy "how explainer=default"` with `set-policy` for an exact role override.
+Personal policy lives in `pstack-context.json` under `COPILOT_HOME`, or your user `.copilot` directory when that variable is unset.
+For example:
+
+```json
+{
+	"schemaVersion": 1,
+	"default": "adaptive",
+	"roles": {
+		"how explainer": "default"
+	}
+}
+```
+
+An omitted global policy inherits `context.default.json`. Exact role overrides take precedence.
+Role-only updates preserve omitted fields. They do not copy inherited defaults or role settings into your personal file.
+To restore a role's inheritance, remove its key from `roles` in the returned `personalFile`.
+To inherit the shipped global default again, remove the `default` key. Keep `schemaVersion: 1` and unrelated choices.
+Do not edit the shipped file when `policyFile` points to it. Changing the global policy does not remove role overrides.
+
+| Policy | Behavior |
+| --- | --- |
+| `adaptive` | The shipped default. Default for bounded work. Long for supported large-corpus work. Unknown child identity or unsupported long context selects default. |
+| `default` | Default context for every workload. |
+| `always_long` | Strict opt-in. Long context for every workload. Unresolved child identity or unproven support blocks the launch. |
+
+Use `set-policy --default always_long` to require long context.
+`always_long` selects Copilot's `long_context` tier. The policy name and tier name are separate.
+If a preview policy used `"long_context"` as its global or role policy value, replace that value with `"always_long"`.
+A known unavailable model blocks in every mode. Pstack never replaces the selected model.
+An omitted task model does not prove parent inheritance, even when the parent supports long context.
+Model aliases therefore use default context under adaptive policy and block under `always_long`.
+Malformed policy, duplicate keys, and unknown role overrides fail with an error.
+
+Managed launches copy the resolver's arguments and declaration.
+Native hooks also check them and record decisions in `pstack-context-decisions\<sessionId>`.
+Post-launch observations compare against the saved dispatch decision, even if policy changes while the delegate runs.
+Missing or ambiguous dispatch evidence produces an unverified observation. The binding checker only lints instruction structure.
+Submit the whole command `skip poteto mode` to opt out, or `/poteto-mode` to re-enter.
+Native hooks preserve that opt-out across same-session resume.
+Disabled hooks and timeouts can bypass native checks, so callers still need explicit routing.
+If the hook executable cannot start, Copilot can deny unrelated tool calls too. Remove the owned hooks with `--hooks remove`.
+Local hooks do not transfer to cloud workers. Remote launches need their own capability evidence.
+
+For fresh CLI dispatch evidence, run from the checkout:
+
+```powershell
+node scripts\verify-context-routing.mjs --cli "<copilot.exe>" --out "<new-evidence-directory>"
+```
+
+The verifier uses an isolated Copilot home and compares requested, post-hook, and effective tiers.
+Add `--policy always_long` or `--policy default` to verify another policy without changing your personal setup.
+To select another model, supply its supported effort too, for example `--model grok-4.7 --effort xhigh`.
+The same effort applies to the verifier's parent and delegates. The CLI validates the model's supported values.
+Its controlled workloads prove dispatch, not better answers or autonomous workload classification.
 
 ## Accept the verification offer, or don't
 
@@ -82,7 +182,7 @@ At the end of setup, `/setup-pstack` looks for a way to prove app behavior in yo
 
 Say yes and it writes `.github/skills/verify-<app>/`, a project-local skill that teaches agents to drive your app the way a user does. It proves the skill works once before handing it over. Say no and setup moves on. You can run the **create-verification-skill** skill yourself any time. [Verify and ship](./06-verify-and-ship.md#create-a-project-verification-skill) covers when it earns its place.
 
-After setup, start a new session. The model file is read per session.
+The resolver reads the model and context files on each managed launch, so changes take effect without starting a new session.
 
 ## Run your first task
 

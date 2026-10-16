@@ -1,0 +1,102 @@
+---
+name: context-routing
+description: Resolve pstack delegate context from persistent policy, explicit workload, and current host/model evidence. Use automatically before every pstack task delegate or session kickoff, for "context policy", "adaptive context", or "configure pstack context"; no user reminder is required.
+---
+
+# Context routing
+
+Run this contract before each pstack-managed delegate, including direct workflow invocations.
+Do not ask the user to request a larger window.
+If the session opted out with the whole command `skip poteto mode`, leave launches unmanaged and their arguments unchanged.
+The whole command `/poteto-mode` re-enters.
+Native hooks persist opt-out on same-session resume.
+With hooks disabled, these commands do not update the native marker. Follow the conversational opt-out, but do not claim durable tracking.
+
+## Resolve before the launch
+
+1. Locate the pstack checkout from this skill's base directory, two levels up.
+   Use that checkout's `scripts\context-routing.mjs`, not a script relative to the user's repository.
+   The resolver reads `context.default.json`, the existing model map, and the optional personal `pstack-context.json`.
+   `COPILOT_HOME` selects the personal directory. Without it, use the normal user `.copilot` directory.
+2. Name the exact configured role. Keep combined labels such as `feature, refactoring` intact.
+   Run `node "<pstack>\scripts\context-routing.mjs" show --role "<role>"` to inspect its selected model choices.
+   The resolver owns model-map parsing, personal overrides, and checked-in defaults. Do not select them again in the workflow.
+   Select panel members separately with zero-based `--member`.
+   Use `judgment and prose` for an ad-hoc reviewer unless the workflow names another role.
+   Keep workflow-specific panel selection and fallback rules. For an explicit race or fallback, pass both `--model` and `--effort`.
+   If the tool rejects a configured model ID, use the role's checked-in default and report the fallback.
+   If that default is rejected, use the closest valid ID of the same family from the tool error.
+   Re-resolve the fallback pair before retrying. Do not treat aliases as rejected IDs or rewrite the user's model map.
+   Aliases `auto` and `inherit-parent` omit both launch fields and leave the child model unresolved.
+   Copilot may select a per-agent preference or a custom-agent model before falling back to the parent.
+3. Classify the delegate's actual inputs, not its role, prompt length, or model family.
+   `bounded` covers a named helper, limited diff, or independent slice.
+   A small joint read across several files is still bounded. File count or cross-component scope alone does not justify long context.
+   `large-corpus` covers evidence that the delegate must hold and compare together across a large body of material.
+   State the size or extent of that material and why a bounded read or independent slices cannot answer the question.
+   Do not widen a task, add delegates, or repeat work to obtain a long-context decision.
+   Give a concrete `--why` and one `--input` per input reference. A corpus needs input references.
+4. Read this session's actual tool schema or current host metadata.
+   Set `--host-context supported` only if this launch tool exposes the context field.
+   Set `--support supported` only if current evidence supports long context for the exact selected model on that target.
+   A model's presence in a picker, a nominal window, billing keys alone, or reasoning `max` is insufficient.
+   Use `unsupported`, `unknown`, or `unavailable` when that is what the evidence says.
+   Record the evidence in `--source` and `--host-source`. Do not borrow another panel member's support.
+5. Run the resolver. This PowerShell example assumes the two support facts in step 4 were observed.
+
+```powershell
+node "<pstack>\scripts\context-routing.mjs" resolve `
+  --role "how explainer" --workload bounded --why "Read one named helper." `
+  --input "scripts\install-always-on.mjs" `
+  --host-context supported --host-source "Current task context_tier schema" `
+  --support supported --source "Current exact-model task schema"
+```
+
+   For kickoff, add `--target create_session`, `open_pr_session`, or `open_issue_session`.
+   A resolved result has `decision`, `declaration`, and literal `toolArguments`.
+   A blocked result has no tool arguments and exits nonzero. Fix the reported cause; do not drop the context field.
+6. Copy the returned arguments into the real tool call.
+   For `task`, copy the returned model, effort, and `context_tier`.
+   For kickoff, copy `toolArguments.kickoff` into the kickoff object.
+   Omit model and effort when the result omits them. Do not replace the selected model to obtain a tier.
+   Prefix the task name with `pstack-`. Start its prompt, or `kickoff.prompt`, with the exact returned `declaration` line, then a newline and the brief.
+   Do not add a second declaration. Keep the other arguments unchanged.
+
+## Policy and observations
+
+Adaptive selects `default` for bounded work.
+It selects `long_context` for eligible large-corpus work.
+The `default` policy selects the default tier regardless of workload.
+The shipped default is `adaptive`. Existing aliases remain launchable at the default tier.
+`always_long` is a strict opt-in. It selects `long_context` regardless of workload, with declared host and exact-model support.
+Under adaptive policy, unknown or unsupported model support selects `default` with an explicit diagnostic.
+Known unavailable models block. `always_long` blocks when support is unproven.
+An omitted child model stays unresolved even with parent capability evidence. Adaptive selects default; `always_long` blocks.
+To use `always_long` with an aliased role, choose an explicit role model through `/setup-pstack`, or change the context policy there.
+The exact role override wins over the global policy.
+
+Capability sources and workload reasons are caller assertions, not independently verified facts.
+The hook checks declaration structure, model identity, and policy consistency. It cannot prove the sources or classification are true.
+Do not present a routing decision as proof of autonomous routing quality.
+
+Native CLI hooks call the same resolver and can correct a missing or mismatched tier on a managed launch.
+The pre-hook persists the dispatch-time decision. The post-hook observes that decision without rereading current policy or importing the resolver.
+Missing dispatch records or indistinguishable in-flight launches produce an unverified observation, not a newly computed denial.
+They never grant tool permissions. Unmanaged calls remain untouched.
+Missing or malformed declarations deny only calls that claim the reserved pstack scope.
+Decisions appear in `pstack-context-decisions\<sessionId>` under the active Copilot home.
+Read the decision and report a downgrade or denial with its reason.
+Successful launches record decisions without injecting the full record into the conversation. Denials and mismatches remain visible.
+Ordinary user prompts create no decision records. Opt-out and re-entry commands still do.
+Post-hook arguments and effective `subagent.configured` metadata prove dispatch; original tool requests can retain pre-hook values.
+The binding checker is a structural lint for instructions and links, not proof that agents follow this contract.
+
+Disabled hooks, timeouts, unmarked launches, and an unavailable hook runtime can bypass native checks.
+Copying the resolver's explicit arguments remains necessary.
+`install-always-on.mjs --hooks remove` disables only the owned native hooks.
+`--hooks skip` leaves existing hooks unchanged; it does not disable them.
+Local hooks do not transfer to a cloud worker. Give remote descendants access to this contract and resolver before they delegate.
+This contract never changes an already-running parent or per-agent defaults.
+Larger context is not a quality promise. Available input also includes system instructions, history, and tool output.
+
+See [the setup guide](../../docs/guide/01-setup.md#configure-delegated-context) for policy configuration and the CLI verification command.

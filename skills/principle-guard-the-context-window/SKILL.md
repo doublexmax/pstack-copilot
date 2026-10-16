@@ -5,6 +5,9 @@ description: "Apply when context is filling up: large outputs, long files, repea
 
 # Guard the Context Window
 
+Before delegating bulk, invoke [context-routing](../context-routing/SKILL.md).
+Use its workload-based result rather than changing the model or assuming every role needs long context.
+
 The context window is finite and non-renewable within a session. Every token should be worth its cost.
 
 **Why:** Context overflow degrades reasoning quality, creates compression artifacts, and halts progress.

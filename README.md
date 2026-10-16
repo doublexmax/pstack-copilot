@@ -2,7 +2,7 @@
 
 a port of [pstack](https://github.com/cursor/plugins/tree/main/pstack) by
 [poteto](https://x.com/poteto), rewritten to run on the github copilot
-app. 51 skills, 23 playbooks, 24 principles, and 3 agents. MIT, same as upstream.
+app. 52 skills, 23 playbooks, 24 principles, and 3 agents. MIT, same as upstream.
 
 this is not a mirror. the cursor plugin manifest, the `/add-plugin` install path,
 the event-triggered automations, and the graphite stacking layer are all gone.
@@ -58,6 +58,14 @@ two steps:
 
 1. run [`/setup-pstack`](./skills/setup-pstack/SKILL.md) and choose which models you want.
 2. describe your task. the mode is already on.
+
+delegate context defaults to `adaptive`. bounded inputs and unresolved child models
+use default context. supported large-corpus work can use long context.
+[`/setup-pstack`](./skills/setup-pstack/SKILL.md) can switch to `default` or the strict
+`always_long` opt-in without rewriting model or effort choices.
+`always_long` blocks aliases and unproven long-context support.
+capability and workload declarations are agent assertions, not independent proof. see
+[the setup guide](./docs/guide/01-setup.md#configure-delegated-context).
 
 `/poteto-mode` still works if you skipped the always-on step or want to name it
 explicitly.
@@ -290,7 +298,7 @@ copilot already has a great plan mode which works great with pstack. but persona
 
 type [`/automate-me`](./skills/automate-me/SKILL.md). it mines your recent transcripts, drafts a `<your-name>-mode` skill from how you've actually worked, and routes through pstack underneath. you keep pstack as the base and end up with your own routing skill alongside `poteto-mode`.
 
-models are configurable too. type [`/setup-pstack`](./skills/setup-pstack/SKILL.md). it detects the models you have access to and writes `~/.copilot/pstack-models.md`, a small override file mapping each role (code, judgment, the review panels) to a model. every skill that delegates opens it by path and falls back to sensible defaults when a line is absent, so you override only what you want.
+models are configurable too. type [`/setup-pstack`](./skills/setup-pstack/SKILL.md). it detects the models you have access to and writes `~/.copilot/pstack-models.md`, a small override file mapping each role (code, judgment, the review panels) to a model. the context resolver reads it and falls back to checked-in defaults when a line is absent, so you override only what you want.
 
 an override file written before this sync pins the old default models. delete those role lines, or delete the file, then run [`/setup-pstack`](./skills/setup-pstack/SKILL.md) again. a rerun keeps any role whose model differs from the default.
 
@@ -309,7 +317,7 @@ copilot ignores that key, so the port carries the same behaviour a different way
 node scripts/install-always-on.mjs
 ```
 
-the installer does three user-scoped writes:
+the installer manages four user-scoped changes:
 
 1. a managed block in `~/.copilot/copilot-instructions.md`. copilot loads that
    file into the **system prompt** of every session, in every directory, git or
@@ -326,6 +334,11 @@ the installer does three user-scoped writes:
    `pstack-models.md` are normal disk reads. without that grant, non-interactive
    sessions fail the read and used to invent upstream behavior from memory. the
    mode skill now **stops** on a denied playbook read instead.
+4. `~/.copilot/hooks/pstack-context.json` binds pstack-managed launches to the
+   canonical context resolver. it uses direct Node execution, not a shell.
+   ordinary unmanaged delegates stay unchanged. decisions have machine-readable
+   records, and `skip poteto mode` opts the session out of routing too when hooks
+   are enabled.
 
 three properties worth knowing:
 
@@ -336,9 +349,22 @@ three properties worth knowing:
 - it is idempotent, and each write only touches its own markers or the
   `~/.copilot` trust entry. anything else you keep survives.
 
-`--dry-run` shows the change without writing. `--uninstall` reverses all three.
-`--skip-shell` keeps always-on and trustedFolders only. `skip poteto mode`
-stands the mode down for a session without editing anything.
+`--dry-run` shows the change without writing. `--uninstall` removes the managed
+instructions, hooks, trust entry, and wrappers, not your context or model policy.
+`--skip-shell` leaves profiles and shims alone. `--skip-trust` leaves `config.json`
+unchanged, including JSONC comments. `COPILOT_HOME` isolates the target directory.
+`--hooks skip` leaves existing hooks unchanged while refreshing the other integration.
+`--hooks remove` removes only the owned hook config and copied entry.
+the default installer or `--hooks install` enables them again.
+`--uninstall` cannot be combined with `--hooks`.
+`skip poteto mode`
+stands the mode down for a session without changing your preferences.
+without native hooks, that command does not update the durable opt-out marker.
+
+hook timeouts and disabled hooks can bypass native routing. callers also copy
+the resolver's explicit tier. this never changes an already-running parent's
+window or per-agent defaults. [context routing](./skills/context-routing/SKILL.md)
+defines the launch contract and its limits.
 
 the always-on source text lives at
 [`always-on/copilot-instructions.md`](./always-on/copilot-instructions.md).

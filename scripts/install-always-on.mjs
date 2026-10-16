@@ -1,27 +1,35 @@
 #!/usr/bin/env node
 import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir, platform } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const sourceFile = join(root, 'always-on', 'copilot-instructions.md');
 const home = process.env.USERPROFILE || process.env.HOME || homedir();
-const copilotDir = join(home, '.copilot');
+const copilotDir = resolve(process.env.COPILOT_HOME || join(home, '.copilot'));
 const instructionsFile = join(copilotDir, 'copilot-instructions.md');
 const configFile = join(copilotDir, 'config.json');
 const binDir = join(copilotDir, 'bin');
+const hookFile = join(copilotDir, 'hooks', 'pstack-context.json');
+const hookScript = join(root, 'scripts', 'context-hook.mjs');
+const hookEntry = join(copilotDir, 'hooks', 'context-hook.mjs');
 
 const instructionsBegin = '<!-- pstack:begin poteto-mode -->';
 const instructionsEnd = '<!-- pstack:end poteto-mode -->';
 const shellBegin = '# BEGIN pstack path trust';
 const shellEnd = '# END pstack path trust';
 
-const USAGE = `usage: node install-always-on.mjs [--dry-run] [--uninstall] [--skip-shell]
+const USAGE = `usage: node install-always-on.mjs [--dry-run] [--uninstall] [--skip-shell] [--skip-trust] [--hooks <install|skip|remove>]
 
-Installs poteto-mode always-on instructions, adds ~/.copilot to config.json
+Installs poteto-mode instructions and native pstack context hooks, adds ~/.copilot to config.json
 trustedFolders, and installs a pstack wrapper that runs copilot with
---add-dir ~/.copilot so playbooks and pstack-models.md are readable.`;
+--add-dir ~/.copilot so playbooks and pstack-models.md are readable.
+--skip-trust leaves config.json untouched, including JSONC files.
+--hooks install is the default; skip leaves existing hooks unchanged.
+--hooks remove changes only owned hook files, not instructions, trust, or wrappers.
+--uninstall removes all managed integration and cannot be combined with --hooks.
+--hooks remove accepts --dry-run but cannot be combined with --skip-shell or --skip-trust.`;
 
 function parseManagedBlock(text, begin, end) {
   const beginAt = text.indexOf(begin);
@@ -77,10 +85,88 @@ function readJson(file) {
   const raw = readFileSync(file, 'utf8').trim();
   if (!raw) return {};
   try {
-    return JSON.parse(raw);
+    const value = JSON.parse(raw);
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error('expected an object');
+    }
+    if (value.trustedFolders !== undefined
+      && (!Array.isArray(value.trustedFolders) || value.trustedFolders.some((folder) => typeof folder !== 'string'))) {
+      throw new Error('trustedFolders must be an array of paths');
+    }
+    return value;
   } catch {
-    throw new Error(`invalid JSON in ${file}`);
+    throw new Error(`invalid JSON configuration in ${file}; use --skip-trust to leave it untouched`);
   }
+}
+
+async function planNativeHooks(removing) {
+  const phases = ['sessionStart', 'userPromptSubmitted', 'preToolUse', 'postToolUse'];
+  const current = existsSync(hookFile) ? readFileSync(hookFile, 'utf8') : null;
+  if (current !== null) {
+    let previous;
+    try {
+      previous = JSON.parse(current);
+    } catch {
+      throw new Error(`refusing to replace invalid hook file ${hookFile}`);
+    }
+    const hooks = previous?.hooks;
+    const owned = previous && typeof previous === 'object' && !Array.isArray(previous)
+      && previous.version === 1 && hooks && typeof hooks === 'object' && !Array.isArray(hooks)
+      && Object.keys(previous).sort().join(',') === 'hooks,version'
+      && Object.keys(hooks).sort().join(',') === [...phases].sort().join(',')
+      && phases.every((phase) => {
+        const entries = hooks[phase];
+        return Array.isArray(entries) && entries.length === 1 && entries[0] && typeof entries[0] === 'object'
+          && entries[0].env?.PSTACK_CONTEXT_MANAGED === '1'
+          && Object.keys(entries[0].env).length === 1
+          && entries[0].type === 'command'
+          && typeof entries[0].exec === 'string'
+          && Array.isArray(entries[0].args) && [2, 3].includes(entries[0].args.length)
+          && typeof entries[0].args[0] === 'string'
+          && basename(entries[0].args[0]) === 'context-hook.mjs' && entries[0].args[1] === phase
+          && Object.keys(entries[0]).every((key) => ['type', 'exec', 'args', 'env', 'matcher', 'timeoutSec'].includes(key));
+      });
+    if (!owned) throw new Error(`refusing to replace a foreign hook file ${hookFile}`);
+  }
+  const entryCurrent = existsSync(hookEntry) ? readFileSync(hookEntry, 'utf8') : null;
+  if (entryCurrent !== null && !entryCurrent.includes("export const ENTRY_VERSION = 'pstack-context-entry-v1';")) {
+    throw new Error(`refusing to replace a foreign hook entry ${hookEntry}`);
+  }
+  if (removing) return { current, next: null, entryCurrent, entryNext: null };
+  requireFile(hookScript);
+  const { loadContextPolicy } = await import('./context-routing.mjs');
+  loadContextPolicy({ root, home: copilotDir });
+  const hooks = Object.fromEntries(phases.map((phase) => [phase, [{
+    type: 'command',
+    exec: process.execPath,
+    args: [hookEntry, phase, root],
+    env: { PSTACK_CONTEXT_MANAGED: '1' },
+    ...(['preToolUse', 'postToolUse'].includes(phase)
+      ? { matcher: 'task|create_session|open_pr_session|open_issue_session' } : {}),
+    timeoutSec: 30,
+  }]]));
+  return { current, next: `${JSON.stringify({ version: 1, hooks }, null, 2)}\n`,
+    entryCurrent, entryNext: readFileSync(hookScript, 'utf8') };
+}
+
+function installNativeHooks(plan, dryRun) {
+  if (plan.current === plan.next && plan.entryCurrent === plan.entryNext) {
+    console.log(`no changes needed at ${hookFile}`);
+    return;
+  }
+  if (dryRun) {
+    console.log(`would ${plan.next === null ? 'remove' : 'install'} native context hooks at ${hookFile}`);
+    return;
+  }
+  if (plan.next === null) {
+    if (plan.current !== null) unlinkSync(hookFile);
+    if (plan.entryCurrent !== null) unlinkSync(hookEntry);
+  } else {
+    mkdirSync(dirname(hookFile), { recursive: true });
+    if (plan.entryCurrent !== plan.entryNext) writeFileSync(hookEntry, plan.entryNext);
+    writeFileSync(hookFile, plan.next);
+  }
+  console.log(`${plan.next === null ? 'removed' : 'installed'} native context hooks at ${hookFile}`);
 }
 
 function installInstructions(removing, dryRun) {
@@ -286,21 +372,52 @@ function installShell(removing, dryRun, skipShell) {
 
 try {
   const args = process.argv.slice(2);
-  const allowed = new Set(['--dry-run', '--uninstall', '--skip-shell', '--help', '-h']);
-  const unknown = args.find((arg) => !allowed.has(arg));
-  if (unknown) throw new Error(`unknown option: ${unknown}\n${USAGE}`);
-  if (args.includes('--help') || args.includes('-h')) {
+  const allowed = new Set(['--dry-run', '--uninstall', '--skip-shell', '--skip-trust', '--help', '-h']);
+  const flags = new Set();
+  let hooks;
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === '--hooks') {
+      if (hooks !== undefined) throw new Error(`duplicate option: --hooks\n${USAGE}`);
+      hooks = args[++i];
+      if (!['install', 'skip', 'remove'].includes(hooks)) {
+        throw new Error(`--hooks requires install, skip, or remove\n${USAGE}`);
+      }
+      continue;
+    }
+    if (!allowed.has(arg)) throw new Error(`unknown option: ${arg}\n${USAGE}`);
+    const flag = arg === '-h' ? '--help' : arg;
+    if (flags.has(flag)) throw new Error(`duplicate option: ${flag}\n${USAGE}`);
+    flags.add(flag);
+  }
+  if (flags.has('--uninstall') && hooks !== undefined) {
+    throw new Error(`--uninstall cannot be combined with --hooks\n${USAGE}`);
+  }
+  if (hooks === 'remove' && (flags.has('--skip-shell') || flags.has('--skip-trust'))) {
+    throw new Error(`--hooks remove changes only hooks; --skip-shell and --skip-trust do not apply\n${USAGE}`);
+  }
+  if (flags.has('--help')) {
     console.log(USAGE);
     process.exit(0);
   }
 
-  const dryRun = args.includes('--dry-run');
-  const removing = args.includes('--uninstall');
-  const skipShell = args.includes('--skip-shell');
+  const dryRun = flags.has('--dry-run');
+  const removing = flags.has('--uninstall');
+  const skipShell = flags.has('--skip-shell');
+  const skipTrust = flags.has('--skip-trust');
 
-  installInstructions(removing, dryRun);
-  installTrustedFolder(removing, dryRun);
-  installShell(removing, dryRun, skipShell);
+  if (hooks === 'remove') {
+    installNativeHooks(await planNativeHooks(true), dryRun);
+  } else {
+    if (!skipTrust) readJson(configFile);
+    const nativeHooks = hooks === 'skip' ? null : await planNativeHooks(removing);
+    installInstructions(removing, dryRun);
+    if (nativeHooks) installNativeHooks(nativeHooks, dryRun);
+    else console.log('skipping native context hooks (--hooks skip)');
+    if (skipTrust) console.log('skipping trustedFolders (--skip-trust)');
+    else installTrustedFolder(removing, dryRun);
+    installShell(removing, dryRun, skipShell);
+  }
 } catch (error) {
   console.error(`error: ${error.message}`);
   process.exitCode = 1;

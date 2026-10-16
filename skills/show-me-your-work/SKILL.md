@@ -5,6 +5,9 @@ description: "Keep a reviewable decision trail for long-running or unattended wo
 
 # Show me your work
 
+Before the cross-model trail reviewer launches, invoke [context-routing](../context-routing/SKILL.md) with `judgment and prose`.
+Preserve its different-family model choice and copy the resolved arguments and declaration for the trail and transcript.
+
 Keep one canonical log.
 
 ## The format

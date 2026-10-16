@@ -1,17 +1,24 @@
 ---
 name: setup-pstack
-description: Configure which models pstack uses per role and at what reasoning budget. Detects the models available to the task tool and writes a personal override file that the skills read. Use for setup-pstack, "configure pstack models", "pstack budget", or changing pstack's model choices.
+description: Configure pstack models, reasoning budget, and persistent delegate context policy. Use for setup-pstack, "configure pstack models", "pstack budget", "configure pstack context", or "context-only setup".
 ---
 
 # Setup pstack
 
-Write `~/.copilot/pstack-models.md`, a personal override file that sets pstack's model per
-role. The skills read it and fall back to `models.default.md` in the pstack fork when a
+Write the active `pstack-models.md`, a personal override file that sets pstack's model per
+role. The resolver reads it and falls back to `models.default.md` in the pstack fork when a
 line is absent, so this is an override layer, not a requirement.
 
-Copilot has no user-global always-applied rule, so this file is not auto-injected. Every
-pstack skill that delegates opens it explicitly as its first step. That is the contract:
-this skill writes it, the skills read it.
+Context policy is independent. Read [context-routing](../context-routing/SKILL.md) for its canonical resolver and personal directory.
+For a context-only request, run only **Context policy** below. Do not ask for a budget, rewrite the model map, or change parent/per-agent tier settings.
+
+Run `node "<pstack>\scripts\context-routing.mjs" show` before reading or writing personal settings.
+Use the returned `modelFile` for model setup and `personalFile` for personal context policy.
+These paths respect `COPILOT_HOME`, falling back to the user's `.copilot` directory when unset.
+Do not substitute `~/.copilot` when a different home is active.
+
+Copilot does not auto-inject this file. This skill writes it, and the context resolver
+reads it for every managed launch.
 
 The file lives outside the pstack fork on purpose, so `git pull` from upstream never
 conflicts with your choices.
@@ -29,9 +36,9 @@ A model choice is two fields in Copilot, `model` and `reasoning_effort`. Record 
 
 ### 2. Load current state
 
-Read `<pstack>/models.default.md` for the defaults. If `~/.copilot/pstack-models.md`
+Read `<pstack>/models.default.md` for the defaults. If the returned `modelFile`
 already exists, read it and treat its `# budget` line and its role values as the current
-choices. A line whose role is not in step 5, such as `how critics`, is from a retired role.
+choices. A line whose role is absent from `models.default.md`, such as `how critics`, is from a retired role.
 Drop it and say so in step 3c.
 
 ### 3. Budget, map, and confirm
@@ -57,8 +64,10 @@ any role the user changed by family, list, or alias (`inherit-parent`, `auto`).
 **(c) Show the roles and confirm.** Show every role with its model and effort, marking any
 ID not in the detected set as needing a choice. Also list each line step 2 dropped. Ask
 whether to accept as-is or change specific roles, offering the detected models plus
-`inherit-parent` and `auto`. Both aliases mean the role runs on the parent chat model,
-which is how Auto users stay on Auto.
+`inherit-parent` and `auto`. Both aliases omit model and effort so Copilot selects the
+child's model. Per-agent or custom-agent preferences can take precedence over the parent.
+The shipped `adaptive` policy keeps these choices launchable at the default tier.
+The opt-in `always_long` policy blocks an unresolved child model.
 
 For panel roles (arena runners, architect runners, interrogate reviewers) the value is a
 list, and one subagent runs per entry, alias entries included, so the list length sets the
@@ -78,39 +87,23 @@ every delegation that reads it.
 
 ### 5. Write the override file
 
-Write `~/.copilot/pstack-models.md`, a `# budget` line with the chosen label and its target
+Write the returned `modelFile`, a `# budget` line with the chosen label and its target
 effort, then one line per role, using the same labels `models.default.md` uses and the same
-`model / effort` shape. Overwrite the whole file so re-runs stay idempotent. Shape:
+`model / effort` shape. Derive the complete role table from that file, not this example.
+Overwrite the whole file so re-runs stay idempotent. Representative override syntax:
 
 ```
-# pstack model configuration. One line per role.
-# Delete a line to fall back to models.default.md in the pstack fork.
-# `inherit-parent` or `auto`: the role runs on the parent chat model. Omit `model` and
-# `reasoning_effort` on the task call. Alias entries in a panel list still count toward fan-out.
 # budget: unlimited (max)
-feature, refactoring:                   grok-4.7 / xhigh
-bug-fix:                                grok-4.7 / xhigh
-perf-issue:                             grok-4.7 / xhigh
-hillclimb:                              grok-4.7 / xhigh
-judgment and prose:                     claude-opus-5.5 / max
-hardest tasks:                          claude-opus-5.5 / max
-how explorer:                           grok-4.7 / xhigh
-how explainer:                          claude-opus-5.5 / max
-why investigators:                      grok-4.7 / xhigh
-why synthesizer:                        claude-opus-5.5 / max
-reflect tooling:                        gpt-5.6-sol / max
-reflect judgment, divergent, synth:     claude-opus-5.5 / max
-arena runners:                          claude-opus-5.5 / max, gpt-5.6-sol / max, grok-4.7 / xhigh, gemini-3.8-flash / high
-arena cross-judge pool:                 claude-opus-5.5 / max, gpt-5.6-sol / max, grok-4.7 / xhigh, gemini-3.8-flash / high
-swarm workers:                          grok-4.7 / xhigh
-architect runners:                      claude-opus-5.5 / max, gpt-5.6-sol / max, grok-4.7 / xhigh, gemini-3.8-flash / high
-interrogate reviewers:                  claude-opus-5.5 / max, gpt-5.6-sol / max, grok-4.7 / xhigh, gemini-3.8-flash / high
+how explainer: auto
+swarm workers: gpt-6.1-sol / high
 ```
 
 ### 6. Confirm
 
 Tell the user the file was written and that skills pick it up on their next run, no restart
 needed. Re-running this skill updates it.
+
+Then run **Context policy**. Existing model and effort choices do not change when that policy changes.
 
 ### 7. Offer a verification skill (optional)
 
@@ -119,3 +112,31 @@ an existing harness). If not, offer once: "want a project-local verification ski
 agents can drive the app the way a user does and prove changes work? I can generate one
 with the create-verification-skill skill." On yes, invoke it. On no, move on without
 pushing.
+
+## Context policy
+
+Run `<pstack>\scripts\context-routing.mjs show` to read the current independent policy.
+The shipped default is `adaptive`. Existing personal choices take precedence.
+Requests to change only the policy use this section without rerunning model or budget setup.
+If the user already chose a policy, use that choice. Otherwise ask one question with these choices:
+
+- `Adaptive, long context for supported large-corpus work (Recommended)`
+- `Default context for every delegate`
+- `Always long context; block when support is unproven`
+
+Use `adaptive`, `default`, or `always_long` for the corresponding policy.
+`long_context` is the Copilot tier selected by `always_long`, not a policy name.
+Write only the personal context file through the canonical command:
+
+```powershell
+node "<pstack>\scripts\context-routing.mjs" set-policy --default adaptive
+```
+
+For a requested exact-role override, use `--role-policy "role=policy"`.
+Omit `--default` unless the user also requests a global change. Role-only updates keep inherited defaults and roles inherited.
+To restore inheritance, remove that exact key from `roles` in the returned `personalFile`.
+If the file or key is absent, it already inherits. To restore the shipped global default, remove only the `default` key.
+Keep `schemaVersion: 1` and all unrelated choices. Never edit the returned `policyFile` when it points to the shipped defaults.
+Keep combined role labels and the existing 17-role model map intact.
+Report the returned policy file and mode. Direct workflows and always-on routing read it automatically.
+This does not resize the current session. Unknown child identity or support selects default under adaptive policy and blocks `always_long`.

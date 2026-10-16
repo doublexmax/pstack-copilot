@@ -5,6 +5,9 @@ description: "Spawn N parallel candidates at the same task, pick a base, graft t
 
 # Arena
 
+Before each runner or judge launch, invoke [context-routing](../context-routing/SKILL.md).
+Use `arena runners` or `arena cross-judge pool` and copy that member's resolved arguments and declaration.
+
 Fan out N parallel attempts at the same task. Read every candidate end to end. Pick the strongest as the base. Graft the best ideas from the others into it. Verify the synthesized result.
 
 ## Start
@@ -24,7 +27,7 @@ The N candidates will receive the same prompt, so the prompt is the contract.
 
 1. State the artifact each candidate is producing.
 2. Derive the rubric. State what success looks like for *this* task, then turn it into 3-6 concrete gradeable criteria. Concrete: `Adds a --dry-run flag that skips writes`. Vague: `code is correct`. The rubric is the picker's tool in Phase D. Candidates only see the task.
-3. Pick the runners. Use `arena runners` from `~/.copilot/pstack-models.md` when present. Otherwise default to one each on `claude-opus-5.5 / max`, `gpt-5.6-sol / max`, `grok-4.7 / xhigh`, `gemini-3.8-flash / high`. An `auto` or `inherit-parent` entry in this line or the cross-judge line means the parent model, so omit `model` and `reasoning_effort` for it. If the `task` tool rejects a configured entry, run that seat on its family's default and say so. Families go by prefix: `claude-*`, `gpt-*`, `grok-*`, and `gemini-*`. With no family match, use `claude-opus-5.5 / max`. If it rejects a default, use the closest valid ID of the same family from its error message. Spawn more when the arena covers multiple design directions. Same model N times when the work is generation-bound rather than judgment-sensitive.
+3. Inspect `arena runners` with the resolver's `show --role`, then resolve each member. If the tool rejects a configured entry, use that family's checked-in role default and report it. Families go by prefix: `claude-*`, `gpt-*`, `grok-*`, and `gemini-*`. With no family match, use the first checked-in member. Re-resolve every fallback. Spawn more when the arena covers multiple design directions. Use the same model N times when the work is generation-bound rather than judgment-sensitive.
 4. Assign output paths. Each candidate writes to its own location (a git worktree where possible, otherwise `/tmp/arena-<slug>/candidate-<n>/`), per the **separate-before-serializing-shared-state** principle skill.
 
 ## Phase B: Fan out
@@ -37,7 +40,7 @@ If a candidate fails to produce output, proceed with N-1 and note the dropout in
 
 ## Phase C: Cross-judge
 
-After all Phase B candidates complete, choose one model from the `arena cross-judge pool` in `~/.copilot/pstack-models.md` when present. Otherwise choose from `claude-opus-5.5 / max`, `gpt-5.6-sol / max`, `grok-4.7 / xhigh`, `gemini-3.8-flash / high`. Prefer a different model family from the parent's. Spawn one judge subagent on that model with `agent_type: "general-purpose"` and a prompt that forbids writes. It sees the rubric and the candidates by path label, scores each criterion, and recommends a base with rationale. It runs in parallel with the parent's reading in Phase D, not with the candidates themselves. Don't spawn the judge while candidates are still writing, because it would see partial or empty outputs and report them as dropouts.
+After all Phase B candidates complete, inspect `arena cross-judge pool` with the resolver's `show --role` and choose one member. Prefer a different model family from the parent's. Resolve that member and spawn one judge with `agent_type: "general-purpose"` and a prompt that forbids writes. It sees the rubric and the candidates by path label, scores each criterion, and recommends a base with rationale. It runs in parallel with the parent's reading in Phase D, not with the candidates themselves. Don't spawn the judge while candidates are still writing, because it would see partial or empty outputs and report them as dropouts.
 
 ## Phase D: Pick a base
 
