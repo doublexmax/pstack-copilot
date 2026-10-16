@@ -382,6 +382,10 @@ test('role-only updates persist only personal overrides and keep inheriting ship
 
 test('the executable resolver returns tool arguments and rejects invalid CLI options', (t) => {
   const f = fixture(t);
+  const shown = f.run('show');
+  assert.equal(shown.status, 0, shown.stderr);
+  assert.equal(JSON.parse(shown.stdout).modelFile, join(f.home, 'pstack-models.md'));
+  assert.equal(JSON.parse(shown.stdout).personalFile, join(f.home, 'pstack-context.json'));
   const args = [
     'resolve', '--role', 'feature, refactoring', '--workload', 'bounded', '--why', 'Read one helper.',
     '--model', 'gpt-6.1-sol', '--effort', 'max', '--host-context', 'supported', '--host-source', 'Current task schema',

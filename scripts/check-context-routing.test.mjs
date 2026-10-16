@@ -41,6 +41,16 @@ test('a new standalone delegating skill cannot bypass the contract registry', (t
   assert.deepEqual(checkBindings(dir), ['skills/new-workflow/SKILL.md: delegation must bind the canonical context-routing skill']);
 });
 
+test('every supported kickoff API requires a canonical binding in a standalone skill', (t) => {
+  const dir = fixture(t);
+  const file = join(dir, 'skills', 'new-workflow', 'SKILL.md');
+  mkdirSync(dirname(file));
+  for (const tool of ['create_session', 'open_pr_session', 'open_issue_session']) {
+    writeFileSync(file, `Use ${tool} with a kickoff prompt.\n`);
+    assert.deepEqual(checkBindings(dir), ['skills/new-workflow/SKILL.md: delegation must bind the canonical context-routing skill']);
+  }
+});
+
 test('copied agents invoke the registered skill in the documented separate install layout', (t) => {
   const home = mkdtempSync(join(tmpdir(), 'pstack-home-'));
   t.after(() => rmSync(home, { recursive: true, force: true }));

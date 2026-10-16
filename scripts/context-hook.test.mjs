@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { runHook } from './context-hook.mjs';
-import { loadContextPolicy, resolveRole, routeToolCall } from './context-routing.mjs';
+import { configurePolicy, loadContextPolicy, resolveRole, routeToolCall } from './context-routing.mjs';
 
 const script = fileURLToPath(new URL('./context-hook.mjs', import.meta.url));
 
@@ -192,4 +192,35 @@ test('unmarked native calls bypass broken checkout and session validation before
   assert.equal(result.status, 0);
   assert.deepEqual(JSON.parse(result.stdout), {});
   assert.deepEqual(JSON.parse(result.stderr), { scope: 'unmanaged', reason: 'no-pstack-declaration' });
+});
+
+test('post-hook observes the accepted alias decision even after policy changes or checkout disappears', (t) => {
+  const f = fixture(t);
+  const resolved = resolveRole({
+    role: 'how explainer', model: 'auto', workload: 'bounded', why: 'Read one helper.',
+    hostContext: true, hostSource: 'Current task schema',
+  }, f);
+  const event = envelope({ toolName: 'task', toolArgs: {
+    ...resolved.toolArguments, name: 'pstack-alias', prompt: `${resolved.declaration}\nRead one helper.`,
+  } });
+  const call = (phase, input, root) => spawnSync(process.execPath, [script, phase, ...(root ? [root] : [])], {
+    env: { ...process.env, COPILOT_HOME: f.home }, encoding: 'utf8', input: JSON.stringify(input),
+  });
+  const pre = call('preToolUse', event);
+  assert.equal(pre.status, 0, pre.stderr);
+  const args = JSON.parse(pre.stdout).modifiedArgs;
+  assert.equal(args.context_tier, 'default');
+  configurePolicy({ defaultMode: 'always_long' }, f);
+  const postEvent = { ...event, timestamp: event.timestamp + 1, toolArgs: args };
+  const post = call('postToolUse', postEvent);
+  assert.equal(post.status, 0, post.stderr);
+  assert.deepEqual(JSON.parse(post.stdout), {});
+  const missingCheckout = call('postToolUse', postEvent, join(f.home, 'missing-checkout'));
+  assert.equal(missingCheckout.status, 0, missingCheckout.stderr);
+  assert.deepEqual(JSON.parse(missingCheckout.stdout), {});
+  const dir = join(f.home, 'pstack-context-decisions', event.sessionId);
+  const records = readdirSync(dir).map((name) => JSON.parse(readFileSync(join(dir, name), 'utf8')));
+  const observed = records.find((value) => value.event === 'postToolUse');
+  assert.equal(observed.policy, 'adaptive');
+  assert.equal(observed.observation, 'matched');
 });
