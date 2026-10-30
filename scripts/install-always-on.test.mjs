@@ -363,11 +363,13 @@ const cases = {
       const expected = { ...before };
       delete expected['.copilot/hooks/pstack-context.json'];
       delete expected['.copilot/hooks/context-hook.mjs'];
+      delete expected['.copilot/extensions/double/extension.mjs'];
       h.run('--hooks', 'remove', '--dry-run');
       assert.deepStrictEqual(snapshot(h.home), before);
       h.run('--hooks', 'remove');
       assert.strictEqual(existsSync(join(dir, 'hooks', 'pstack-context.json')), false);
       assert.strictEqual(existsSync(join(dir, 'hooks', 'context-hook.mjs')), false);
+      assert.strictEqual(existsSync(join(dir, 'extensions', 'double')), false);
       assert.deepStrictEqual(snapshot(h.home), expected);
       h.run('--hooks', 'remove');
       assert.deepStrictEqual(snapshot(h.home), expected);
@@ -406,6 +408,34 @@ const cases = {
         assert.deepStrictEqual(snapshot(h.home), before);
       } finally { h.cleanup(); }
     }
+  },
+  'double extension binds the installing clone and follows the hook lifecycle'() {
+    const h = withHome();
+    try {
+      const file = join(h.copilotDir, 'extensions', 'double', 'extension.mjs');
+      h.run('--skip-trust', '--skip-shell');
+      const installed = readFileSync(file, 'utf8');
+      assert.ok(installed.includes(`const pstackRoot = ${JSON.stringify(root)};`), 'bound to this clone');
+      assert.ok(!installed.includes('".copilot", "pstack"'), 'default root replaced');
+      assert.ok(existsSync(join(root, 'skills', 'double', 'scripts', 'double_watch.py')), 'bound watcher exists');
+      const once = snapshot(h.home);
+      h.run('--skip-trust', '--skip-shell');
+      assert.deepStrictEqual(snapshot(h.home), once);
+      h.run('--hooks', 'remove');
+      assert.strictEqual(existsSync(join(h.copilotDir, 'extensions', 'double')), false);
+      h.run('--skip-trust', '--skip-shell');
+      assert.strictEqual(readFileSync(file, 'utf8'), installed);
+      h.run('--uninstall', '--skip-trust', '--skip-shell');
+      assert.strictEqual(existsSync(file), false);
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, 'user extension\n');
+      const before = snapshot(h.home);
+      assert.throws(() => h.run('--skip-trust', '--skip-shell'), /foreign extension/);
+      assert.throws(() => h.run('--hooks', 'remove'), /foreign extension/);
+      assert.deepStrictEqual(snapshot(h.home), before);
+      h.run('--hooks', 'skip', '--skip-trust', '--skip-shell');
+      assert.strictEqual(readFileSync(file, 'utf8'), 'user extension\n');
+    } finally { h.cleanup(); }
   },
   'dry-run with either install or skip writes nothing'() {
     for (const action of ['install', 'skip']) {
