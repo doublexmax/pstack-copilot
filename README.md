@@ -29,7 +29,7 @@ git clone https://github.com/doublexmax/pstack-copilot ~/.copilot/pstack
 copilot skill add ~/.copilot/pstack/skills
 ```
 
-then copy the three agents so `poteto`, `poteto-worker`, and `comment-sicko`
+then copy the four agents so `poteto`, `poteto-worker`, `comment-sicko`, and `double`
 show up as spawnable subagents:
 
 ```bash
@@ -46,7 +46,8 @@ node ~/.copilot/pstack/scripts/install-always-on.mjs
 ```
 
 that writes the always-on block, adds `~/.copilot` to `config.json`
-`trustedFolders`, and installs a `pstack` wrapper that passes
+`trustedFolders`, installs the [double](./skills/double/SKILL.md) runtime extension
+bound to this clone, and installs a `pstack` wrapper that passes
 `--add-dir ~/.copilot` so headless runs can read playbooks and model
 overrides. see [always-on](#always-on) for what it does and how to take it
 back out. the [setup guide](./docs/guide/01-setup.md) has the path-trust
@@ -239,6 +240,8 @@ pstack also ships a subagent that runs my style end to end. spawn it from a pare
 [`/poteto-mode`](./skills/poteto-mode/SKILL.md) and [`agent_type: "poteto-worker"`](./agents/poteto-worker.agent.md) route through the same wrapper.
 
 pstack also ships [Comment Sicko](./agents/comment-sicko.agent.md), a read-only comment reviewer available as `agent_type: "comment-sicko"`. usually invoke it through [`/no-comments`](./skills/no-comments/SKILL.md), not directly.
+
+pstack also ships [Double](./agents/double.agent.md), an independent session supervisor. type [`/double`](./skills/double/SKILL.md) inside a worker session and it spawns a nested `Double: <name>` child on a different vendor family. a zero-token watcher wakes it only when the worker makes a load-bearing claim, and it messages the worker only to refute one with counter-evidence. it never writes the worker's code.
 
 ## principles
 
