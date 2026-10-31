@@ -62,8 +62,21 @@ def extract_range_context(session_dir: pathlib.Path, lines: list[str], own_start
         t = ev.get("type")
         d = ev.get("data", {})
         if t == "assistant.message" and not d.get("parentToolCallId"):
-            treqs = [{"name": tr.get("name"), "args": str(tr.get("arguments"))[:400]} for tr in (d.get("toolRequests") or [])]
-            range_events.append({"event": idx, "type": t, "content": d.get("content") or "", "tools": treqs})
+            treqs = [
+                {
+                    "name": tr.get("name"),
+                    "intent": tr.get("intentionSummary") or tr.get("toolTitle") or "",
+                    "args": str(tr.get("arguments"))[:400],
+                }
+                for tr in (d.get("toolRequests") or [])
+            ]
+            range_events.append({
+                "event": idx,
+                "type": t,
+                "reasoning": d.get("reasoningText") or "",
+                "content": d.get("content") or "",
+                "tools": treqs,
+            })
         elif t == "tool.execution_complete":
             res = str(d.get("result", {}).get("content", ""))
             range_events.append({
@@ -97,10 +110,19 @@ def scan_events(session_dir: pathlib.Path, start_idx: int = 0, touched: list[str
             ev = json.loads(lines[idx])
         except Exception:
             continue
-        if ev.get("type") != "assistant.message":
-            continue
-
+        ev_type = ev.get("type")
         data = ev.get("data", {})
+        if ev_type == "tool.execution_start":
+            shell_info = data.get("shellToolInfo") or {}
+            if shell_info.get("hasWriteFileRedirection"):
+                for p in shell_info.get("possiblePaths") or []:
+                    if p not in touched:
+                        touched.append(p)
+                if VERIFY_OR_SCOPE_RE.search(str(data.get("arguments", ""))):
+                    verify_touched = True
+            continue
+        if ev_type != "assistant.message":
+            continue
         content = (data.get("content") or "").strip()
         treqs = data.get("toolRequests") or []
         tnames = [tr.get("name", "") for tr in treqs]
