@@ -46,7 +46,7 @@ When spawning `Double: <worker_name>` from inside the worker session:
    Copy `toolArguments.kickoff` (`model`, `reasoning_effort`, and `context_tier`, omitting `model` and `reasoning_effort` when an alias is configured) and prepend the returned `declaration` line (`PSTACK_CONTEXT_V1 ...`) as line 1 of `kickoff.prompt`.
 
 3. **Spawn the nested Double child session (silent `--wait` loop, no noisy timer schedule).**
-   Call `create_session` with `coordinate_with_creator: false` and **no `schedule`** (so the App never fires 2-minute completion chimes or burns LLM turns while the parent is idle):
+   Call `create_session` in `"mode": "interactive"` with `coordinate_with_creator: false` and **no `schedule`** (so the App never fires 2-minute completion chimes or autopilot continuation retry turns when Double ends its turn on `PARENT_INACTIVE`):
    ```json
    {
      "session_kind": "chat",
@@ -57,7 +57,7 @@ When spawning `Double: <worker_name>` from inside the worker session:
        "model": "<orthogonal_model>",
        "reasoning_effort": "<orthogonal_effort>",
        "context_tier": "<resolved_context_tier>",
-       "mode": "autopilot",
+       "mode": "interactive",
        "prompt": "PSTACK_CONTEXT_V1 {...}\nSupervise worker session <worker_session_id> (<worker_name>). Invoke the double skill and enter the silent --wait verification loop. Keep all Double state (double-cursor.json, double-wake-bundle.json, double-audit.tsv, double-audit.md) in your own session artifacts_dir (<double_session_dir>/files)."
      }
    }

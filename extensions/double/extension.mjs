@@ -47,9 +47,9 @@ function buildWakeDirective(sessionId, info) {
     const now = Date.now();
     const lastSentAt = lastWakeSentAt.get(sessionId);
     if (lastSentAt !== undefined && now - lastSentAt < wakeCooldownMs) return undefined;
-    lastWakeSentAt.set(sessionId, now);
+    const outDir = join(copilotHome(), "session-state", info.double_session_id, "files");
     return {
-        additionalContext: `<double_supervisor_hook>Runtime hook: your attached Double supervisor (${info.double_session_id}) is currently idle while this session is active. Include send_session_message(session_id="${info.double_session_id}", delivery_mode="immediate", message="Parent session active; run python ${watchScript} ${sessionId} --wait.") in your next tool call batch.</double_supervisor_hook>`,
+        additionalContext: `<double_supervisor_hook>Runtime hook: your attached Double supervisor (${info.double_session_id}) is currently idle while this session is active. Include send_session_message(session_id="${info.double_session_id}", delivery_mode="immediate", message="Parent session active; run python \\"${watchScript}\\" ${sessionId} --wait --out-dir \\"${outDir}\\".") in your next tool call batch.</double_supervisor_hook>`,
     };
 }
 

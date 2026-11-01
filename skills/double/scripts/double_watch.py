@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import re
 import sqlite3
@@ -10,7 +11,17 @@ import time
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-ROOT = pathlib.Path.home() / ".copilot" / "session-state"
+
+def copilot_home() -> pathlib.Path:
+    env_home = os.environ.get("COPILOT_HOME")
+    if env_home:
+        return pathlib.Path(env_home).resolve()
+    user_home = os.environ.get("USERPROFILE") or os.environ.get("HOME")
+    base = pathlib.Path(user_home) if user_home else pathlib.Path.home()
+    return (base / ".copilot").resolve()
+
+
+ROOT = copilot_home() / "session-state"
 PATCH_FILE_RE = re.compile(r"^\*\*\*\s+(?:Add File|Update File|Delete File|Move to):\s*(.+)$")
 FACTUAL_CLAIM_RE = re.compile(
     r"\b(succeeded|passed|failed|reduced|matched|differed|reproduced|verified|confirmed|identical|no unrelated|remains additive|completed|is now the|routed correctly|fixed|root cause|because|caused by|must be|assumes)\b",
@@ -84,7 +95,9 @@ def extract_range_context(session_dir: pathlib.Path, lines: list[str], own_start
             continue
         t = ev.get("type")
         d = ev.get("data", {})
-        if t == "assistant.message" and not d.get("parentToolCallId"):
+        if d.get("parentToolCallId"):
+            continue
+        if t == "assistant.message":
             treqs = [
                 {
                     "name": tr.get("name"),
@@ -167,9 +180,10 @@ def scan_events(
             continue
         ev_type = ev.get("type")
         data = ev.get("data", {})
+        if data.get("parentToolCallId"):
+            continue
         if pending_wake and (
-            ev_type == "user.message"
-            or (ev_type in ("assistant.turn_start", "assistant.message") and not data.get("parentToolCallId"))
+            ev_type in ("user.message", "assistant.turn_start", "assistant.message")
             or (ev_type == "hook.start" and data.get("hookType") == "userPromptSubmitted")
         ):
             emit_pending_wake(max(last_wake_idx, idx - 1))
@@ -219,10 +233,9 @@ def scan_events(
             elif name == "sql" and "status='done'" in args_str.replace(" ", ""):
                 checkpoint_done = True
 
-        is_subagent = bool(data.get("parentToolCallId"))
-        is_gate = not is_subagent and (any(n in ("ask_user", "task_complete") for n in tnames) or (bool(content) and not non_wake_treqs))
-        is_claim = not is_subagent and bool(claim_text and FACTUAL_CLAIM_RE.search(claim_text))
-        is_drift = not is_subagent and bool(checkpoint_done and verify_touched and not is_gate and not is_claim)
+        is_gate = any(n in ("ask_user", "task_complete") for n in tnames) or (bool(content) and not non_wake_treqs)
+        is_claim = bool(claim_text and FACTUAL_CLAIM_RE.search(claim_text))
+        is_drift = bool(checkpoint_done and verify_touched and not is_gate and not is_claim)
 
         if is_gate or is_claim or is_drift:
             trigger = "T1_HUMAN_GATE" if is_gate else ("T2_MIDRUN_CLAIM" if is_claim else "T3_CHECKPOINT_DRIFT")
@@ -289,7 +302,7 @@ def poll_once(session_dir: pathlib.Path, out_dir: pathlib.Path, flush_pending: b
     own_start = find_own_session_start(lines, session_dir.name)
     state = load_cursor(cursor_file, len(lines), own_start, session_dir.name)
     wakes, _, _, next_idx, last_wake, touched, verify_touched = scan_events(
-        session_dir, state["last_wake_idx"], state["touched"], state["verify_touched"],
+        session_dir, state["last_wake_idx"],
         lines=lines, flush_pending=flush_pending,
     )
     new_wakes = [w for w in wakes if w["event_range"][1] >= state["next_idx"]]
@@ -315,7 +328,8 @@ def poll_once(session_dir: pathlib.Path, out_dir: pathlib.Path, flush_pending: b
 
 
 def find_double_child(worker_sid: str) -> dict | None:
-    db = pathlib.Path.home() / ".copilot" / "data.db"
+    home = copilot_home()
+    db = home / "data.db"
     if not db.exists():
         return None
     conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
@@ -332,7 +346,7 @@ def find_double_child(worker_sid: str) -> dict | None:
         ).fetchone()
     finally:
         conn.close()
-    marker = pathlib.Path.home() / ".copilot" / "session-state" / worker_sid / "double-supervised"
+    marker = home / "session-state" / worker_sid / "double-supervised"
     if not row:
         if marker.exists():
             marker.unlink()
@@ -344,7 +358,7 @@ def find_double_child(worker_sid: str) -> dict | None:
 
 def check_parent_state(session_dir: pathlib.Path, lines: list[str], idle_grace_seconds: float = 10.0) -> tuple[bool, str]:
     db_row = None
-    db = pathlib.Path.home() / ".copilot" / "data.db"
+    db = copilot_home() / "data.db"
     if db.exists():
         conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
         try:
@@ -406,7 +420,9 @@ def wait_for_wake(session_dir: pathlib.Path, out_dir: pathlib.Path, interval: fl
         active, reason = check_parent_state(session_dir, lines, idle_exit_seconds)
         if not active:
             if ev_file.exists():
-                poll_once(session_dir, out_dir, flush_pending=True)
+                wakes = poll_once(session_dir, out_dir, flush_pending=True)
+                if wakes:
+                    return
             print(json.dumps({"status": "PARENT_INACTIVE", "reason": reason, "worker_session_id": session_dir.name}), flush=True)
             return
 
@@ -427,7 +443,8 @@ def main():
     parser.add_argument("--idle-exit-seconds", type=float, default=10.0)
     args = parser.parse_args()
 
-    matches = [d for d in ROOT.iterdir() if d.is_dir() and d.name.startswith(args.session_id)]
+    state_root = copilot_home() / "session-state"
+    matches = [d for d in state_root.iterdir() if d.is_dir() and d.name.startswith(args.session_id)] if state_root.exists() else []
     if not matches:
         raise SystemExit(f"No session matching {args.session_id}")
     session_dir = matches[0]
