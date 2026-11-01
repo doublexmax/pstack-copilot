@@ -32,13 +32,13 @@ That one command does four things:
 1. Splices a short block into `~/.copilot/copilot-instructions.md`, which Copilot loads into the system prompt of every session in every directory. From then on you describe the task and the mode is already on.
 2. Adds the absolute `~/.copilot` path to `trustedFolders` in `~/.copilot/config.json`, preserving any folders you already trusted.
 3. Installs a `pstack` CLI wrapper (`~/.copilot/bin/` shims plus a marked block in your PowerShell profile or shell rc) that runs `copilot --add-dir ~/.copilot ...`, so headless runs can read playbooks and `pstack-models.md`.
-4. Installs direct-exec Node hooks for [context routing](../../skills/context-routing/SKILL.md). Pstack-managed delegates use a resolved tier. Ordinary delegates remain unchanged.
+4. Installs direct-exec Node hooks for [context routing](../../skills/context-routing/SKILL.md) and the [Double](../../skills/double/SKILL.md) runtime extension (`~/.copilot/extensions/double/extension.mjs`). Pstack-managed delegates use a resolved tier, and active supervised sessions wake an idle Double child automatically. Ordinary delegates remain unchanged.
 
 The block is user-scoped, so a repo you clone next month is covered without any per-repo setup. `--uninstall` removes the managed changes and leaves unrelated content and personal policy untouched. `--skip-shell` leaves profiles and shims alone. `--dry-run` prints what would change.
 
-To install the other integration without native hooks, add `--hooks skip`.
-That flag leaves existing hooks unchanged. It does not disable installed hooks.
-Use `--hooks remove` to remove only the owned hook config and copied entry.
+To install the other integration without native hooks or the `double` extension, add `--hooks skip`.
+That flag leaves existing hooks and the `double` extension unchanged. It does not disable installed hooks.
+Use `--hooks remove` to remove only the owned hook config, copied hook entry, and `double` extension.
 The default installer or `--hooks install` enables them again.
 `--uninstall` cannot be combined with `--hooks`.
 Hook removal preserves your instructions, policy, models, trust, wrappers, and session markers.
