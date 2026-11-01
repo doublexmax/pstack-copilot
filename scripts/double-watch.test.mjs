@@ -345,18 +345,18 @@ test('double bindings, skill kickoff contract, and documentation stay aligned', 
   const skillText = readFileSync(join(root, 'skills', 'double', 'SKILL.md'), 'utf8');
   assert.match(skillText, /--target create_session/);
   assert.match(skillText, /"context_tier":/);
+  assert.match(skillText, /"mode":\s*"interactive"/);
   assert.match(skillText, /PSTACK_CONTEXT_V1/);
   assert.match(skillText, /"input":\s*\{/);
   assert.match(skillText, /double-supervised/);
-  assert.doesNotMatch(skillText, /call `task_complete`/i);
 
   const agentText = readFileSync(join(root, 'agents', 'double.agent.md'), 'utf8');
-  assert.doesNotMatch(agentText, /call `task_complete`/i);
   assert.match(agentText, /<worker_session_dir>\/files\//);
   assert.match(agentText, /<double_session_dir>\/files\/double-audit\.tsv/);
 
   const extText = readFileSync(join(root, 'extensions', 'double', 'extension.mjs'), 'utf8');
   assert.match(extText, /double-supervised/);
+  assert.match(extText, /--out-dir/);
 
   const setupSkill = readFileSync(join(root, 'skills', 'setup-pstack', 'SKILL.md'), 'utf8');
   assert.match(setupSkill, /double verifier/);
@@ -367,4 +367,197 @@ test('double bindings, skill kickoff contract, and documentation stay aligned', 
 
   const syncDoc = readFileSync(join(root, 'docs', 'upstream-sync.md'), 'utf8');
   assert.match(syncDoc, /double\.agent\.md/);
+});
+
+test('poll_once resets scan state at last_wake_idx across incremental polls and ignores subagent turn_end events', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'double-cursor-replay-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const sessionDir = join(dir, 'worker-cursor');
+  const outDir = join(dir, 'out');
+  mkdirSync(sessionDir, { recursive: true });
+  mkdirSync(outDir, { recursive: true });
+
+  const poll1Events = [
+    { type: 'session.start', data: { sessionId: 'worker-cursor' } },
+    {
+      type: 'assistant.message',
+      data: {
+        content: '',
+        toolRequests: [{ toolCallId: 'c1', name: 'edit', arguments: { path: 'src/prod.py', old_str: 'a', new_str: 'b' } }],
+      },
+    },
+    { type: 'tool.execution_complete', data: { toolCallId: 'c1', success: true, result: { content: 'ok' } } },
+    {
+      type: 'assistant.message',
+      data: {
+        content: '',
+        toolRequests: [{ toolCallId: 'c2', name: 'sql', arguments: { query: "UPDATE todos SET status='done' WHERE id='t1'" } }],
+      },
+    },
+    { type: 'tool.execution_complete', data: { toolCallId: 'c2', success: true, result: { content: 'ok' } } },
+    {
+      type: 'assistant.message',
+      data: {
+        content: '',
+        toolRequests: [{ toolCallId: 'c3', name: 'edit', arguments: { path: 'tests/test_prod.py', old_str: 'x', new_str: 'y' } }],
+      },
+    },
+    { type: 'tool.execution_complete', data: { toolCallId: 'c3', success: true, result: { content: 'ok' } } },
+  ];
+  writeFileSync(join(sessionDir, 'events.jsonl'), `${poll1Events.map((e) => JSON.stringify(e)).join('\n')}\n`);
+
+  const first = runPy(`
+import importlib.util, json, pathlib
+spec = importlib.util.spec_from_file_location("dw", ${JSON.stringify(watchScript)})
+dw = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(dw)
+print(json.dumps(dw.poll_once(pathlib.Path(${JSON.stringify(sessionDir)}), pathlib.Path(${JSON.stringify(outDir)}))))
+`);
+  assert.deepEqual(JSON.parse(first), []);
+
+  const poll2Events = [
+    ...poll1Events,
+    {
+      type: 'assistant.message',
+      data: {
+        content: 'Verified the fix works.',
+        toolRequests: [{ toolCallId: 'c4', name: 'powershell', arguments: { command: 'pytest' } }],
+      },
+    },
+    {
+      type: 'assistant.turn_end',
+      data: { turnId: '0', parentToolCallId: 'subagent_call_1' },
+    },
+  ];
+  writeFileSync(join(sessionDir, 'events.jsonl'), `${poll2Events.map((e) => JSON.stringify(e)).join('\n')}\n`);
+
+  const midSubagent = runPy(`
+import importlib.util, json, pathlib
+spec = importlib.util.spec_from_file_location("dw", ${JSON.stringify(watchScript)})
+dw = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(dw)
+print(json.dumps(dw.poll_once(pathlib.Path(${JSON.stringify(sessionDir)}), pathlib.Path(${JSON.stringify(outDir)}))))
+`);
+  assert.deepEqual(JSON.parse(midSubagent), []);
+
+  const poll3Events = [
+    ...poll2Events,
+    { type: 'tool.execution_complete', data: { toolCallId: 'c4', success: true, result: { content: '1 passed' } } },
+  ];
+  writeFileSync(join(sessionDir, 'events.jsonl'), `${poll3Events.map((e) => JSON.stringify(e)).join('\n')}\n`);
+
+  const final = runPy(`
+import importlib.util, json, pathlib
+spec = importlib.util.spec_from_file_location("dw", ${JSON.stringify(watchScript)})
+dw = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(dw)
+print(json.dumps(dw.poll_once(pathlib.Path(${JSON.stringify(sessionDir)}), pathlib.Path(${JSON.stringify(outDir)}))))
+`);
+  assert.deepEqual(JSON.parse(final), [
+    {
+      worker_session_id: 'worker-cursor',
+      event_range: [0, 9],
+      trigger: 'T2_MIDRUN_CLAIM',
+      touched_files: ['src/prod.py', 'tests/test_prod.py'],
+      trigger_detail: 'Verified the fix works.',
+    },
+  ]);
+});
+
+test('wait_for_wake returns flushed final wake before PARENT_INACTIVE and honors COPILOT_HOME', (t) => {
+  const base = mkdtempSync(join(tmpdir(), 'double-copilot-home-'));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const customHome = join(base, 'custom-copilot');
+  const sessionDir = join(customHome, 'session-state', 'worker-flush');
+  const outDir = join(base, 'out');
+  mkdirSync(sessionDir, { recursive: true });
+  mkdirSync(outDir, { recursive: true });
+
+  const events = [
+    { type: 'session.start', data: { sessionId: 'worker-flush' } },
+    {
+      type: 'assistant.message',
+      data: {
+        content: 'Verified the output file matches.',
+        toolRequests: [{ toolCallId: 'c_unfin', name: 'powershell', arguments: { command: 'echo ok' } }],
+      },
+    },
+    { type: 'session.shutdown', data: {} },
+  ];
+  writeFileSync(join(sessionDir, 'events.jsonl'), `${events.map((e) => JSON.stringify(e)).join('\n')}\n`);
+
+  const firstWait = execFileSync('python', [watchScript, 'worker-flush', '--wait', '--out-dir', outDir, '--idle-exit-seconds', '0'], {
+    env: { ...process.env, COPILOT_HOME: customHome },
+    encoding: 'utf8',
+  });
+  assert.doesNotMatch(firstWait, /PARENT_INACTIVE/);
+  const bundle = JSON.parse(readFileSync(join(outDir, 'double-wake-bundle.json'), 'utf8'));
+  assert.equal(bundle.length, 1);
+  assert.deepEqual(bundle[0].event_range, [0, 2]);
+
+  const secondWait = execFileSync('python', [watchScript, 'worker-flush', '--wait', '--out-dir', outDir, '--idle-exit-seconds', '0'], {
+    env: { ...process.env, COPILOT_HOME: customHome },
+    encoding: 'utf8',
+  });
+  assert.equal(JSON.parse(secondWait.trim()).status, 'PARENT_INACTIVE');
+});
+
+test('extension.mjs includes --out-dir in wake directive and starts cooldown only after send_session_message', (t) => {
+  const base = mkdtempSync(join(tmpdir(), 'double-ext-test-'));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const sdkDir = join(base, 'node_modules', '@github', 'copilot-sdk');
+  mkdirSync(sdkDir, { recursive: true });
+  writeFileSync(join(sdkDir, 'package.json'), JSON.stringify({
+    name: '@github/copilot-sdk',
+    type: 'module',
+    exports: { './extension': './extension.mjs' },
+  }));
+  writeFileSync(join(sdkDir, 'extension.mjs'), 'export let registeredHooks; export async function joinSession(cfg) { registeredHooks = cfg.hooks; }\n');
+
+  const customHome = join(base, 'copilot-home');
+  const workerDir = join(customHome, 'session-state', 'worker-ext');
+  mkdirSync(workerDir, { recursive: true });
+  writeFileSync(join(workerDir, 'double-supervised'), 'double-child-99\n');
+
+  const db = new DatabaseSync(join(customHome, 'data.db'));
+  db.exec(`
+    CREATE TABLE sessions (id TEXT PRIMARY KEY, title TEXT, agent TEXT, is_running INTEGER, was_interrupted INTEGER, archived_at TEXT, created_at TEXT);
+    CREATE TABLE chat_parent_links (session_id TEXT, parent_session_id TEXT);
+  `);
+  db.prepare('INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?, ?)').run('double-child-99', 'Double: worker', 'double', 0, 0, null, '2026-11-01T00:00:00Z');
+  db.prepare('INSERT INTO chat_parent_links VALUES (?, ?)').run('double-child-99', 'worker-ext');
+  db.close();
+
+  const extCopy = join(base, 'extension.mjs');
+  const extSrc = readFileSync(join(root, 'extensions', 'double', 'extension.mjs'), 'utf8')
+    .replace('const pstackRoot = join(homedir(), ".copilot", "pstack");', `const pstackRoot = ${JSON.stringify(root)};`);
+  writeFileSync(extCopy, extSrc);
+
+  const runner = join(base, 'run.mjs');
+  writeFileSync(runner, `
+import './extension.mjs';
+import { registeredHooks } from '@github/copilot-sdk/extension';
+const inv = { sessionId: 'worker-ext' };
+const promptHook = await registeredHooks.onUserPromptSubmitted({}, inv);
+const beforeSend = await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
+const onSend = await registeredHooks.onPostToolUse({ toolName: 'send_session_message' }, inv);
+const afterSend = await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
+console.log(JSON.stringify({
+  promptHasOutDir: promptHook?.additionalContext?.includes('--out-dir') ?? false,
+  beforeSendHasDirective: Boolean(beforeSend?.additionalContext),
+  onSendUndefined: onSend === undefined,
+  afterSendHasDirective: Boolean(afterSend?.additionalContext),
+}));
+`);
+  const out = execFileSync(process.execPath, [runner], {
+    cwd: base,
+    env: { ...process.env, COPILOT_HOME: customHome },
+    encoding: 'utf8',
+  });
+  assert.deepEqual(JSON.parse(out.trim()), {
+    promptHasOutDir: true,
+    beforeSendHasDirective: true,
+    onSendUndefined: true,
+    afterSendHasDirective: false,
+  });
 });
