@@ -1143,3 +1143,35 @@ console.log(JSON.stringify({ deliveries, state: readState() }));
   assert.equal(result.state.queued, 1);
   assert.equal(result.state.monitors, 0);
 });
+
+test('fresh Double startup records double_ext_pid without duplicate kickoff wake, worker delegates when double_ext_pid is alive, and read_audit_ranges backfills double-audit.md', (t) => {
+  const freshDouble = extensionHarness(t, { sessionId: 'double-child-99', workerRunning: 1 });
+  const startup = freshDouble.run(`
+console.log(JSON.stringify({ deliveries, state: readState() }));
+`);
+  assert.deepEqual(startup.deliveries, []);
+  assert.equal(startup.state.phase, 'wake_pending');
+  assert.equal(startup.state.queued, 1);
+  assert.equal(startup.state.wake_count, 0);
+  assert.equal(Number.isInteger(startup.state.double_ext_pid) && startup.state.double_ext_pid > 0, true);
+
+  const delegated = extensionHarness(t, { sessionId: 'worker-ext' });
+  writeFileSync(delegated.statePath, JSON.stringify(lifecycleState('idle', { double_ext_pid: process.pid })));
+  const workerResult = delegated.run(`
+await registeredHooks.onUserPromptSubmitted({}, inv);
+console.log(JSON.stringify({ deliveries, state: readState() }));
+`);
+  assert.deepEqual(workerResult.deliveries, []);
+  assert.equal(workerResult.state.phase, 'idle');
+  assert.equal(workerResult.state.worker_active, true);
+
+  writeFileSync(join(delegated.outDir, 'double-audit.tsv'), auditHeader + auditRow('0-3'));
+  const ranges = JSON.parse(runWatcher(`
+print(json.dumps(dw.read_audit_ranges(pathlib.Path(${JSON.stringify(delegated.outDir)}))))
+`));
+  assert.deepEqual(ranges, [[0, 3]]);
+  const mdText = readFileSync(join(delegated.outDir, 'double-audit.md'), 'utf8');
+  assert.match(mdText, /# Double audit/);
+  assert.match(mdText, /\|\s*0-3\s*\|\s*T1_HUMAN_GATE\s*\|\s*VERIFIED\s*\|/);
+});
+
