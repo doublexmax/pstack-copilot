@@ -197,6 +197,7 @@ test('unmarked native calls bypass broken checkout and session validation before
 
 test('post-hook observes the accepted alias decision even after policy changes or checkout disappears', (t) => {
   const f = fixture(t);
+  configurePolicy({ defaultMode: 'adaptive' }, f);
   const resolved = resolveRole({
     role: 'how explainer', model: 'auto', workload: 'bounded', why: 'Read one helper.',
     hostContext: true, hostSource: 'Current task schema',

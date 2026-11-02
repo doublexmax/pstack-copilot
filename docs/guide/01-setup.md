@@ -94,15 +94,16 @@ You only override what you care about. A role with no line in the rule keeps the
 Set a role to `inherit-parent` or `auto` to omit the subagent model and effort fields.
 Copilot selects the child model, which can come from a per-agent or custom-agent preference rather than the parent.
 Both values mean the same thing, and neither is a model slug.
-The shipped `adaptive` policy keeps these unresolved model choices launchable at the default tier.
-The opt-in `always_long` policy blocks them. Choose an explicit role model or change the context policy through `/setup-pstack`.
+The shipped `always_long` policy blocks unresolved model choices.
+Choose an explicit role model or change the context policy through `/setup-pstack`.
+The `adaptive` policy keeps these choices launchable at the default tier.
 For a panel role the value is a list, and one subagent runs per entry, so the list length sets the panel size.
 Setup also configures `swarm workers`, the default model for every `/swarm` worker unless a race names a model for each arm.
 
 ## Configure delegated context
 
 Ask `/setup-pstack` for context-only setup to preserve your model and effort choices.
-The shipped default is `adaptive`. Bounded delegates use default context without requiring proven long-context support.
+The shipped default is `always_long`. Managed launches require long-context support for the selected model and launch tool.
 Existing personal policy choices take precedence.
 To change only the policy, ask `/setup-pstack` to use `adaptive`, `default`, or `always_long`.
 Under adaptive policy, small inputs use `default`, even when the task spans several files.
@@ -142,9 +143,9 @@ Do not edit the shipped file when `policyFile` points to it. Changing the global
 
 | Policy | Behavior |
 | --- | --- |
-| `adaptive` | The shipped default. Default for bounded work. Long for supported large-corpus work. Unknown child identity or unsupported long context selects default. |
+| `adaptive` | Default for bounded work. Long for supported large-corpus work. Unknown child identity or unsupported long context selects default. |
 | `default` | Default context for every workload. |
-| `always_long` | Strict opt-in. Long context for every workload. Unresolved child identity or unproven support blocks the launch. |
+| `always_long` | The shipped default. Long context for every workload. Unresolved child identity or unproven support blocks the launch. |
 
 Use `set-policy --default always_long` to require long context.
 `always_long` selects Copilot's `long_context` tier. The policy name and tier name are separate.
@@ -171,7 +172,7 @@ node scripts\verify-context-routing.mjs --cli "<copilot.exe>" --out "<new-eviden
 ```
 
 The verifier uses an isolated Copilot home and compares requested, post-hook, and effective tiers.
-Add `--policy always_long` or `--policy default` to verify another policy without changing your personal setup.
+Add `--policy adaptive` or `--policy default` to verify another policy without changing your personal setup.
 To select another model, supply its supported effort too, for example `--model grok-4.7 --effort xhigh`.
 The same effort applies to the verifier's parent and delegates. The CLI validates the model's supported values.
 Its controlled workloads prove dispatch, not better answers or autonomous workload classification.

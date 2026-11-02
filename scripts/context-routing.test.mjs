@@ -58,27 +58,35 @@ function event(result, args = {}) {
   };
 }
 
-test('missing optional files preserve bounded launches with explicit models and aliases', (t) => {
+test('shipped policy requires long context when no personal policy exists', (t) => {
   const f = fixture(t, null);
   const result = resolveRole(request(), f);
   assert.deepEqual(result.toolArguments, {
-    model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: 'default',
+    model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: 'long_context',
   });
   assert.deepEqual(result.decision, {
     role: 'feature, refactoring', effectiveModel: 'gpt-6.1-sol', workload: 'bounded',
-    policy: 'adaptive', evidence: [
+    policy: 'always_long', evidence: [
       join(f.root, 'context.default.json'), 'Current task context_tier schema', 'Current exact-model task schema',
-    ], diagnostics: [], status: 'resolved', tier: 'default', reason: 'bounded-work',
+    ], diagnostics: [], status: 'resolved', tier: 'long_context', reason: 'policy-long',
+  });
+  assert.deepEqual(routeToolCall(event(result, { context_tier: 'default' }), f).output, {
+    modifiedArgs: event(result).toolArgs,
   });
   for (const alias of ['auto', 'inherit-parent']) {
     const resolved = resolveRole(request({ model: alias, effort: undefined, support: 'unknown' }), f);
-    assert.deepEqual(resolved.toolArguments, { context_tier: 'default' });
+    assert.equal(resolved.decision.status, 'blocked');
+    assert.equal(resolved.decision.reason, 'required-long-unproven');
+    assert.equal(Object.hasOwn(resolved, 'toolArguments'), false);
     assert.equal(resolved.decision.effectiveModel, null);
-    assert.deepEqual(routeToolCall(event(resolved), f).output, { modifiedArgs: event(resolved).toolArgs });
   }
-  assert.deepEqual(resolveRole(request({ support: 'unsupported' }), f).toolArguments, {
-    model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: 'default',
-  });
+  for (const support of ['unknown', 'unsupported']) {
+    const blocked = resolveRole(request({ support }), f);
+    assert.equal(blocked.decision.status, 'blocked');
+    assert.equal(blocked.decision.reason, 'required-long-unproven');
+  }
+  f.write('pstack-context.json', { schemaVersion: 1, default: 'adaptive' });
+  assert.equal(resolveRole(request(), f).toolArguments.context_tier, 'default');
 });
 
 test('supported joint large-corpus work gets long context without changing the model or effort', (t) => {
