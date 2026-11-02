@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,6 +18,23 @@ function runPy(code, env = {}) {
     encoding: 'utf8',
   });
 }
+
+function runWatcher(code, env = {}) {
+  return runPy(`
+import importlib.util, json, os, pathlib
+spec = importlib.util.spec_from_file_location("dw", ${JSON.stringify(watchScript)})
+dw = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(dw)
+${code}
+`, env);
+}
+
+function writeEvents(sessionDir, events) {
+  writeFileSync(join(sessionDir, 'events.jsonl'), `${events.map((event) => JSON.stringify(event)).join('\n')}\n`);
+}
+
+const auditHeader = 'ts\tevent_range\ttrigger\tverdict\tclaim\tevidence_pointer\tobserved_fact\n';
+const auditRow = (range) => `2026-11-02T00:00:00Z\t${range}\tT1_HUMAN_GATE\tVERIFIED\tclaim\tartifact\tobserved\n`;
 
 test('extract_files parses apply_patch headers and preserves edit/create path when content contains File:', () => {
   const out = runPy(`
@@ -251,10 +268,37 @@ cursor = json.loads((pathlib.Path(${JSON.stringify(outDir)}) / "double-cursor.js
 print(json.dumps({"wakes": len(wakes), "bundle_exists": bundle_exists, "worker_sid": cursor.get("worker_session_id")}))
 `);
   assert.deepEqual(JSON.parse(thirdPoll), {
-    wakes: 0,
-    bundle_exists: false,
+    wakes: 3,
+    bundle_exists: true,
     worker_sid: 'worker-2',
   });
+  const pending = JSON.parse(readFileSync(join(outDir, 'double-cursor.json'), 'utf8')).pending_wakes;
+  assert.deepEqual(pending.map(({ event_range, delivered_audit_rows }) => ({ event_range, delivered_audit_rows })), [
+    { event_range: [0, 3], delivered_audit_rows: 0 },
+    { event_range: [4, 6], delivered_audit_rows: 0 },
+    { event_range: [7, 8], delivered_audit_rows: 0 },
+  ]);
+
+  const ledger = join(outDir, 'double-audit.tsv');
+  const partialAudit = auditHeader + auditRow('[0, 3]') + auditRow('4-6');
+  writeFileSync(ledger, partialAudit);
+  const partial = JSON.parse(runWatcher(`
+wakes = dw.poll_once(pathlib.Path(${JSON.stringify(sessionDir)}), pathlib.Path(${JSON.stringify(outDir)}))
+print(json.dumps([w["event_range"] for w in wakes]))
+`));
+  assert.deepEqual(partial, [[7, 8]]);
+  assert.deepEqual(JSON.parse(readFileSync(join(outDir, 'double-wake-bundle.json'), 'utf8')).map((w) => w.event_range), [[7, 8]]);
+  assert.equal(readFileSync(ledger, 'utf8'), partialAudit);
+
+  appendFileSync(ledger, auditRow('7..8'));
+  const fullyAudited = readFileSync(ledger, 'utf8');
+  const acknowledged = JSON.parse(runWatcher(`
+print(json.dumps(dw.poll_once(pathlib.Path(${JSON.stringify(sessionDir)}), pathlib.Path(${JSON.stringify(outDir)}))))
+`));
+  assert.deepEqual(acknowledged, []);
+  assert.equal(existsSync(join(outDir, 'double-wake-bundle.json')), false);
+  assert.deepEqual(JSON.parse(readFileSync(join(outDir, 'double-cursor.json'), 'utf8')).pending_wakes, []);
+  assert.equal(readFileSync(ledger, 'utf8'), fullyAudited);
 });
 
 test('replay writes double-wake-bundle.json and wait_for_wake handles missing events.jsonl without crashing', (t) => {
@@ -283,6 +327,19 @@ test('replay writes double-wake-bundle.json and wait_for_wake handles missing ev
   assert.equal(bundle.length, 1);
   assert.equal(bundle[0].trigger, 'T1_HUMAN_GATE');
   assert.equal(Array.isArray(bundle[0].range_events), true);
+  const cursor = JSON.parse(readFileSync(join(outDir, 'double-cursor.json'), 'utf8'));
+  assert.equal(cursor.next_idx, events.length);
+  assert.equal(cursor.last_wake_idx, events.length);
+  assert.deepEqual(cursor.pending_wakes.map((wake) => wake.event_range), [[0, 1]]);
+
+  writeFileSync(join(outDir, 'double-audit.tsv'), auditHeader + auditRow('[0, 1]'));
+  const resumed = execFileSync('python', [watchScript, 'worker-replay', '--wait', '--out-dir', outDir, '--idle-exit-seconds', '0'], {
+    env: { ...process.env, COPILOT_HOME: '', USERPROFILE: home, HOME: home },
+    encoding: 'utf8',
+  });
+  assert.equal(JSON.parse(resumed.trim()).status, 'PARENT_INACTIVE');
+  assert.deepEqual(JSON.parse(readFileSync(join(outDir, 'double-cursor.json'), 'utf8')).pending_wakes, []);
+  assert.equal(existsSync(bundlePath), false);
 
   const waitOut = execFileSync('python', [watchScript, 'worker-empty', '--wait', '--out-dir', outDir, '--idle-exit-seconds', '0'], {
     env: { ...process.env, COPILOT_HOME: '', USERPROFILE: home, HOME: home },
@@ -349,6 +406,7 @@ test('double bindings, skill kickoff contract, and documentation stay aligned', 
   assert.match(skillText, /PSTACK_CONTEXT_V1/);
   assert.match(skillText, /"input":\s*\{/);
   assert.match(skillText, /double-supervised/);
+  assert.match(skillText, /gpt-6\.1-sol \/ xhigh/);
 
   const agentText = readFileSync(join(root, 'agents', 'double.agent.md'), 'utf8');
   assert.match(agentText, /<worker_session_dir>\/files\//);
@@ -460,6 +518,7 @@ print(json.dumps(dw.poll_once(pathlib.Path(${JSON.stringify(sessionDir)}), pathl
       trigger: 'T2_MIDRUN_CLAIM',
       touched_files: ['src/prod.py', 'tests/test_prod.py'],
       trigger_detail: 'Verified the fix works.',
+      delivered_audit_rows: 0,
     },
   ]);
 });
@@ -499,10 +558,291 @@ test('wait_for_wake returns flushed final wake before PARENT_INACTIVE and honors
     env: { ...process.env, COPILOT_HOME: customHome },
     encoding: 'utf8',
   });
-  assert.equal(JSON.parse(secondWait.trim()).status, 'PARENT_INACTIVE');
+  assert.equal(secondWait.trim(), '');
+  assert.deepEqual(JSON.parse(readFileSync(join(outDir, 'double-wake-bundle.json'), 'utf8')), bundle);
+  const auditing = JSON.parse(readFileSync(join(outDir, 'double-lifecycle.json'), 'utf8'));
+  assert.equal(auditing.phase, 'auditing');
+  assert.equal(auditing.monitors, 1);
+  assert.equal(auditing.monitor_pid, null);
+
+  writeFileSync(join(outDir, 'double-audit.tsv'), auditHeader + auditRow('0-2'));
+  const thirdWait = execFileSync('python', [watchScript, 'worker-flush', '--wait', '--out-dir', outDir, '--idle-exit-seconds', '0'], {
+    env: { ...process.env, COPILOT_HOME: customHome },
+    encoding: 'utf8',
+  });
+  assert.equal(JSON.parse(thirdWait.trim()).status, 'PARENT_INACTIVE');
+  const idle = JSON.parse(readFileSync(join(outDir, 'double-lifecycle.json'), 'utf8'));
+  assert.deepEqual({
+    worker_session_id: idle.worker_session_id,
+    phase: idle.phase,
+    queued: idle.queued,
+    monitors: idle.monitors,
+    monitor_pid: idle.monitor_pid,
+    worker_active: idle.worker_active,
+    last_event_size: idle.last_event_size,
+  }, {
+    worker_session_id: 'worker-flush',
+    phase: 'idle',
+    queued: 0,
+    monitors: 0,
+    monitor_pid: null,
+    worker_active: false,
+    last_event_size: statSync(join(sessionDir, 'events.jsonl')).size,
+  });
 });
 
-test('extension.mjs includes --out-dir in wake directive and starts cooldown only after send_session_message', (t) => {
+test('poll_once merges new wakes with unacknowledged wakes and refreshes their context', (t) => {
+  const base = mkdtempSync(join(tmpdir(), 'double-pending-'));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const sessionDir = join(base, 'worker-pending');
+  const outDir = join(base, 'out');
+  mkdirSync(sessionDir, { recursive: true });
+  mkdirSync(outDir);
+  const events = [
+    { type: 'session.start', data: { sessionId: 'worker-pending' } },
+    { type: 'assistant.message', data: { content: 'Verified the first artifact.' } },
+  ];
+  writeEvents(sessionDir, events);
+  const poll = () => JSON.parse(runWatcher(`
+print(json.dumps(dw.poll_once(pathlib.Path(${JSON.stringify(sessionDir)}), pathlib.Path(${JSON.stringify(outDir)}))))
+`));
+  assert.deepEqual(poll().map((w) => w.event_range), [[0, 1]]);
+  const db = new DatabaseSync(join(sessionDir, 'session.db'));
+  db.exec('CREATE TABLE todos (id TEXT, title TEXT, status TEXT, updated_at TEXT)');
+  db.prepare('INSERT INTO todos VALUES (?, ?, ?, ?)').run('pending-task', 'Audit the next artifact', 'in_progress', '2026-11-02');
+  db.close();
+  writeEvents(sessionDir, [...events, { type: 'assistant.message', data: { content: 'Verified the second artifact.' } }]);
+  assert.deepEqual(poll().map((w) => w.event_range), [[0, 1], [2, 2]]);
+  assert.deepEqual(poll().map((w) => w.event_range), [[0, 1], [2, 2]]);
+  const bundle = JSON.parse(readFileSync(join(outDir, 'double-wake-bundle.json'), 'utf8'));
+  assert.deepEqual(bundle.map((w) => w.active_todo_anchor), [
+    { id: 'pending-task', title: 'Audit the next artifact', status: 'in_progress' },
+    { id: 'pending-task', title: 'Audit the next artifact', status: 'in_progress' },
+  ]);
+});
+
+test('audit acknowledgment matches overlapping integer ranges and only falls back to new symbolic rows', (t) => {
+  const base = mkdtempSync(join(tmpdir(), 'double-audit-ranges-'));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const sessionDir = join(base, 'worker-ranges');
+  mkdirSync(sessionDir);
+  writeEvents(sessionDir, [
+    { type: 'session.start', data: { sessionId: 'worker-ranges' } },
+    { type: 'assistant.message', data: { content: 'Verified the artifact.' } },
+  ]);
+  const cases = [
+    { range: '0-1', acknowledged: true },
+    { range: '[0, 3]', acknowledged: true },
+    { range: '1..3', acknowledged: true },
+    { range: '1', acknowledged: true },
+    { range: 'all', acknowledged: true },
+    { range: '*', acknowledged: true },
+    { range: '2-8', acknowledged: false },
+    { range: '559', acknowledged: false },
+    { range: 'W1', acknowledged: true },
+    { range: 'W1', existing: true, acknowledged: false },
+    { range: 'W1', old: '559', acknowledged: true },
+    { range: 'W1', extra: '394-405', acknowledged: false },
+    { range: '0-1', existing: true, acknowledged: true },
+  ];
+  for (const [index, entry] of cases.entries()) {
+    const outDir = join(base, `out-${index}`);
+    mkdirSync(outDir);
+    const ledger = join(outDir, 'double-audit.tsv');
+    writeFileSync(ledger, auditHeader + (entry.existing ? auditRow(entry.range) : '') + (entry.old ? auditRow(entry.old) : ''));
+    const poll = () => JSON.parse(runWatcher(`
+print(json.dumps(dw.poll_once(pathlib.Path(${JSON.stringify(sessionDir)}), pathlib.Path(${JSON.stringify(outDir)}))))
+`));
+    poll();
+    if (!entry.existing) appendFileSync(ledger, auditRow(entry.range));
+    if (entry.extra) appendFileSync(ledger, auditRow(entry.extra));
+    const before = readFileSync(ledger, 'utf8');
+    assert.deepEqual(poll().map((w) => w.event_range), entry.acknowledged ? [] : [[0, 1]], JSON.stringify(entry));
+    assert.equal(readFileSync(ledger, 'utf8'), before);
+    assert.equal(existsSync(join(outDir, 'double-wake-bundle.json')), !entry.acknowledged);
+  }
+});
+
+test('session prefixes must be unambiguous and exact directories take precedence', (t) => {
+  const home = mkdtempSync(join(tmpdir(), 'double-prefix-'));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const stateRoot = join(home, 'session-state');
+  for (const name of ['worker-beta', 'worker-alpha-longer', 'worker-alpha']) {
+    mkdirSync(join(stateRoot, name), { recursive: true });
+  }
+  writeFileSync(join(stateRoot, 'worker-file'), '');
+  const run = (id) => spawnSync('python', [watchScript, id, '--replay', '--out-dir', join(home, 'out')], {
+    env: { ...process.env, COPILOT_HOME: home },
+    encoding: 'utf8',
+  });
+  const ambiguous = run('worker-');
+  assert.equal(ambiguous.status, 1);
+  assert.equal(ambiguous.stderr.trim(), "Ambiguous session prefix 'worker-' matches 3 sessions: worker-alpha, worker-alpha-longer, worker-beta");
+  assert.equal(run('worker-alpha').status, 0);
+  assert.match(run('worker-b').stdout, /Session worker-beta /);
+  const missing = run('missing');
+  assert.equal(missing.status, 1);
+  assert.equal(missing.stderr.trim(), 'No session matching missing');
+});
+
+test('watcher ignores conversational must-be phrases and shell words but preserves causal claims and file paths', (t) => {
+  const base = mkdtempSync(join(tmpdir(), 'double-signal-'));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const sessionDir = join(base, 'worker-signal');
+  mkdirSync(sessionDir);
+  const phrases = [
+    'I must be mindful.',
+    'We must be careful.',
+    'The agent must be cautious.',
+    'They must be sure about the next step.',
+    'They must be able to proceed.',
+    'The problem must be a stale cache.',
+    'The failure must be caused by a stale cache.',
+    'The root cause must be a stale cache.',
+  ];
+  const out = runWatcher(`
+session_dir = pathlib.Path(${JSON.stringify(sessionDir)})
+phrases = ${JSON.stringify(phrases)}
+counts = []
+for phrase in phrases:
+    events = [
+        {"type": "assistant.message", "data": {"reasoningText": phrase, "toolRequests": [{"name": "powershell", "toolCallId": "c1"}]}},
+        {"type": "tool.execution_complete", "data": {"toolCallId": "c1", "success": True}},
+    ]
+    counts.append(len(dw.scan_events(session_dir, lines=[json.dumps(e) for e in events])[0]))
+events = [
+    {"type": "assistant.message", "data": {"content": "Verified output.", "toolRequests": [{"name": "powershell", "toolCallId": "c1"}]}},
+    {"type": "tool.execution_start", "data": {"shellToolInfo": {"hasWriteFileRedirection": True, "possiblePaths": ${JSON.stringify(['status', 'push', 'throw', '$env:GH_TOKEN', 'Directory', 'no doublexmax token', 'test_out.txt', 'src/app.py', 'skills\\double\\SKILL.md', 'logs/output', '$env:TEMP/out.txt', 'not a path.txt'])}}}},
+    {"type": "tool.execution_complete", "data": {"toolCallId": "c1", "success": True}},
+]
+wakes = dw.scan_events(session_dir, lines=[json.dumps(e) for e in events])[0]
+print(json.dumps({"counts": counts, "paths": wakes[0]["touched_files"]}))
+`);
+  assert.deepEqual(JSON.parse(out), {
+    counts: [0, 0, 0, 0, 0, 1, 1, 1],
+    paths: ['test_out.txt', 'src/app.py', 'skills\\double\\SKILL.md', 'logs/output'],
+  });
+});
+
+test('range context selects the active todo, falls back to the latest todo, and tolerates a missing database', (t) => {
+  const base = mkdtempSync(join(tmpdir(), 'double-todo-'));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const db = new DatabaseSync(join(base, 'session.db'));
+  db.exec('CREATE TABLE todos (id TEXT, title TEXT, status TEXT, updated_at TEXT)');
+  db.prepare('INSERT INTO todos VALUES (?, ?, ?, ?)').run('active', 'Finish the lifecycle', 'in_progress', '2026-11-01');
+  db.prepare('INSERT INTO todos VALUES (?, ?, ?, ?)').run('latest', 'Check the audit', 'pending', '2026-11-02');
+  const context = (dir) => JSON.parse(runWatcher(`
+print(json.dumps(dw.extract_range_context(pathlib.Path(${JSON.stringify(dir)}), [], 0, 0, -1)))
+`)).active_todo_anchor;
+  assert.deepEqual(context(base), { id: 'active', title: 'Finish the lifecycle', status: 'in_progress' });
+  db.exec("UPDATE todos SET status = 'done' WHERE id = 'active'");
+  assert.deepEqual(context(base), { id: 'latest', title: 'Check the audit', status: 'pending' });
+  db.close();
+  assert.equal(context(join(base, 'missing')), null);
+});
+
+test('tool-only human gates include tool names and arguments in trigger_detail', () => {
+  const out = runWatcher(`
+events = [
+    {"type": "assistant.message", "data": {"toolRequests": [{"name": "task_complete", "toolCallId": "c1", "arguments": {"summary": "Done"}}]}},
+    {"type": "tool.execution_complete", "data": {"toolCallId": "c1", "success": True}},
+    {"type": "assistant.message", "data": {"toolRequests": [{"name": "ask_user", "toolCallId": "c2", "arguments": {"question": "Which one?"}}]}},
+    {"type": "tool.execution_start", "data": {"toolCallId": "c2"}},
+]
+wakes = dw.scan_events(pathlib.Path("worker-tools"), lines=[json.dumps(e) for e in events])[0]
+print(json.dumps([{"trigger": w["trigger"], "detail": w["trigger_detail"]} for w in wakes]))
+`);
+  assert.deepEqual(JSON.parse(out), [
+    { trigger: 'T1_HUMAN_GATE', detail: "task_complete({'summary': 'Done'})" },
+    { trigger: 'T1_HUMAN_GATE', detail: "ask_user({'question': 'Which one?'})" },
+  ]);
+});
+
+test('wait suppresses a duplicate live monitor and recovers a dead monitor', (t) => {
+  const home = mkdtempSync(join(tmpdir(), 'double-monitor-'));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const sessionDir = join(home, 'session-state', 'worker-monitor');
+  const outDir = join(home, 'session-state', 'double-monitor', 'files');
+  mkdirSync(sessionDir, { recursive: true });
+  mkdirSync(outDir, { recursive: true });
+  writeEvents(sessionDir, [{ type: 'session.shutdown', data: {} }]);
+  const statePath = join(outDir, 'double-lifecycle.json');
+  const state = {
+    worker_session_id: 'worker-monitor',
+    double_session_id: 'double-monitor',
+    phase: 'watching',
+    queued: 0,
+    monitors: 1,
+    monitor_pid: process.pid,
+    worker_active: true,
+    wake_count: 7,
+    last_event_size: 0,
+    updated_at: Date.now(),
+  };
+  writeFileSync(statePath, JSON.stringify(state));
+  const wait = () => JSON.parse(execFileSync('python', [watchScript, 'worker-monitor', '--wait', '--out-dir', outDir, '--idle-exit-seconds', '0'], {
+    env: { ...process.env, COPILOT_HOME: home },
+    encoding: 'utf8',
+    timeout: 5000,
+  }).trim());
+  assert.deepEqual(wait(), {
+    status: 'DUPLICATE_MONITOR_SUPPRESSED',
+    monitor_pid: process.pid,
+    worker_session_id: 'worker-monitor',
+  });
+  assert.deepEqual(JSON.parse(readFileSync(statePath, 'utf8')), state);
+  writeFileSync(statePath, JSON.stringify({ ...state, monitor_pid: 2147483647 }));
+  assert.equal(wait().status, 'PARENT_INACTIVE');
+  const recovered = JSON.parse(readFileSync(statePath, 'utf8'));
+  assert.equal(recovered.phase, 'idle');
+  assert.equal(recovered.monitors, 0);
+  assert.equal(recovered.monitor_pid, null);
+  assert.equal(recovered.double_session_id, 'double-monitor');
+  assert.equal(recovered.wake_count, 7);
+});
+
+test('concurrent wait processes keep one live monitor without failing competing commands', (t) => {
+  const base = mkdtempSync(join(tmpdir(), 'double-monitor-race-'));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const result = JSON.parse(runPy(`
+import json, os, pathlib, subprocess, sys, time
+observations = []
+for wave in range(3):
+    home = pathlib.Path(${JSON.stringify(base)}) / str(wave)
+    worker = home / "session-state" / "worker-race"
+    output = home / "session-state" / "double-race" / "files"
+    worker.mkdir(parents=True)
+    output.mkdir(parents=True)
+    events = worker / "events.jsonl"
+    events.write_text(json.dumps({"type": "tool.execution_start", "data": {"toolCallId": "live", "toolName": "powershell"}}) + "\\n", encoding="utf-8")
+    command = [sys.executable, ${JSON.stringify(watchScript)}, worker.name, "--wait", "--interval", "0.02", "--idle-exit-seconds", "0", "--out-dir", str(output)]
+    processes = [subprocess.Popen(command, env={**os.environ, "COPILOT_HOME": str(home)}, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for _ in range(8)]
+    try:
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and sum(p.poll() is None for p in processes) > 1:
+            time.sleep(0.02)
+        live = sum(p.poll() is None for p in processes)
+        with events.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps({"type": "session.shutdown", "data": {}}) + "\\n")
+        statuses, errors = [], []
+        for process in processes:
+            stdout, stderr = process.communicate(timeout=5)
+            if process.returncode == 0:
+                statuses.append(json.loads(stdout)["status"])
+            else:
+                errors.append(stderr.strip().splitlines()[-1] if stderr.strip() else f"exit {process.returncode}")
+        observations.append({"live": live, "suppressed": statuses.count("DUPLICATE_MONITOR_SUPPRESSED"), "idle": statuses.count("PARENT_INACTIVE"), "errors": errors})
+    finally:
+        for process in processes:
+            if process.poll() is None:
+                process.terminate()
+                process.wait(timeout=5)
+print(json.dumps(observations))
+`));
+  assert.deepEqual(result, Array.from({ length: 3 }, () => ({ live: 1, suppressed: 7, idle: 1, errors: [] })));
+});
+
+function extensionHarness(t, { sessionId = 'worker-ext', marker = true, workerRunning = 0, doubleRunning = 0 } = {}) {
   const base = mkdtempSync(join(tmpdir(), 'double-ext-test-'));
   t.after(() => rmSync(base, { recursive: true, force: true }));
   const sdkDir = join(base, 'node_modules', '@github', 'copilot-sdk');
@@ -512,19 +852,44 @@ test('extension.mjs includes --out-dir in wake directive and starts cooldown onl
     type: 'module',
     exports: { './extension': './extension.mjs' },
   }));
-  writeFileSync(join(sdkDir, 'extension.mjs'), 'export let registeredHooks; export async function joinSession(cfg) { registeredHooks = cfg.hooks; }\n');
+  writeFileSync(join(sdkDir, 'extension.mjs'), `
+export let registeredHooks;
+export const deliveries = [];
+const listeners = new Set();
+let deliveryError;
+export function failNextDelivery(message) { deliveryError = new Error(message); }
+async function deliver(value) {
+  deliveries.push(value);
+  if (deliveryError) {
+    const error = deliveryError;
+    deliveryError = undefined;
+    throw error;
+  }
+}
+export const session = {
+  sessionId: process.env.DOUBLE_TEST_SESSION_ID,
+  rpc: { tools: { execute: async (request) => deliver({ transport: 'rpc', ...request }) } },
+  send: async (request) => deliver({ transport: 'send', ...request }),
+  on: (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
+};
+export async function emit(event) { await Promise.all([...listeners].map((listener) => listener(event))); }
+export async function joinSession(cfg) { registeredHooks = cfg.hooks; return session; }
+`);
 
   const customHome = join(base, 'copilot-home');
   const workerDir = join(customHome, 'session-state', 'worker-ext');
   mkdirSync(workerDir, { recursive: true });
-  writeFileSync(join(workerDir, 'double-supervised'), 'double-child-99\n');
+  if (marker) writeFileSync(join(workerDir, 'double-supervised'), 'double-child-99\n');
+  const outDir = join(customHome, 'session-state', 'double-child-99', 'files');
+  mkdirSync(outDir, { recursive: true });
 
   const db = new DatabaseSync(join(customHome, 'data.db'));
   db.exec(`
     CREATE TABLE sessions (id TEXT PRIMARY KEY, title TEXT, agent TEXT, is_running INTEGER, was_interrupted INTEGER, archived_at TEXT, created_at TEXT);
     CREATE TABLE chat_parent_links (session_id TEXT, parent_session_id TEXT);
   `);
-  db.prepare('INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?, ?)').run('double-child-99', 'Double: worker', 'double', 0, 0, null, '2026-11-01T00:00:00Z');
+  db.prepare('INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?, ?)').run('worker-ext', 'Worker', 'poteto', workerRunning, 0, null, '2026-11-01T00:00:00Z');
+  db.prepare('INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?, ?)').run('double-child-99', 'Double: worker', 'double', doubleRunning, 0, null, '2026-11-01T00:00:00Z');
   db.prepare('INSERT INTO chat_parent_links VALUES (?, ?)').run('double-child-99', 'worker-ext');
   db.close();
 
@@ -533,37 +898,248 @@ test('extension.mjs includes --out-dir in wake directive and starts cooldown onl
     .replace('const pstackRoot = join(homedir(), ".copilot", "pstack");', `const pstackRoot = ${JSON.stringify(root)};`);
   writeFileSync(extCopy, extSrc);
 
-  const runner = join(base, 'run.mjs');
-  writeFileSync(runner, `
+  const statePath = join(outDir, 'double-lifecycle.json');
+  return {
+    base, customHome, outDir, statePath, workerDir,
+    run(code) {
+      const runner = join(base, 'run.mjs');
+      writeFileSync(runner, `
 import './extension.mjs';
-import { registeredHooks } from '@github/copilot-sdk/extension';
-const inv = { sessionId: 'worker-ext' };
-const promptHook = await registeredHooks.onUserPromptSubmitted({}, inv);
-const beforeSend = await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
-const preSend = await registeredHooks.onPreToolUse({ toolName: 'send_session_message' }, inv);
-const parallelPostBeforeSendCompletes = await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
-const onSend = await registeredHooks.onPostToolUse({ toolName: 'send_session_message' }, inv);
-const afterSend = await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
-console.log(JSON.stringify({
-  promptHasOutDir: promptHook?.additionalContext?.includes('--out-dir') ?? false,
-  beforeSendHasDirective: Boolean(beforeSend?.additionalContext),
-  preSendUndefined: preSend === undefined,
-  parallelPostHasDirective: Boolean(parallelPostBeforeSendCompletes?.additionalContext),
-  onSendUndefined: onSend === undefined,
-  afterSendHasDirective: Boolean(afterSend?.additionalContext),
-}));
+import { registeredHooks, session, deliveries, emit, failNextDelivery } from '@github/copilot-sdk/extension';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
+import { setTimeout as sleep } from 'node:timers/promises';
+const inv = { sessionId: ${JSON.stringify(sessionId)} };
+const statePath = ${JSON.stringify(statePath)};
+const readState = () => existsSync(statePath) ? JSON.parse(readFileSync(statePath, 'utf8')) : null;
+const writeState = (state) => writeFileSync(statePath, JSON.stringify(state));
+const setRunning = (id, value) => {
+  const db = new DatabaseSync(${JSON.stringify(join(customHome, 'data.db'))});
+  db.prepare('UPDATE sessions SET is_running = ? WHERE id = ?').run(value, id);
+  db.close();
+};
+const waitUntil = async (condition) => {
+  const deadline = Date.now() + 4000;
+  while (!condition() && Date.now() < deadline) await sleep(20);
+  if (!condition()) throw new Error('Expected runtime wake or lifecycle transition was not observed.');
+};
+${code}
 `);
-  const out = execFileSync(process.execPath, [runner], {
-    cwd: base,
-    env: { ...process.env, COPILOT_HOME: customHome },
-    encoding: 'utf8',
+      return JSON.parse(execFileSync(process.execPath, [runner], {
+        cwd: base,
+        env: { ...process.env, COPILOT_HOME: customHome, DOUBLE_TEST_SESSION_ID: sessionId },
+        encoding: 'utf8',
+        timeout: 10_000,
+      }).trim());
+    },
+  };
+}
+
+function lifecycleState(phase, values = {}) {
+  return {
+    worker_session_id: 'worker-ext',
+    double_session_id: 'double-child-99',
+    phase,
+    queued: 0,
+    monitors: 0,
+    monitor_pid: null,
+    worker_active: false,
+    wake_count: 0,
+    last_event_size: 0,
+    updated_at: Date.now(),
+    ...values,
+  };
+}
+
+function wakePrompt(harness) {
+  return `Parent session active; run python "${watchScript}" worker-ext --wait --out-dir "${harness.outDir}" and write double-audit.tsv and double-audit.md in "${harness.outDir}".`;
+}
+
+test('worker hooks dispatch one runtime wake with no worker dialogue', (t) => {
+  const harness = extensionHarness(t);
+  const result = harness.run(`
+const results = [];
+for (const name of ['onSessionStart', 'onUserPromptSubmitted', 'onPreToolUse', 'onPostToolUse', 'onPostToolUseFailure', 'onSessionEnd']) {
+  results.push(await registeredHooks[name]?.({ toolName: 'view' }, inv));
+}
+await Promise.all(Array.from({ length: 10 }, () => registeredHooks.onPostToolUse({ toolName: 'view' }, inv)));
+console.log(JSON.stringify({ results, deliveries, state: readState() }));
+`);
+  assert.deepEqual(result.results, [null, null, null, null, null, null]);
+  assert.deepEqual(result.deliveries, [{
+    transport: 'rpc',
+    name: 'send_session_message',
+    arguments: { session_id: 'double-child-99', delivery_mode: 'immediate', message: wakePrompt(harness) },
+  }]);
+  assert.equal(result.state.phase, 'wake_pending');
+  assert.equal(result.state.queued, 1);
+  assert.equal(result.state.monitors, 0);
+  assert.equal(result.state.wake_count, 1);
+  assert.equal(result.state.worker_session_id, 'worker-ext');
+  assert.equal(result.state.double_session_id, 'double-child-99');
+});
+
+test('legacy Double wake calls are denied while unrelated session messages still activate Double', (t) => {
+  const harness = extensionHarness(t);
+  const result = harness.run(`
+const unrelated = await registeredHooks.onPreToolUse({
+  toolName: 'send_session_message', toolArgs: { session_id: 'other-session', message: 'Please --wait for my next update.' },
+}, inv);
+const denied = await registeredHooks.onPreToolUse({
+  toolName: 'send_session_message', toolArgs: { session_id: 'double-child-99', message: 'Parent session active; run double_watch.py worker-ext --wait.' },
+}, inv);
+const ordinary = await registeredHooks.onPreToolUse({
+  toolName: 'send_session_message', toolArgs: { session_id: 'double-child-99', message: 'The requested artifact is ready.' },
+}, inv);
+console.log(JSON.stringify({ unrelated: unrelated ?? null, denied: denied ?? null, ordinary: ordinary ?? null, deliveries }));
+`);
+  assert.equal(result.unrelated, null);
+  assert.equal(result.ordinary, null);
+  assert.deepEqual(result.denied, {
+    permissionDecision: 'deny',
+    permissionDecisionReason: 'Double supervisor activation is runtime-owned.',
   });
-  assert.deepEqual(JSON.parse(out.trim()), {
-    promptHasOutDir: true,
-    beforeSendHasDirective: true,
-    preSendUndefined: true,
-    parallelPostHasDirective: false,
-    onSendUndefined: true,
-    afterSendHasDirective: false,
-  });
+  assert.deepEqual(result.deliveries, [{
+    transport: 'rpc',
+    name: 'send_session_message',
+    arguments: { session_id: 'double-child-99', delivery_mode: 'immediate', message: wakePrompt(harness) },
+  }]);
+});
+
+test('lifecycle coalesces live monitors and running supervisors, then recovers stale phases', (t) => {
+  const harness = extensionHarness(t);
+  const result = harness.run(`
+const observations = [];
+for (const phase of ['watching', 'auditing', 'acknowledging']) {
+  writeState(${JSON.stringify(lifecycleState('watching'))});
+  writeState({ ...readState(), phase, monitor_pid: process.pid });
+  await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
+  observations.push({ phase: readState().phase, queued: readState().queued, monitors: readState().monitors, worker_active: readState().worker_active });
+}
+setRunning('double-child-99', 1);
+writeState(${JSON.stringify(lifecycleState('wake_pending', { queued: 1 }))});
+await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
+observations.push({ phase: readState().phase, queued: readState().queued, monitors: readState().monitors, worker_active: readState().worker_active });
+setRunning('double-child-99', 0);
+for (const phase of ['watching', 'auditing', 'acknowledging', 'wake_pending', 'unavailable', 'recovering']) {
+  writeState({ ...${JSON.stringify(lifecycleState('idle'))}, phase, updated_at: Date.now() - 16000, monitor_pid: 2147483647 });
+  await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
+  observations.push({ phase: readState().phase, queued: readState().queued, monitors: readState().monitors, wake_count: readState().wake_count });
+}
+console.log(JSON.stringify({ observations, deliveries }));
+`);
+  assert.deepEqual(result.observations.slice(0, 4), [
+    { phase: 'watching', queued: 0, monitors: 1, worker_active: true },
+    { phase: 'auditing', queued: 0, monitors: 1, worker_active: true },
+    { phase: 'acknowledging', queued: 0, monitors: 1, worker_active: true },
+    { phase: 'watching', queued: 0, monitors: 1, worker_active: true },
+  ]);
+  assert.deepEqual(result.observations.slice(4), Array.from({ length: 6 }, () => ({
+    phase: 'wake_pending', queued: 1, monitors: 0, wake_count: 1,
+  })));
+  assert.equal(result.deliveries.length, 6);
+  assert.equal(result.deliveries.every((delivery) => delivery.arguments.message === wakePrompt(harness)), true);
+});
+
+test('failed runtime transport leaves no queued wake and a later hook retries', (t) => {
+  const harness = extensionHarness(t);
+  const result = harness.run(`
+failNextDelivery('runtime unavailable');
+const first = await registeredHooks.onUserPromptSubmitted({}, inv);
+const failed = readState();
+const second = await registeredHooks.onPostToolUseFailure({ toolName: 'powershell' }, inv);
+console.log(JSON.stringify({ first: first ?? null, second: second ?? null, failed, retried: readState(), deliveries }));
+`);
+  assert.equal(result.first, null);
+  assert.equal(result.second, null);
+  assert.deepEqual({
+    phase: result.failed.phase,
+    queued: result.failed.queued,
+    monitors: result.failed.monitors,
+    last_error: result.failed.last_error,
+  }, { phase: 'unavailable', queued: 0, monitors: 0, last_error: 'runtime unavailable' });
+  assert.equal(result.retried.phase, 'wake_pending');
+  assert.equal(result.retried.wake_count, 2);
+  assert.deepEqual(result.deliveries.map((delivery) => delivery.arguments.message), [wakePrompt(harness), wakePrompt(harness)]);
+});
+
+test('unmarked and archived workers do not dispatch supervisor wakes', (t) => {
+  const unmarked = extensionHarness(t, { marker: false });
+  assert.deepEqual(unmarked.run(`
+const response = await registeredHooks.onUserPromptSubmitted({}, inv);
+console.log(JSON.stringify({ response: response ?? null, deliveries }));
+`), { response: null, deliveries: [] });
+  const archived = extensionHarness(t);
+  assert.deepEqual(archived.run(`
+const db = new DatabaseSync(${JSON.stringify(join(archived.customHome, 'data.db'))});
+db.exec("UPDATE sessions SET archived_at = '2026-11-02' WHERE agent = 'double'");
+db.close();
+const response = await registeredHooks.onUserPromptSubmitted({}, inv);
+console.log(JSON.stringify({ response: response ?? null, deliveries }));
+`), { response: null, deliveries: [] });
+});
+
+test('Double runtime wakes itself on worker activity and pending wakes without worker hooks', (t) => {
+  const harness = extensionHarness(t, { sessionId: 'double-child-99', marker: false });
+  writeFileSync(harness.statePath, JSON.stringify(lifecycleState('idle')));
+  const result = harness.run(`
+setRunning('worker-ext', 1);
+await waitUntil(() => deliveries.length === 1);
+const first = readState();
+await emit({ type: 'assistant.turn_start' });
+await waitUntil(() => readState()?.phase === 'watching');
+const active = readState();
+await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
+const whileActive = deliveries.length;
+setRunning('worker-ext', 0);
+writeState({ ...readState(), phase: 'idle', worker_active: false, monitors: 0 });
+writeFileSync(${JSON.stringify(join(harness.outDir, 'double-cursor.json'))}, JSON.stringify({
+  worker_session_id: 'worker-ext', pending_wakes: [{ event_range: [1, 2] }],
+}));
+await emit({ type: 'session.idle' });
+await waitUntil(() => deliveries.length === 2);
+console.log(JSON.stringify({ first, active, whileActive, deliveries, final: readState() }));
+`);
+  assert.equal(result.first.phase, 'wake_pending');
+  assert.equal(result.first.wake_count, 1);
+  assert.equal(result.active.phase, 'watching');
+  assert.equal(result.active.monitors, 1);
+  assert.equal(result.whileActive, 1);
+  assert.deepEqual(result.deliveries, [
+    { transport: 'send', prompt: wakePrompt(harness) },
+    { transport: 'send', prompt: wakePrompt(harness) },
+  ]);
+  assert.equal(result.final.wake_count, 2);
+});
+
+test('idle Double detects appended worker events but does not wake on unchanged idle state', (t) => {
+  const harness = extensionHarness(t, { sessionId: 'double-child-99' });
+  writeFileSync(harness.statePath, JSON.stringify(lifecycleState('idle')));
+  const result = harness.run(`
+await sleep(1100);
+const before = [...deliveries];
+writeFileSync(${JSON.stringify(join(harness.workerDir, 'events.jsonl'))}, '{"type":"user.message","data":{"content":"Continue"}}\\n');
+await waitUntil(() => deliveries.length === 1);
+console.log(JSON.stringify({ before, deliveries, state: readState() }));
+`);
+  assert.deepEqual(result.before, []);
+  assert.deepEqual(result.deliveries, [{ transport: 'send', prompt: wakePrompt(harness) }]);
+  assert.equal(result.state.phase, 'wake_pending');
+  assert.equal(result.state.wake_count, 1);
+});
+
+test('concurrent worker hooks share one pending activation', (t) => {
+  const harness = extensionHarness(t);
+  const result = harness.run(`
+await Promise.all(Array.from({ length: 24 }, () => registeredHooks.onUserPromptSubmitted({}, inv)));
+console.log(JSON.stringify({ deliveries, state: readState() }));
+`);
+  assert.deepEqual(result.deliveries, [{
+    transport: 'rpc',
+    name: 'send_session_message',
+    arguments: { session_id: 'double-child-99', delivery_mode: 'immediate', message: wakePrompt(harness) },
+  }]);
+  assert.equal(result.state.wake_count, 1);
+  assert.equal(result.state.queued, 1);
+  assert.equal(result.state.monitors, 0);
 });
