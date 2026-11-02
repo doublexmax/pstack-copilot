@@ -27,8 +27,9 @@ maximums, not downgrades.
 
 Aliases `inherit-parent` and `auto` both omit `model` and `reasoning_effort` on the `task` call.
 Copilot selects the child model from its preferences or the parent. Omission does not prove parent inheritance.
-The shipped `adaptive` policy keeps unresolved choices launchable at the default tier.
-The opt-in `always_long` policy blocks them. Select an explicit role model or change policy through `/setup-pstack`.
+The shipped `always_long` policy blocks unresolved choices.
+Select an explicit role model or change policy through `/setup-pstack`.
+The `adaptive` policy keeps unresolved choices launchable at the default tier.
 
 ```
 feature, refactoring:                   grok-4.7 / xhigh
@@ -62,9 +63,9 @@ role at once, clamped to each model's maximum.
 Context is independent of model and reasoning effort. Before every delegate, use
 [context-routing](./skills/context-routing/SKILL.md) to resolve the persistent policy
 against the actual workload and current host/model evidence.
-`context.default.json` selects `adaptive`. Personal choices live in
+`context.default.json` selects `always_long`. Personal choices live in
 `pstack-context.json` under the active Copilot configuration directory.
-Users can select `default` or the strict `always_long` policy through `/setup-pstack`.
+Users can select `default` or `adaptive` through `/setup-pstack`.
 Under adaptive policy, bounded work uses `default`; eligible large-corpus work uses `long_context`.
 Do not infer selectable tiers from nominal capacity or reasoning `max`.
 Declared capability and workload sources are agent assertions, not independent verification.

@@ -66,8 +66,8 @@ ID not in the detected set as needing a choice. Also list each line step 2 dropp
 whether to accept as-is or change specific roles, offering the detected models plus
 `inherit-parent` and `auto`. Both aliases omit model and effort so Copilot selects the
 child's model. Per-agent or custom-agent preferences can take precedence over the parent.
-The shipped `adaptive` policy keeps these choices launchable at the default tier.
-The opt-in `always_long` policy blocks an unresolved child model.
+The shipped `always_long` policy blocks an unresolved child model.
+The `adaptive` policy keeps these choices launchable at the default tier.
 
 For panel roles (arena runners, architect runners, interrogate reviewers) the value is a
 list, and one subagent runs per entry, alias entries included, so the list length sets the
@@ -116,13 +116,13 @@ pushing.
 ## Context policy
 
 Run `<pstack>\scripts\context-routing.mjs show` to read the current independent policy.
-The shipped default is `adaptive`. Existing personal choices take precedence.
+The shipped default is `always_long`. Existing personal choices take precedence.
 Requests to change only the policy use this section without rerunning model or budget setup.
 If the user already chose a policy, use that choice. Otherwise ask one question with these choices:
 
-- `Adaptive, long context for supported large-corpus work (Recommended)`
+- `Always long context; block when support is unproven (Recommended)`
+- `Adaptive, long context for supported large-corpus work`
 - `Default context for every delegate`
-- `Always long context; block when support is unproven`
 
 Use `adaptive`, `default`, or `always_long` for the corresponding policy.
 `long_context` is the Copilot tier selected by `always_long`, not a policy name.

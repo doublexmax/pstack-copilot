@@ -1,5 +1,5 @@
 {
   "schemaVersion": 1,
-  "default": "adaptive",
+  "default": "always_long",
   "roles": {}
 }

@@ -67,8 +67,7 @@ node "<pstack>\scripts\context-routing.mjs" resolve `
 Adaptive selects `default` for bounded work.
 It selects `long_context` for eligible large-corpus work.
 The `default` policy selects the default tier regardless of workload.
-The shipped default is `adaptive`. Existing aliases remain launchable at the default tier.
-`always_long` is a strict opt-in. It selects `long_context` regardless of workload, with declared host and exact-model support.
+The shipped default is `always_long`. It selects `long_context` regardless of workload, with declared host and exact-model support.
 Under adaptive policy, unknown or unsupported model support selects `default` with an explicit diagnostic.
 Known unavailable models block. `always_long` blocks when support is unproven.
 An omitted child model stays unresolved even with parent capability evidence. Adaptive selects default; `always_long` blocks.
