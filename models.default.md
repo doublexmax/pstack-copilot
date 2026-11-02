@@ -15,12 +15,12 @@ not a panel. Keep the lineages distinct when you edit this.
 
 | Role slot | `model` | `reasoning_effort` | Why |
 | --- | --- | --- | --- |
-| Fast code | `grok-4.7` | `xhigh` | Every code playbook, plus swarm workers and `how`/`why` explorers. |
-| Precise-spec and tooling | `gpt-5.6-sol` | `max` | A specified sequence to execute to the letter, and reflect's tooling lens. |
+| Fast code | `grok-4.7` | `xhigh` | Swarm workers and `how`/`why` explorers. |
+| Precise-spec and tooling | `gpt-6.1-sol` | `max` | Every code playbook, a specified sequence to execute to the letter, and reflect's tooling lens. |
 | Prose, judgment, hardest | `claude-opus-5.5` | `max` | Explanation, synthesis, review, vague intent, and cross-cutting design. |
-| Fourth panel seat | `gemini-3.8-flash` | `high` | Keeps the review panels on four vendors. |
+| Fourth panel seat | `gemini-4-argon` | `high` | Keeps the review panels on four vendors. |
 
-`grok-4.7` tops out at `xhigh` and `gemini-3.8-flash` tops out at `high`. Those are their
+`grok-4.7` tops out at `xhigh` and `gemini-4-argon` tops out at `high`. Those are their
 maximums, not downgrades.
 
 ## Per-role defaults
@@ -32,23 +32,23 @@ Select an explicit role model or change policy through `/setup-pstack`.
 The `adaptive` policy keeps unresolved choices launchable at the default tier.
 
 ```
-feature, refactoring:                   grok-4.7 / xhigh
-bug-fix:                                grok-4.7 / xhigh
-perf-issue:                             grok-4.7 / xhigh
-hillclimb:                              grok-4.7 / xhigh
+feature, refactoring:                   gpt-6.1-sol / max
+bug-fix:                                gpt-6.1-sol / max
+perf-issue:                             gpt-6.1-sol / max
+hillclimb:                              gpt-6.1-sol / max
 judgment and prose:                     claude-opus-5.5 / max
 hardest tasks:                          claude-opus-5.5 / max
 how explorer:                           grok-4.7 / xhigh
 how explainer:                          claude-opus-5.5 / max
 why investigators:                      grok-4.7 / xhigh
 why synthesizer:                        claude-opus-5.5 / max
-reflect tooling:                        gpt-5.6-sol / max
+reflect tooling:                        gpt-6.1-sol / max
 reflect judgment, divergent, synth:     claude-opus-5.5 / max
-arena runners:                          claude-opus-5.5 / max, gpt-5.6-sol / max, grok-4.7 / xhigh, gemini-3.8-flash / high
-arena cross-judge pool:                 claude-opus-5.5 / max, gpt-5.6-sol / max, grok-4.7 / xhigh, gemini-3.8-flash / high
+arena runners:                          claude-opus-5.5 / max, gpt-6.1-sol / max, grok-4.7 / xhigh, gemini-4-argon / high
+arena cross-judge pool:                 claude-opus-5.5 / max, gpt-6.1-sol / max, grok-4.7 / xhigh, gemini-4-argon / high
 swarm workers:                          grok-4.7 / xhigh
-architect runners:                      claude-opus-5.5 / max, gpt-5.6-sol / max, grok-4.7 / xhigh, gemini-3.8-flash / high
-interrogate reviewers:                  claude-opus-5.5 / max, gpt-5.6-sol / max, grok-4.7 / xhigh, gemini-3.8-flash / high
+architect runners:                      claude-opus-5.5 / max, gpt-6.1-sol / max, grok-4.7 / xhigh, gemini-4-argon / high
+interrogate reviewers:                  claude-opus-5.5 / max, gpt-6.1-sol / max, grok-4.7 / xhigh, gemini-4-argon / high
 ```
 
 Panel roles are lists. One subagent runs per entry, alias entries included, so the list

@@ -395,7 +395,7 @@ there is no CI gate. this org disables hosted runners and the repo has no self-h
 | `AGENTS.md` subagent contract | `.agent.md` files spawned through the `task` tool |
 | `AskQuestion` tool | the `ask_user` tool |
 | one model slug per role | `model` plus `reasoning_effort`, two fields |
-| three-vendor panel (opus 5.5 / sol / grok) | a fourth seat, `gemini-3.8-flash`, so the panels read four lineages |
+| three-vendor panel (opus 5.5 / sol / grok) | a fourth seat, `gemini-4-argon`, so the panels read four lineages |
 | graphite (`gt`) stacking | azure devops PR chains driven by `az repos` |
 | github PR review threads | ado threads via the ado mcp |
 | event-triggered automations | scheduled copilot workflows via `save_workflow` |
