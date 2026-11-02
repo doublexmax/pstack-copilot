@@ -59,11 +59,10 @@ two steps:
 1. run [`/setup-pstack`](./skills/setup-pstack/SKILL.md) and choose which models you want.
 2. describe your task. the mode is already on.
 
-delegate context defaults to `adaptive`. bounded inputs and unresolved child models
-use default context. supported large-corpus work can use long context.
-[`/setup-pstack`](./skills/setup-pstack/SKILL.md) can switch to `default` or the strict
-`always_long` opt-in without rewriting model or effort choices.
-`always_long` blocks aliases and unproven long-context support.
+delegate context defaults to `always_long`. managed launches require long-context
+support for the selected model and tool, and block aliases or unproven support.
+[`/setup-pstack`](./skills/setup-pstack/SKILL.md) can switch to `adaptive` or `default`
+without rewriting model or effort choices. existing personal policy choices take precedence.
 capability and workload declarations are agent assertions, not independent proof. see
 [the setup guide](./docs/guide/01-setup.md#configure-delegated-context).
 
