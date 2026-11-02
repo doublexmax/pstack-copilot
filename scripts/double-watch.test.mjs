@@ -14,7 +14,7 @@ const watchScript = join(root, 'skills', 'double', 'scripts', 'double_watch.py')
 function runPy(code, env = {}) {
   return execFileSync('python', ['-c', code], {
     cwd: root,
-    env: { ...process.env, ...env },
+    env: { ...process.env, COPILOT_HOME: '', ...env },
     encoding: 'utf8',
   });
 }
@@ -275,7 +275,7 @@ test('replay writes double-wake-bundle.json and wait_for_wake handles missing ev
   writeFileSync(join(sessionDir, 'events.jsonl'), `${events.map((e) => JSON.stringify(e)).join('\n')}\n`);
 
   execFileSync('python', [watchScript, 'worker-replay', '--replay', '--out-dir', outDir], {
-    env: { ...process.env, USERPROFILE: home, HOME: home },
+    env: { ...process.env, COPILOT_HOME: '', USERPROFILE: home, HOME: home },
   });
   const bundlePath = join(outDir, 'double-wake-bundle.json');
   assert.equal(existsSync(bundlePath), true);
@@ -285,7 +285,7 @@ test('replay writes double-wake-bundle.json and wait_for_wake handles missing ev
   assert.equal(Array.isArray(bundle[0].range_events), true);
 
   const waitOut = execFileSync('python', [watchScript, 'worker-empty', '--wait', '--out-dir', outDir, '--idle-exit-seconds', '0'], {
-    env: { ...process.env, USERPROFILE: home, HOME: home },
+    env: { ...process.env, COPILOT_HOME: '', USERPROFILE: home, HOME: home },
     encoding: 'utf8',
   });
   assert.equal(JSON.parse(waitOut.trim()).status, 'PARENT_INACTIVE');
@@ -540,11 +540,15 @@ import { registeredHooks } from '@github/copilot-sdk/extension';
 const inv = { sessionId: 'worker-ext' };
 const promptHook = await registeredHooks.onUserPromptSubmitted({}, inv);
 const beforeSend = await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
+const preSend = await registeredHooks.onPreToolUse({ toolName: 'send_session_message' }, inv);
+const parallelPostBeforeSendCompletes = await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
 const onSend = await registeredHooks.onPostToolUse({ toolName: 'send_session_message' }, inv);
 const afterSend = await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
 console.log(JSON.stringify({
   promptHasOutDir: promptHook?.additionalContext?.includes('--out-dir') ?? false,
   beforeSendHasDirective: Boolean(beforeSend?.additionalContext),
+  preSendUndefined: preSend === undefined,
+  parallelPostHasDirective: Boolean(parallelPostBeforeSendCompletes?.additionalContext),
   onSendUndefined: onSend === undefined,
   afterSendHasDirective: Boolean(afterSend?.additionalContext),
 }));
@@ -557,6 +561,8 @@ console.log(JSON.stringify({
   assert.deepEqual(JSON.parse(out.trim()), {
     promptHasOutDir: true,
     beforeSendHasDirective: true,
+    preSendUndefined: true,
+    parallelPostHasDirective: false,
     onSendUndefined: true,
     afterSendHasDirective: false,
   });

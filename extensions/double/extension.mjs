@@ -49,7 +49,7 @@ function buildWakeDirective(sessionId, info) {
     if (lastSentAt !== undefined && now - lastSentAt < wakeCooldownMs) return undefined;
     const outDir = join(copilotHome(), "session-state", info.double_session_id, "files");
     return {
-        additionalContext: `<double_supervisor_hook>Runtime hook: your attached Double supervisor (${info.double_session_id}) is currently idle while this session is active. Include send_session_message(session_id="${info.double_session_id}", delivery_mode="immediate", message="Parent session active; run python \\"${watchScript}\\" ${sessionId} --wait --out-dir \\"${outDir}\\".") in your next tool call batch.</double_supervisor_hook>`,
+        additionalContext: `<double_supervisor_hook>Runtime hook: your attached Double supervisor (${info.double_session_id}) is currently idle while this session is active. Include send_session_message(session_id="${info.double_session_id}", delivery_mode="immediate", message="Parent session active; run python \\"${watchScript}\\" ${sessionId} --wait --out-dir \\"${outDir}\\" and write double-audit.tsv and double-audit.md in \\"${outDir}\\".") in your next tool call batch.</double_supervisor_hook>`,
     };
 }
 
@@ -58,6 +58,12 @@ await joinSession({
         onUserPromptSubmitted: async (_input, invocation) => {
             const info = await checkDoubleChild(invocation.sessionId);
             return buildWakeDirective(invocation.sessionId, info);
+        },
+        onPreToolUse: async (input, invocation) => {
+            if (input.toolName === "send_session_message") {
+                lastWakeSentAt.set(invocation.sessionId, Date.now());
+            }
+            return undefined;
         },
         onPostToolUse: async (input, invocation) => {
             if (input.toolName === "send_session_message") {
