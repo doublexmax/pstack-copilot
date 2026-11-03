@@ -162,6 +162,9 @@ async function reconcileSupervisorLifecycle(sessionId, workerActivity = false, i
             transition(outDir, state, "idle", now);
         }
         if (state.phase !== "idle") return;
+        if (state.phase === "idle" && !info.is_running) {
+            doubleTurnActive = false;
+        }
         const eventsPath = join(copilotHome(), "session-state", info.worker_session_id, "events.jsonl");
         const eventSize = existsSync(eventsPath) ? statSync(eventsPath).size : 0;
         const cursor = readJson(join(outDir, "double-cursor.json"));
@@ -171,7 +174,7 @@ async function reconcileSupervisorLifecycle(sessionId, workerActivity = false, i
             saveLifecycle(outDir, state);
             return;
         }
-        if (session?.sessionId !== info.double_session_id && pidAlive(state.double_ext_pid)) {
+        if (session?.sessionId !== info.double_session_id && pidAlive(state.double_ext_pid) && now - state.updated_at <= 3000) {
             saveLifecycle(outDir, state);
             return;
         }
@@ -244,7 +247,12 @@ session = await joinSession({
 if (findPair("c.session_id", session.sessionId)) {
     session.on((event) => {
         if (event.type === "assistant.turn_start") doubleTurnActive = true;
-        if (event.type === "session.idle") {
+        if (
+            event.type === "session.idle"
+            || event.type === "session.usage_checkpoint"
+            || event.type === "session.task_complete"
+            || ((event.type === "hook.start" || event.type === "hook.end") && event.data?.hookType === "agentStop")
+        ) {
             doubleTurnActive = false;
             return reconcileSupervisorLifecycle(session.sessionId);
         }

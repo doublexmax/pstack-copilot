@@ -593,8 +593,9 @@ def check_parent_state(session_dir: pathlib.Path, lines: list[str], idle_grace_s
             t == "hook.start" and d.get("hookType") == "userPromptSubmitted"
         ):
             if db_row and not db_row[0]:
-                age = (time.time() - ev_file.stat().st_mtime) if ev_file.exists() else idle_grace_seconds
-                if age >= idle_grace_seconds:
+                active_window = max(idle_grace_seconds, 120.0) if d.get("parentToolCallId") else idle_grace_seconds
+                age = (time.time() - ev_file.stat().st_mtime) if ev_file.exists() else active_window
+                if age >= active_window:
                     return False, "session_inactive"
             return True, "turn_active"
     return False, "no_events"
