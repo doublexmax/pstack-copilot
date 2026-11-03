@@ -63,9 +63,11 @@ def is_double_wake_call(tr: dict) -> bool:
 
 
 def is_likely_shell_path(path) -> bool:
-    if not isinstance(path, str) or not path or re.search(r"[$\s]", path):
+    if not isinstance(path, str) or not path or re.search(r"[$*\"'<>|\r\n\t]", path):
         return False
-    return "/" in path or "\\" in path or bool(re.search(r"\.[A-Za-z0-9]{1,8}$", path))
+    if "/" in path or "\\" in path:
+        return not path.startswith(("http://", "https://"))
+    return " " not in path and bool(re.match(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*\.[A-Za-z0-9]{1,8}$", path))
 
 
 def find_own_session_start(lines: list[str], target_sid: str) -> int:
@@ -82,6 +84,28 @@ def find_own_session_start(lines: list[str], target_sid: str) -> int:
                 start_idx = idx
                 break
     return start_idx
+
+
+def extract_wake_claims(lines: list[str], start_idx: int, end_idx: int) -> list[str]:
+    claims = []
+    for line in lines[start_idx:min(end_idx + 1, len(lines))]:
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        data = event.get("data", {})
+        if event.get("type") != "assistant.message" or data.get("parentToolCallId"):
+            continue
+        for field in ("content", "reasoningText"):
+            text = re.sub(r"```[\s\S]*?```", "", data.get(field) or "")
+            message_claims = [
+                segment.strip() for segment in re.split(r"(?<=[.!?])\s+|\n+", text)
+                if segment.strip() and FACTUAL_CLAIM_RE.search(segment)
+            ]
+            if message_claims:
+                claims.extend(message_claims)
+                break
+    return claims
 
 
 def extract_range_context(session_dir: pathlib.Path, lines: list[str], own_start: int, start_idx: int, end_idx: int) -> dict:
@@ -164,11 +188,14 @@ def extract_range_context(session_dir: pathlib.Path, lines: list[str], own_start
                 conn.close()
         except sqlite3.Error:
             pass
+    claims = extract_wake_claims(lines, start_idx, end_idx)
     return {
         "worker_cwd": cwd,
         "recent_user_prompts": user_prompts[-5:],
         "range_events": range_events,
         "active_todo_anchor": active_todo_anchor,
+        "claims": claims,
+        "claim_count": max(1, len(claims)),
     }
 
 
@@ -222,8 +249,11 @@ def scan_events(
             shell_info = data.get("shellToolInfo") or {}
             if shell_info.get("hasWriteFileRedirection"):
                 for p in shell_info.get("possiblePaths") or []:
-                    if is_likely_shell_path(p) and p not in touched:
-                        touched.append(p)
+                    if is_likely_shell_path(p):
+                        if p not in touched:
+                            touched.append(p)
+                        if VERIFY_OR_SCOPE_RE.search(p):
+                            verify_touched = True
                 if VERIFY_OR_SCOPE_RE.search(str(data.get("arguments", ""))):
                     verify_touched = True
         if pending_wake:
@@ -345,6 +375,7 @@ def load_lifecycle(out_dir: pathlib.Path, worker_sid: str, double_sid: str | Non
         "double_ext_pid": None,
         "worker_active": False,
         "wake_count": 0,
+        "wake_accepted": False,
         "last_event_size": 0,
         "updated_at": int(time.time() * 1000),
     }
@@ -409,23 +440,12 @@ def save_cursor(cursor_file: pathlib.Path, state: dict) -> None:
     write_json(cursor_file, state)
 
 
-def read_audit_ranges(out_dir: pathlib.Path) -> list[tuple[int, int] | None]:
+def sync_audit_markdown(out_dir: pathlib.Path) -> None:
     audit_file = out_dir / "double-audit.tsv"
     if not audit_file.exists():
-        return []
-    ranges = []
-    rows = []
+        return
     with audit_file.open(encoding="utf-8-sig", newline="") as audit:
-        for row in csv.reader(audit, delimiter="\t"):
-            if len(row) < 2 or row[:2] == ["ts", "event_range"]:
-                continue
-            rows.append(row)
-            value = row[1].strip()
-            if value.lower() in ("all", "*"):
-                ranges.append((0, sys.maxsize))
-                continue
-            numbers = [int(n) for n in re.findall(r"\b\d+\b", value)]
-            ranges.append((min(numbers), max(numbers)) if 1 <= len(numbers) <= 2 else None)
+        rows = [row for row in csv.reader(audit, delimiter="\t") if len(row) >= 2 and row[:2] != ["ts", "event_range"]]
     md_file = out_dir / "double-audit.md"
     if rows and (not md_file.exists() or md_file.stat().st_mtime < audit_file.stat().st_mtime):
         lines = [
@@ -438,18 +458,38 @@ def read_audit_ranges(out_dir: pathlib.Path) -> list[tuple[int, int] | None]:
             padded = (list(r) + [""] * 7)[:7]
             escaped = [c.replace("|", "\\|").replace("\n", " ").strip() for c in padded]
             lines.append(f"| {' | '.join(escaped)} |")
-        write_json_or_text = md_file.with_name(f"{md_file.name}.{os.getpid()}.tmp")
-        write_json_or_text.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        write_json_or_text.replace(md_file)
+        temporary = md_file.with_name(f"{md_file.name}.{os.getpid()}.tmp")
+        temporary.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        temporary.replace(md_file)
+
+
+def read_audit_ranges(out_dir: pathlib.Path, *, sync_markdown: bool = True) -> list[tuple[int, int] | None]:
+    audit_file = out_dir / "double-audit.tsv"
+    if not audit_file.exists():
+        return []
+    ranges = []
+    with audit_file.open(encoding="utf-8-sig", newline="") as audit:
+        for row in csv.reader(audit, delimiter="\t"):
+            if len(row) < 2 or row[:2] == ["ts", "event_range"]:
+                continue
+            numbers = [int(n) for n in re.findall(r"\b\d+\b", row[1].strip())]
+            numeric = 1 <= len(numbers) <= 2
+            if numeric and len(row) > 3 and row[3].strip().upper() == "NOTE":
+                continue
+            ranges.append((min(numbers), max(numbers)) if numeric else None)
+    if sync_markdown:
+        sync_audit_markdown(out_dir)
     return ranges
 
 
-def wake_acknowledged(wake: dict, audit_ranges: list[tuple[int, int] | None]) -> bool:
+def wake_acknowledged(wake: dict, audit_ranges: list[tuple[int, int] | None], lines: list[str] | None = None) -> bool:
     start, end = wake["event_range"]
-    if any(r is not None and max(r[0], start) <= min(r[1], end) for r in audit_ranges):
-        return True
+    required = max(1, len(extract_wake_claims(lines or [], start, end)))
+    count = sum(r is not None and max(r[0], start) <= min(r[1], end) for r in audit_ranges)
+    if count > 0:
+        return count >= required
     new_rows = audit_ranges[wake.get("delivered_audit_rows", 0):]
-    return bool(new_rows) and all(r is None for r in new_rows)
+    return len(new_rows) >= required and all(r is None for r in new_rows)
 
 
 def poll_once(session_dir: pathlib.Path, out_dir: pathlib.Path, flush_pending: bool = False) -> list[dict]:
@@ -465,11 +505,13 @@ def poll_once(session_dir: pathlib.Path, out_dir: pathlib.Path, flush_pending: b
         lines=lines, flush_pending=flush_pending,
     )
     new_wakes = [w for w in wakes if w["event_range"][1] >= state["next_idx"]]
-    audit_ranges = read_audit_ranges(out_dir)
+    audit_ranges = read_audit_ranges(out_dir, sync_markdown=False)
     pending = {tuple(w["event_range"]): w for w in state.get("pending_wakes", [])}
     for w in new_wakes:
         pending.setdefault(tuple(w["event_range"]), {**w, "delivered_audit_rows": len(audit_ranges)})
-    pending_wakes = [w for w in pending.values() if not wake_acknowledged(w, audit_ranges)]
+    pending_wakes = [w for w in pending.values() if not wake_acknowledged(w, audit_ranges, lines)]
+    if not pending_wakes:
+        sync_audit_markdown(out_dir)
     save_cursor(cursor_file, {
         "worker_session_id": session_dir.name,
         "next_idx": next_idx,
@@ -478,11 +520,11 @@ def poll_once(session_dir: pathlib.Path, out_dir: pathlib.Path, flush_pending: b
         "verify_touched": verify_touched,
         "pending_wakes": pending_wakes,
     })
-    if any(wake_acknowledged(w, audit_ranges) for w in state.get("pending_wakes", [])):
+    if any(wake_acknowledged(w, audit_ranges, lines) for w in state.get("pending_wakes", [])):
         with lifecycle_lock(out_dir):
             lifecycle = load_lifecycle(out_dir, session_dir.name)
             for phase in ("acknowledging", "watching"):
-                lifecycle.update(phase=phase, queued=0, monitors=1)
+                lifecycle.update(phase=phase, queued=0, monitors=1, wake_accepted=False)
                 save_lifecycle(out_dir, lifecycle)
     enriched = []
     for w in pending_wakes:
@@ -492,7 +534,7 @@ def poll_once(session_dir: pathlib.Path, out_dir: pathlib.Path, flush_pending: b
         write_json(bundle_file, enriched)
         with lifecycle_lock(out_dir):
             lifecycle = load_lifecycle(out_dir, session_dir.name)
-            lifecycle.update(phase="auditing", queued=0, monitors=1, monitor_pid=None)
+            lifecycle.update(phase="auditing", queued=0, monitors=1, monitor_pid=None, wake_accepted=False)
             save_lifecycle(out_dir, lifecycle)
         print(f"WROTE {len(enriched)} wake(s) to {bundle_file}", file=sys.stderr, flush=True)
         for w in pending_wakes:
@@ -605,7 +647,7 @@ def wait_for_wake(session_dir: pathlib.Path, out_dir: pathlib.Path, interval: fl
                 "worker_session_id": session_dir.name,
             }), flush=True)
             return
-        lifecycle.update(phase="watching", queued=0, monitors=1, monitor_pid=os.getpid())
+        lifecycle.update(phase="watching", queued=0, monitors=1, monitor_pid=os.getpid(), wake_accepted=False)
         save_lifecycle(out_dir, lifecycle)
     marker = session_dir / "double-supervised"
     if session_dir.exists() and not marker.exists():
@@ -637,7 +679,7 @@ def wait_for_wake(session_dir: pathlib.Path, out_dir: pathlib.Path, interval: fl
                     continue
                 lifecycle = load_lifecycle(out_dir, session_dir.name)
                 lifecycle.update(
-                    phase="idle", queued=0, monitors=0, monitor_pid=None, worker_active=False,
+                    phase="idle", queued=0, monitors=0, monitor_pid=None, worker_active=False, wake_accepted=False,
                     last_event_size=current_size,
                 )
                 save_lifecycle(out_dir, lifecycle)
@@ -685,11 +727,13 @@ def main():
             time.sleep(args.interval)
 
     wakes, lines, own_start, total, last_wake, touched, verify_touched = scan_events(session_dir, 0, flush_pending=True)
-    audit_ranges = read_audit_ranges(out_dir)
+    audit_ranges = read_audit_ranges(out_dir, sync_markdown=False)
     pending_wakes = [
         {**w, "delivered_audit_rows": len(audit_ranges)} for w in wakes
-        if not wake_acknowledged({**w, "delivered_audit_rows": len(audit_ranges)}, audit_ranges)
+        if not wake_acknowledged({**w, "delivered_audit_rows": len(audit_ranges)}, audit_ranges, lines)
     ]
+    if not pending_wakes:
+        sync_audit_markdown(out_dir)
     enriched = [
         {**w, **extract_range_context(session_dir, lines, own_start, w["event_range"][0], w["event_range"][1])}
         for w in pending_wakes

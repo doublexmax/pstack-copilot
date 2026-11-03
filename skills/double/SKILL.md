@@ -70,14 +70,16 @@ When spawning `Double: <worker_name>` from inside the worker session:
 
 A runtime Copilot extension (`~/.copilot/extensions/double/extension.mjs`, installed by `scripts/install-always-on.mjs` and bound to the installing clone) owns activation. It reads `~/.copilot/data.db` through read-only Node SQLite queries. A worker marker enables child lookup. Inside Double, the extension resolves the worker through `chat_parent_links` without needing a marker in Double's directory.
 
-The extension and Python monitor share `<double_artifacts_dir>/double-lifecycle.json`. Atomic writes keep the JSON complete. A SQLite transaction in `double-lifecycle.lock` serializes transitions for the worker and Double pair and releases ownership on process exit. The record contains `phase`, `queued`, `monitors`, `monitor_pid`, `worker_active`, `wake_count`, and `last_event_size`. Do not edit this runtime-owned file.
+The extension and Python monitor share `<double_artifacts_dir>/double-lifecycle.json`. Atomic writes keep the JSON complete. A SQLite transaction in `double-lifecycle.lock` serializes transitions for the worker and Double pair and releases ownership on process exit. The record contains `phase`, `queued`, `monitors`, `monitor_pid`, `worker_active`, `wake_count`, `wake_accepted`, and `last_event_size`. Do not edit this runtime-owned file.
 
 - Worker hooks never return `additionalContext` or inject `<double_supervisor_hook>` into the worker's conversation. They deny legacy model calls that try to wake the attached Double. Messages to unrelated sessions remain allowed.
-- An idle pair needs attention when the worker is active, events have grown since the last idle checkpoint, or the cursor contains unaudited wakes. The extension records `wake_pending` with `queued = 1` before dispatch. It uses `session.send` inside Double or runtime `rpc.tools.execute` with `send_session_message` from the worker runtime.
-- The `watching`, `auditing`, and `acknowledging` phases coalesce worker activity while Double runs or its monitor PID is alive. Repeated activity does not queue another wake. A wake that remains pending for more than 15 seconds, an interrupted supervisor, or a failed dispatch enters recovery before retry.
+- An idle pair needs attention when the worker is active, events have grown since the last idle checkpoint, or the cursor contains unaudited wakes. The extension records `wake_pending` with `queued = 1` and `wake_accepted = false` before dispatch. It uses `session.send` inside Double or runtime `rpc.tools.execute` with `send_session_message` from the worker runtime. Once the transport accepts the wake, `wake_accepted = true` keeps `wake_pending` coalesced until the supervisor starts its turn or is interrupted. Startup delays beyond 15 seconds do not resend an accepted wake.
+- The `watching`, `auditing`, and `acknowledging` phases coalesce worker activity while Double runs or its monitor PID is alive. Repeated activity does not queue another wake. An unaccepted wake older than 15 seconds, an interrupted supervisor, or a failed dispatch enters recovery before retry. Leaving `wake_pending` resets `wake_accepted` to `false`.
 - Inside Double, the extension tracks `assistant.turn_start` and `session.idle`. An unref'd one-second timer checks the worker even when no worker hook runs. This is a local runtime check, not an App automation or model turn.
 - `double_watch.py --wait` claims one monitor PID and sleeps at zero LLM tokens. A second live monitor receives `DUPLICATE_MONITOR_SUPPRESSED`. When a wake fires, the lifecycle enters `auditing` and releases the monitor PID.
-- `double-cursor.json` retains `pending_wakes` until `double-audit.tsv` records acknowledgment. An overlapping numeric `event_range`, `all`, or `*` acknowledges a wake. New symbolic audit rows acknowledge it only when none of the rows added since delivery contain a numeric range. Recovery redelivers only unacknowledged wakes and leaves prior ledger rows unchanged.
+- Each wake in `double-wake-bundle.json` includes `claims` and `claim_count`. The monitor extracts top-level prose claims, ignores fenced code, and uses `reasoningText` only when that message's `content` has no claims. `claim_count` is at least one, including claim-free human gates.
+- `double-cursor.json` retains `pending_wakes` until `double-audit.tsv` contains at least `claim_count` non-`NOTE` rows whose numeric `event_range` overlaps that wake. A partial audit does not acknowledge the wake. Numeric `NOTE` rows are metadata, not claim verdicts.
+- If no numeric verdict overlaps a wake, symbolic rows can acknowledge it instead. At least `claim_count` rows must have appeared since delivery, and all those rows must be symbolic. This includes `all` and `*`, even with verdict `NOTE`. These rows acknowledge only wakes delivered before the rows were written, never future wakes. A numeric verdict in the same batch prevents symbolic fallback. Recovery redelivers only unacknowledged wakes and leaves prior ledger rows unchanged.
 - Before returning `PARENT_INACTIVE`, the monitor flushes final events and redelivers any unaudited wakes. Only after acknowledgment can an inactive worker move the pair to `idle` with no queued wake or monitor. Double then ends its turn so its sidebar spinner stops. The runtime wakes Double again when the worker needs attention.
 
 `--replay` also seeds `double-cursor.json`. After auditing replay wakes, continue with `--wait` in the same output directory to avoid duplicate audits.
@@ -104,11 +106,11 @@ python "<skill_dir>\scripts\double_watch.py" <worker_session_id> --wait --out-di
 For each wake entry in `<double_artifacts_dir>\double-wake-bundle.json`:
 
 1. **Read the bundled context.**
-   - Read `recent_user_prompts`, `active_todo_anchor`, and `range_events` from `<double_artifacts_dir>\double-wake-bundle.json`.
+   - Read `claims`, `claim_count`, `recent_user_prompts`, `active_todo_anchor`, and `range_events` from `<double_artifacts_dir>\double-wake-bundle.json`.
    - The monitor selects the latest `in_progress` todo, or the latest todo when none is active. If `active_todo_anchor` is `null`, query `<worker_session_dir>\session.db` (`SELECT id, title, description, status FROM todos`) and `<worker_session_dir>\files\decisions.tsv` if present.
 
 2. **List the falsifiable claims in `event_range`.**
-   - Extract every factual claim in `range_events` (both `content` and `reasoning`), `todos` updates, and `decisions.tsv` rows.
+   - Start with the bundled `claims`. Check `range_events`, `todos` updates, and `decisions.tsv` rows for additional factual claims.
    - Compare `reasoning` (`reasoningText`) against user-facing `content` to catch **thought-vs-reply omissions**, where the worker discovers a discrepancy, side-effect, or unexpected table/file write in its intermediate thoughts but omits or contradicts it in the final reply.
    - Whenever `touched_files` is non-empty (including PowerShell write redirections captured via `shellToolInfo`), add the implicit invariant: *"Edits in `touched_files` did not weaken verification checks, hide failed runs, or modify files outside the requested scope without disclosure."*
 
@@ -119,8 +121,8 @@ For each wake entry in `<double_artifacts_dir>\double-wake-bundle.json`:
 
 ### Step 3. Record in `<double_artifacts_dir>\double-audit.tsv` and the Editor Canvas
 
-1. Append one row per audited claim to `<double_artifacts_dir>\double-audit.tsv` (`ts`, `event_range`, `trigger`, `verdict`, `claim`, `evidence_pointer`, `observed_fact`). Use the wake's numeric `event_range`, such as `[394, 405]`, so partial audits acknowledge only matching wakes. Never append duplicate rows for wakes already recorded in the ledger.
-2. Write the updated markdown summary table directly to `<double_artifacts_dir>\double-audit.md` on disk (and `double_watch.py` also backfills `double-audit.md` from `double-audit.tsv` when missing or stale), then open or refresh it in the Editor Canvas (where `scope: "workspace"` resolves relative to `<double_session_dir>\files\`):
+1. Append one row per audited claim to `<double_artifacts_dir>\double-audit.tsv` (`ts`, `event_range`, `trigger`, `verdict`, `claim`, `evidence_pointer`, `observed_fact`). Use the wake's numeric `event_range`, such as `[394, 405]`. Record at least `claim_count` non-`NOTE` rows overlapping each wake before acknowledgment. Resume partial audits by appending only missing claims. Never duplicate recorded claim rows.
+2. Write the updated markdown summary table directly to `<double_artifacts_dir>\double-audit.md` on disk. The monitor backfills missing or stale markdown from `double-audit.tsv` only when no pending wakes remain. Open or refresh it in the Editor Canvas, where `scope: "workspace"` resolves relative to `<double_session_dir>\files\`:
    ```json
    {
      "canvasId": "editor",

@@ -31,8 +31,8 @@ function findPair(column, sessionId) {
     try {
         db = new DatabaseSync(path, { readOnly: true });
         return db.prepare(`
-            SELECT c.parent_session_id AS worker_session_id, c.session_id AS double_session_id,
-                   s.is_running, w.is_running AS worker_is_running
+            SELECT s.*, c.parent_session_id AS worker_session_id, c.session_id AS double_session_id,
+                   w.is_running AS worker_is_running
             FROM chat_parent_links c
             JOIN sessions s ON s.id = c.session_id
             LEFT JOIN sessions w ON w.id = c.parent_session_id
@@ -78,6 +78,7 @@ function loadLifecycle(outDir, info) {
         double_ext_pid: null,
         worker_active: false,
         wake_count: 0,
+        wake_accepted: false,
         last_event_size: 0,
         updated_at: Date.now(),
     };
@@ -99,6 +100,7 @@ function transition(outDir, state, phase, now) {
         queued: phase === "wake_pending" ? 1 : 0,
         monitors: activePhases.has(phase) ? 1 : 0,
         monitor_pid: activePhases.has(phase) ? state.monitor_pid : null,
+        wake_accepted: phase === "wake_pending" ? state.wake_accepted : false,
         updated_at: now,
     });
     saveLifecycle(outDir, state);
@@ -159,16 +161,18 @@ async function reconcileSupervisorLifecycle(sessionId, workerActivity = false, i
         }
         if (state.phase === "wake_pending") {
             if (info.is_running || doubleTurnActive) {
+                state.wake_accepted = false;
                 transition(outDir, state, "watching", now);
                 return;
             }
-            if (now - state.updated_at <= wakeTimeoutMs) {
+            if ((state.wake_accepted && !info.was_interrupted) || now - state.updated_at <= wakeTimeoutMs) {
                 state.queued = 1;
                 state.monitors = 0;
                 state.monitor_pid = null;
                 saveLifecycle(outDir, state);
                 return;
             }
+            state.wake_accepted = false;
             transition(outDir, state, "recovering", now);
         }
         if (state.phase === "unavailable") transition(outDir, state, "recovering", now);
@@ -188,6 +192,7 @@ async function reconcileSupervisorLifecycle(sessionId, workerActivity = false, i
             return;
         }
         state.wake_count += 1;
+        state.wake_accepted = false;
         delete state.last_error;
         transition(outDir, state, "wake_pending", now);
         wakePrompt = `Parent session active; run python "${watchScript}" ${info.worker_session_id} --wait --out-dir "${outDir}" and write double-audit.tsv and double-audit.md in "${outDir}".`;
@@ -204,6 +209,16 @@ async function reconcileSupervisorLifecycle(sessionId, workerActivity = false, i
             });
         } else {
             throw new Error("Double supervisor runtime transport is unavailable.");
+        }
+        const release = lifecycleLock(outDir);
+        try {
+            const state = loadLifecycle(outDir, info);
+            if (state.phase === "wake_pending") {
+                state.wake_accepted = true;
+                saveLifecycle(outDir, state);
+            }
+        } finally {
+            release();
         }
     } catch (error) {
         const release = lifecycleLock(outDir);

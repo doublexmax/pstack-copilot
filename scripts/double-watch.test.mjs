@@ -1433,3 +1433,29 @@ print(json.dumps(dw.read_audit_ranges(pathlib.Path(${JSON.stringify(delegated.ou
   assert.match(mdText, /# Double audit/);
   assert.match(mdText, /\|\s*0-3\s*\|\s*T1_HUMAN_GATE\s*\|\s*VERIFIED\s*\|/);
 });
+
+test('extension resolves supervisor pair even when sessions table omits was_interrupted', (t) => {
+  const harness = extensionHarness(t);
+  const dbPath = join(harness.customHome, 'data.db');
+  rmSync(dbPath);
+  const db = new DatabaseSync(dbPath);
+  db.exec(`
+    CREATE TABLE sessions (id TEXT PRIMARY KEY, title TEXT, agent TEXT, is_running INTEGER, archived_at TEXT, created_at TEXT);
+    CREATE TABLE chat_parent_links (session_id TEXT, parent_session_id TEXT);
+    INSERT INTO sessions VALUES ('worker-ext', 'Worker', NULL, 1, NULL, '2026-11-02');
+    INSERT INTO sessions VALUES ('double-child-99', 'Double: worker', 'double', 0, NULL, '2026-11-02');
+    INSERT INTO chat_parent_links VALUES ('double-child-99', 'worker-ext');
+  `);
+  db.close();
+  const result = harness.run(`
+await registeredHooks.onUserPromptSubmitted({}, inv);
+writeState({ ...readState(), updated_at: Date.now() - 16050 });
+await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
+console.log(JSON.stringify({ deliveries: deliveries.length, state: readState() }));
+`);
+  assert.equal(result.deliveries, 1);
+  assert.equal(result.state.phase, 'wake_pending');
+  assert.equal(result.state.wake_accepted, true);
+  assert.equal(result.state.wake_count, 1);
+});
+
