@@ -34,7 +34,7 @@ function writeEvents(sessionDir, events) {
 }
 
 const auditHeader = 'ts\tevent_range\ttrigger\tverdict\tclaim\tevidence_pointer\tobserved_fact\n';
-const auditRow = (range) => `2026-11-02T00:00:00Z\t${range}\tT1_HUMAN_GATE\tVERIFIED\tclaim\tartifact\tobserved\n`;
+const auditRow = (range, verdict = 'VERIFIED', claim = 'claim') => `2026-11-02T00:00:00Z\t${range}\tT1_HUMAN_GATE\t${verdict}\t${claim}\tartifact\tobserved\n`;
 
 test('extract_files parses apply_patch headers and preserves edit/create path when content contains File:', () => {
   const out = runPy(`
@@ -663,6 +663,161 @@ print(json.dumps(dw.poll_once(pathlib.Path(${JSON.stringify(sessionDir)}), pathl
   }
 });
 
+for (const symbolic of ['all', '*']) {
+  test(`a new ${symbolic} NOTE acknowledges delivered work but never future wakes or mixed numeric batches`, (t) => {
+    const base = mkdtempSync(join(tmpdir(), 'double-symbolic-note-'));
+    t.after(() => rmSync(base, { recursive: true, force: true }));
+    const sessionDir = join(base, 'worker-symbolic');
+    const outDir = join(base, 'out');
+    mkdirSync(sessionDir);
+    mkdirSync(outDir);
+    const events = [
+      { type: 'session.start', data: { sessionId: 'worker-symbolic' } },
+      { type: 'assistant.message', data: { content: 'Verified the old artifact.' } },
+    ];
+    writeEvents(sessionDir, events);
+    const poll = () => JSON.parse(runWatcher(`
+print(json.dumps(dw.poll_once(pathlib.Path(${JSON.stringify(sessionDir)}), pathlib.Path(${JSON.stringify(outDir)}))))
+`));
+    assert.deepEqual(poll().map((w) => w.event_range), [[0, 1]]);
+    const ledger = join(outDir, 'double-audit.tsv');
+    writeFileSync(ledger, auditHeader + auditRow(symbolic, 'NOTE'));
+    assert.deepEqual(poll(), []);
+    writeEvents(sessionDir, [
+      ...events,
+      { type: 'user.message', data: { content: 'Check the next artifact.' } },
+      { type: 'assistant.message', data: { content: 'Verified the new artifact.' } },
+    ]);
+    assert.deepEqual(poll().map((w) => ({ range: w.event_range, delivered: w.delivered_audit_rows })), [
+      { range: [2, 3], delivered: 1 },
+    ]);
+    appendFileSync(ledger, auditRow('394-405') + auditRow(symbolic, 'NOTE'));
+    assert.deepEqual(poll().map((w) => w.event_range), [[2, 3]]);
+    assert.deepEqual(JSON.parse(readFileSync(join(outDir, 'double-cursor.json'), 'utf8')).pending_wakes.map((w) => w.event_range), [[2, 3]]);
+    appendFileSync(ledger, auditRow('2-3'));
+    assert.deepEqual(poll(), []);
+  });
+}
+
+test('numeric NOTE rows do not acknowledge a factual claim', (t) => {
+  const base = mkdtempSync(join(tmpdir(), 'double-numeric-note-'));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const sessionDir = join(base, 'worker-note');
+  const outDir = join(base, 'out');
+  mkdirSync(sessionDir);
+  mkdirSync(outDir);
+  writeEvents(sessionDir, [
+    { type: 'session.start', data: { sessionId: 'worker-note' } },
+    { type: 'assistant.message', data: { content: 'Verified the artifact.' } },
+  ]);
+  const poll = () => JSON.parse(runWatcher(`
+print(json.dumps(dw.poll_once(pathlib.Path(${JSON.stringify(sessionDir)}), pathlib.Path(${JSON.stringify(outDir)}))))
+`));
+  assert.deepEqual(poll().map((w) => w.event_range), [[0, 1]]);
+  const ledger = join(outDir, 'double-audit.tsv');
+  writeFileSync(ledger, auditHeader + auditRow('0-1', ' note '));
+  assert.deepEqual(poll().map((w) => w.event_range), [[0, 1]]);
+  appendFileSync(ledger, auditRow('0-1'));
+  assert.deepEqual(poll(), []);
+});
+
+test('a partial multi-claim audit survives repeated polls and idle waits without replacing the markdown', (t) => {
+  const home = mkdtempSync(join(tmpdir(), 'double-multi-claim-'));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const sessionDir = join(home, 'session-state', 'worker-claims');
+  const outDir = join(home, 'out');
+  mkdirSync(sessionDir, { recursive: true });
+  mkdirSync(outDir);
+  writeEvents(sessionDir, [
+    { type: 'session.start', data: { sessionId: 'worker-claims' } },
+    { type: 'assistant.message', data: { content: 'Verified artifact A. Verified artifact B.' } },
+    { type: 'session.shutdown', data: {} },
+  ]);
+  const poll = () => JSON.parse(runWatcher(`
+print(json.dumps(dw.poll_once(pathlib.Path(${JSON.stringify(sessionDir)}), pathlib.Path(${JSON.stringify(outDir)}))))
+`));
+  assert.deepEqual(poll().map((w) => w.event_range), [[0, 1]]);
+  const markdown = join(outDir, 'double-audit.md');
+  writeFileSync(markdown, 'The previous complete audit.\n');
+  const past = new Date(Date.now() - 20_000);
+  utimesSync(markdown, past, past);
+  const ledger = join(outDir, 'double-audit.tsv');
+  writeFileSync(ledger, auditHeader + auditRow('0-1', 'VERIFIED', 'Artifact A'));
+  for (let pollIndex = 0; pollIndex < 2; pollIndex += 1) {
+    assert.deepEqual(poll().map((w) => w.event_range), [[0, 1]]);
+    assert.equal(readFileSync(markdown, 'utf8'), 'The previous complete audit.\n');
+  }
+  const wait = () => execFileSync('python', [watchScript, 'worker-claims', '--wait', '--out-dir', outDir, '--idle-exit-seconds', '0'], {
+    env: { ...process.env, COPILOT_HOME: home },
+    encoding: 'utf8',
+    timeout: 5000,
+  });
+  assert.equal(wait(), '');
+  const bundle = JSON.parse(readFileSync(join(outDir, 'double-wake-bundle.json'), 'utf8'));
+  assert.deepEqual(bundle.map((w) => ({ claims: w.claims, claim_count: w.claim_count })), [
+    { claims: ['Verified artifact A.', 'Verified artifact B.'], claim_count: 2 },
+  ]);
+  appendFileSync(ledger, auditRow('0-1', 'VERIFIED', 'Artifact B'));
+  const completedLedger = readFileSync(ledger, 'utf8');
+  assert.deepEqual(poll(), []);
+  assert.equal(existsSync(join(outDir, 'double-wake-bundle.json')), false);
+  assert.deepEqual(JSON.parse(readFileSync(join(outDir, 'double-cursor.json'), 'utf8')).pending_wakes, []);
+  assert.match(readFileSync(markdown, 'utf8'), /\| Artifact A \|/);
+  assert.match(readFileSync(markdown, 'utf8'), /\| Artifact B \|/);
+  assert.equal(JSON.parse(wait().trim()).status, 'PARENT_INACTIVE');
+  assert.equal(readFileSync(ledger, 'utf8'), completedLedger);
+});
+
+test('wake bundles list top-level prose claims, fall back to reasoning, and require one row for claim-free gates', (t) => {
+  const base = mkdtempSync(join(tmpdir(), 'double-claim-context-'));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const sessionDir = join(base, 'worker-context');
+  const outDir = join(base, 'out');
+  mkdirSync(sessionDir);
+  mkdirSync(outDir);
+  writeEvents(sessionDir, [
+    { type: 'session.start', data: { sessionId: 'worker-context' } },
+    { type: 'assistant.message', data: {
+      content: 'Verified artifact A. All tests passed!\n```text\nVerified code example.\n```\nThe output matched.',
+      reasoningText: 'Verified an omitted reasoning claim.',
+    } },
+    { type: 'assistant.message', data: { parentToolCallId: 'child', content: 'Verified a child claim.' } },
+    { type: 'assistant.message', data: {
+      content: 'Continuing.\n```text\nVerified another code example.\n```',
+      reasoningText: 'The root cause is stale state.\n```text\nVerified a reasoning code example.\n```\nConfirmed the recovery.',
+    } },
+    { type: 'assistant.message', data: { content: 'Which option do you prefer?' } },
+  ]);
+  runWatcher(`dw.poll_once(pathlib.Path(${JSON.stringify(sessionDir)}), pathlib.Path(${JSON.stringify(outDir)}))`);
+  const bundle = JSON.parse(readFileSync(join(outDir, 'double-wake-bundle.json'), 'utf8'));
+  assert.deepEqual(bundle.map((w) => ({ range: w.event_range, claims: w.claims, count: w.claim_count })), [
+    { range: [0, 1], claims: ['Verified artifact A.', 'All tests passed!', 'The output matched.'], count: 3 },
+    { range: [2, 3], claims: ['The root cause is stale state.', 'Confirmed the recovery.'], count: 2 },
+    { range: [4, 4], claims: [], count: 1 },
+  ]);
+});
+
+test('symbolic fallback requires one new audit row per extracted claim', (t) => {
+  const base = mkdtempSync(join(tmpdir(), 'double-symbolic-claims-'));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const sessionDir = join(base, 'worker-symbolic-claims');
+  const outDir = join(base, 'out');
+  mkdirSync(sessionDir);
+  mkdirSync(outDir);
+  writeEvents(sessionDir, [
+    { type: 'assistant.message', data: { content: 'Verified artifact A. Verified artifact B.' } },
+  ]);
+  const poll = () => JSON.parse(runWatcher(`
+print(json.dumps(dw.poll_once(pathlib.Path(${JSON.stringify(sessionDir)}), pathlib.Path(${JSON.stringify(outDir)}))))
+`));
+  assert.deepEqual(poll().map((w) => w.event_range), [[0, 0]]);
+  const ledger = join(outDir, 'double-audit.tsv');
+  writeFileSync(ledger, auditHeader + auditRow('all', 'NOTE'));
+  assert.deepEqual(poll().map((w) => w.event_range), [[0, 0]]);
+  appendFileSync(ledger, auditRow('W1'));
+  assert.deepEqual(poll(), []);
+});
+
 test('session prefixes must be unambiguous and exact directories take precedence', (t) => {
   const home = mkdtempSync(join(tmpdir(), 'double-prefix-'));
   t.after(() => rmSync(home, { recursive: true, force: true }));
@@ -722,6 +877,57 @@ print(json.dumps({"counts": counts, "paths": wakes[0]["touched_files"]}))
     counts: [0, 0, 0, 0, 0, 1, 1, 1],
     paths: ['test_out.txt', 'src/app.py', 'skills\\double\\SKILL.md', 'logs/output'],
   });
+});
+
+test('redirected paths preserve spaces while rejecting shell syntax and URLs', (t) => {
+  const base = mkdtempSync(join(tmpdir(), 'double-spaced-paths-'));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const paths = [
+    'C:\\work tree\\test results\\assertions.xml', '/tmp/test results/assertions.xml', 'logs with spaces/output',
+    'result.xml', 'not a path.txt', 'status', 'https://example.com/result.xml', 'http://example.com/result.xml',
+    '$env:TEMP/result.xml', 'logs/*.xml', 'logs/"result.xml"', "logs/'result.xml'", 'logs/<result.xml',
+    'logs/>result.xml', 'logs/|result.xml', 'logs/\rresult.xml', 'logs/\nresult.xml', 'logs/\tresult.xml',
+  ];
+  writeEvents(base, [
+    { type: 'assistant.message', data: {
+      content: 'Verified the test output.',
+      toolRequests: [{ name: 'powershell', toolCallId: 'write' }],
+    } },
+    { type: 'tool.execution_start', data: {
+      toolCallId: 'write',
+      shellToolInfo: { hasWriteFileRedirection: true, possiblePaths: paths },
+    } },
+    { type: 'tool.execution_complete', data: { toolCallId: 'write', success: true } },
+  ]);
+  const wakes = JSON.parse(runWatcher(`
+print(json.dumps(dw.scan_events(pathlib.Path(${JSON.stringify(base)}))[0]))
+`));
+  assert.deepEqual(wakes.map((w) => w.touched_files), [paths.slice(0, 4)]);
+});
+
+test('redirected verification paths trigger checkpoint drift without verification words in the command', (t) => {
+  const base = mkdtempSync(join(tmpdir(), 'double-redirect-drift-'));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  writeEvents(base, [
+    { type: 'assistant.message', data: {
+      toolRequests: [{ name: 'powershell', toolCallId: 'write', arguments: { command: 'emit' } }],
+    } },
+    { type: 'tool.execution_start', data: {
+      toolCallId: 'write', arguments: { command: 'emit' },
+      shellToolInfo: { hasWriteFileRedirection: true, possiblePaths: ['test results/assertions.xml'] },
+    } },
+    { type: 'tool.execution_complete', data: { toolCallId: 'write', success: true } },
+    { type: 'assistant.message', data: {
+      toolRequests: [{ name: 'sql', toolCallId: 'checkpoint', arguments: { query: "UPDATE todos SET status='done'" } }],
+    } },
+    { type: 'tool.execution_complete', data: { toolCallId: 'checkpoint', success: true } },
+  ]);
+  const wakes = JSON.parse(runWatcher(`
+print(json.dumps(dw.scan_events(pathlib.Path(${JSON.stringify(base)}))[0]))
+`));
+  assert.deepEqual(wakes.map((w) => ({ trigger: w.trigger, touched: w.touched_files })), [
+    { trigger: 'T3_CHECKPOINT_DRIFT', touched: ['test results/assertions.xml'] },
+  ]);
 });
 
 test('range context selects the active todo, falls back to the latest todo, and tolerates a missing database', (t) => {
@@ -979,6 +1185,59 @@ console.log(JSON.stringify({ results, deliveries, state: readState() }));
   assert.equal(result.state.double_session_id, 'double-child-99');
 });
 
+for (const sessionId of ['worker-ext', 'double-child-99']) {
+  test(`accepted wakes stay coalesced past delayed startup through ${sessionId}`, (t) => {
+    const harness = extensionHarness(t, { sessionId, workerRunning: 1 });
+    writeFileSync(harness.statePath, JSON.stringify(lifecycleState('idle')));
+    const result = harness.run(`
+await registeredHooks.onUserPromptSubmitted({}, inv);
+const accepted = readState();
+for (let retry = 0; retry < 3; retry += 1) {
+  writeState({ ...readState(), updated_at: Date.now() - 16000 });
+  await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
+}
+const delayed = readState();
+setRunning('double-child-99', 1);
+await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
+console.log(JSON.stringify({ accepted, delayed, started: readState(), deliveries }));
+`);
+    const delivery = sessionId === 'worker-ext'
+      ? { transport: 'rpc', name: 'send_session_message', arguments: { session_id: 'double-child-99', delivery_mode: 'immediate', message: wakePrompt(harness) } }
+      : { transport: 'send', prompt: wakePrompt(harness) };
+    assert.deepEqual(result.deliveries, [delivery]);
+    assert.equal(result.accepted.wake_accepted, true);
+    assert.deepEqual({
+      phase: result.delayed.phase, queued: result.delayed.queued, monitors: result.delayed.monitors,
+      monitor_pid: result.delayed.monitor_pid, wake_count: result.delayed.wake_count, wake_accepted: result.delayed.wake_accepted,
+    }, { phase: 'wake_pending', queued: 1, monitors: 0, monitor_pid: null, wake_count: 1, wake_accepted: true });
+    assert.deepEqual({
+      phase: result.started.phase, queued: result.started.queued, monitors: result.started.monitors, wake_accepted: result.started.wake_accepted,
+    }, { phase: 'watching', queued: 0, monitors: 1, wake_accepted: false });
+  });
+}
+
+test('an accepted wake retries after an interrupted supervisor and resets acceptance on failure', (t) => {
+  const harness = extensionHarness(t);
+  const result = harness.run(`
+await registeredHooks.onUserPromptSubmitted({}, inv);
+writeState({ ...readState(), updated_at: Date.now() - 16000 });
+const db = new DatabaseSync(${JSON.stringify(join(harness.customHome, 'data.db'))});
+db.exec("UPDATE sessions SET was_interrupted = 1 WHERE id = 'double-child-99'");
+db.close();
+failNextDelivery('interrupted transport');
+await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
+const failed = readState();
+await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
+console.log(JSON.stringify({ failed, retried: readState(), deliveries }));
+`);
+  assert.deepEqual({
+    phase: result.failed.phase, wake_accepted: result.failed.wake_accepted, queued: result.failed.queued, last_error: result.failed.last_error,
+  }, { phase: 'unavailable', wake_accepted: false, queued: 0, last_error: 'interrupted transport' });
+  assert.deepEqual(result.deliveries.map((d) => d.arguments.message), Array(3).fill(wakePrompt(harness)));
+  assert.equal(result.retried.wake_accepted, true);
+  assert.equal(result.retried.wake_count, 3);
+});
+
 test('legacy Double wake calls are denied while unrelated session messages still activate Double', (t) => {
   const harness = extensionHarness(t);
   const result = harness.run(`
@@ -1174,4 +1433,3 @@ print(json.dumps(dw.read_audit_ranges(pathlib.Path(${JSON.stringify(delegated.ou
   assert.match(mdText, /# Double audit/);
   assert.match(mdText, /\|\s*0-3\s*\|\s*T1_HUMAN_GATE\s*\|\s*VERIFIED\s*\|/);
 });
-
