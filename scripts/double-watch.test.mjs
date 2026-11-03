@@ -1539,3 +1539,59 @@ console.log(JSON.stringify({ deliveries: deliveries.length, state: readState() }
   assert.equal(result.state.wake_accepted, true);
   assert.equal(result.state.wake_count, 1);
 });
+
+test('Double registers its runtime when the parent link appears after startup', (t) => {
+  const harness = extensionHarness(t, { sessionId: 'double-child-99', marker: false, doubleRunning: 1 });
+  const db = new DatabaseSync(join(harness.customHome, 'data.db'));
+  db.exec(`
+    DELETE FROM chat_parent_links WHERE session_id = 'double-child-99';
+    UPDATE sessions SET agent = NULL WHERE id = 'double-child-99';
+  `);
+  db.close();
+  const result = harness.run(`
+const startup = readState();
+const registrations = { listeners: 0, intervals: [] };
+const originalOn = session.on;
+session.on = (listener) => {
+  registrations.listeners += 1;
+  return originalOn(listener);
+};
+const originalSetInterval = globalThis.setInterval;
+globalThis.setInterval = (callback, milliseconds) => {
+  registrations.intervals.push(milliseconds);
+  return originalSetInterval(callback, milliseconds);
+};
+const db = new DatabaseSync(${JSON.stringify(join(harness.customHome, 'data.db'))});
+db.prepare('INSERT INTO chat_parent_links VALUES (?, ?)').run('double-child-99', 'worker-ext');
+db.prepare('UPDATE sessions SET agent = ? WHERE id = ?').run('double', 'double-child-99');
+db.close();
+for (let retry = 0; retry < 3; retry += 1) {
+  for (const name of ['onSessionStart', 'onUserPromptSubmitted', 'onPostToolUse']) {
+    await registeredHooks[name]({ toolName: 'view' }, inv);
+  }
+}
+const afterHooks = readState();
+await emit({ type: 'assistant.turn_start' });
+setRunning('double-child-99', 0);
+await emit({ type: 'hook.start', data: { hookType: 'agentStop' } });
+await emit({ type: 'session.usage_checkpoint' });
+const idle = readState();
+const beforeActivity = [...deliveries];
+setRunning('worker-ext', 1);
+writeFileSync(${JSON.stringify(join(harness.workerDir, 'events.jsonl'))}, '{"type":"user.message","data":{"content":"Continue"}}\\n', { flag: 'a' });
+await sleep(2200);
+console.log(JSON.stringify({ startup, registrations, afterHooks, idle, beforeActivity, deliveries, state: readState() }));
+`);
+  assert.deepEqual(result.deliveries, [{ transport: 'send', prompt: wakePrompt(harness) }]);
+  assert.equal(result.startup, null);
+  assert.deepEqual(result.registrations, { listeners: 1, intervals: [1000] });
+  assert.equal(result.afterHooks.phase, 'watching');
+  assert.equal(result.afterHooks.wake_count, 0);
+  assert.equal(result.idle.phase, 'idle');
+  assert.equal(result.idle.monitors, 0);
+  assert.deepEqual(result.beforeActivity, []);
+  assert.equal(result.state.phase, 'wake_pending');
+  assert.equal(result.state.queued, 1);
+  assert.equal(result.state.wake_count, 1);
+  assert.equal(result.state.wake_accepted, true);
+});
