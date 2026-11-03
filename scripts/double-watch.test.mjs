@@ -318,8 +318,9 @@ test('replay writes double-wake-bundle.json and wait_for_wake handles missing ev
   ];
   writeFileSync(join(sessionDir, 'events.jsonl'), `${events.map((e) => JSON.stringify(e)).join('\n')}\n`);
 
-  execFileSync('python', [watchScript, 'worker-replay', '--replay', '--out-dir', outDir], {
+  const replay = execFileSync('python', [watchScript, 'worker-replay', '--replay', '--out-dir', outDir], {
     env: { ...process.env, COPILOT_HOME: '', USERPROFILE: home, HOME: home },
+    encoding: 'utf8',
   });
   const bundlePath = join(outDir, 'double-wake-bundle.json');
   assert.equal(existsSync(bundlePath), true);
@@ -327,12 +328,22 @@ test('replay writes double-wake-bundle.json and wait_for_wake handles missing ev
   assert.equal(bundle.length, 1);
   assert.equal(bundle[0].trigger, 'T1_HUMAN_GATE');
   assert.equal(Array.isArray(bundle[0].range_events), true);
+  assert.equal(existsSync(join(outDir, 'double-lifecycle.json')), false);
+  const [summary, ...replayedWakes] = replay.trim().split(/\r?\n/);
+  assert.equal(summary, 'Session worker-replay (own_start=0, total=2 events) -> 1 wakes');
+  assert.deepEqual(replayedWakes.map((line) => JSON.parse(line)), bundle);
   const cursor = JSON.parse(readFileSync(join(outDir, 'double-cursor.json'), 'utf8'));
   assert.equal(cursor.next_idx, events.length);
   assert.equal(cursor.last_wake_idx, events.length);
   assert.deepEqual(cursor.pending_wakes.map((wake) => wake.event_range), [[0, 1]]);
 
   writeFileSync(join(outDir, 'double-audit.tsv'), auditHeader + auditRow('[0, 1]'));
+  const auditedReplay = execFileSync('python', [watchScript, 'worker-replay', '--replay', '--out-dir', outDir], {
+    env: { ...process.env, COPILOT_HOME: '', USERPROFILE: home, HOME: home },
+    encoding: 'utf8',
+  });
+  assert.equal(auditedReplay.trim(), 'Session worker-replay (own_start=0, total=2 events) -> 0 wakes');
+  assert.deepEqual(JSON.parse(readFileSync(bundlePath, 'utf8')), []);
   const resumed = execFileSync('python', [watchScript, 'worker-replay', '--wait', '--out-dir', outDir, '--idle-exit-seconds', '0'], {
     env: { ...process.env, COPILOT_HOME: '', USERPROFILE: home, HOME: home },
     encoding: 'utf8',
@@ -346,6 +357,45 @@ test('replay writes double-wake-bundle.json and wait_for_wake handles missing ev
     encoding: 'utf8',
   });
   assert.equal(JSON.parse(waitOut.trim()).status, 'PARENT_INACTIVE');
+});
+
+test('replay ignores the cursor, starts at the worker history, and flushes unfinished tools', (t) => {
+  const home = mkdtempSync(join(tmpdir(), 'double-replay-history-'));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const sessionDir = join(home, 'session-state', 'worker-history');
+  const outDir = join(home, 'out');
+  mkdirSync(sessionDir, { recursive: true });
+  mkdirSync(outDir);
+  const events = [
+    { type: 'session.start', data: { sessionId: 'other-worker' } },
+    { type: 'assistant.message', data: { content: 'Verified another worker.' } },
+    { type: 'session.start', data: { sessionId: 'worker-history' } },
+    { type: 'assistant.message', data: { content: 'Verified the old artifact.' } },
+    ...Array.from({ length: 501 }, () => ({ type: 'session.info', data: {} })),
+    { type: 'assistant.message', data: {
+      content: 'Verified the unfinished output.',
+      toolRequests: [{ name: 'powershell', toolCallId: 'unfinished' }],
+    } },
+  ];
+  writeEvents(sessionDir, events);
+  writeFileSync(join(outDir, 'double-cursor.json'), JSON.stringify({
+    worker_session_id: 'worker-history', next_idx: events.length, last_wake_idx: events.length, pending_wakes: [],
+  }));
+  const replay = execFileSync('python', [watchScript, 'worker-history', '--replay', '--out-dir', outDir], {
+    env: { ...process.env, COPILOT_HOME: home },
+    encoding: 'utf8',
+  }).trim().split(/\r?\n/);
+  assert.equal(replay[0], 'Session worker-history (own_start=2, total=506 events) -> 2 wakes');
+  const bundle = JSON.parse(readFileSync(join(outDir, 'double-wake-bundle.json'), 'utf8'));
+  assert.deepEqual(replay.slice(1).map((line) => JSON.parse(line)), bundle);
+  assert.deepEqual(bundle.map((wake) => ({ range: wake.event_range, claims: wake.claims })), [
+    { range: [2, 3], claims: ['Verified the old artifact.'] },
+    { range: [4, 505], claims: ['Verified the unfinished output.'] },
+  ]);
+  const cursor = JSON.parse(readFileSync(join(outDir, 'double-cursor.json'), 'utf8'));
+  assert.equal(cursor.next_idx, events.length);
+  assert.equal(cursor.last_wake_idx, events.length);
+  assert.deepEqual(cursor.pending_wakes.map((wake) => wake.event_range), [[2, 3], [4, 505]]);
 });
 
 test('check_parent_state detects interrupted sessions in data.db and ignores string literals inside viewed files', (t) => {
@@ -531,6 +581,10 @@ test('wait_for_wake returns flushed final wake before PARENT_INACTIVE and honors
   const outDir = join(base, 'out');
   mkdirSync(sessionDir, { recursive: true });
   mkdirSync(outDir, { recursive: true });
+  const db = new DatabaseSync(join(customHome, 'data.db'));
+  db.exec('CREATE TABLE sessions (id TEXT PRIMARY KEY, is_running INTEGER, was_interrupted INTEGER, archived_at TEXT)');
+  db.prepare('INSERT INTO sessions VALUES (?, 0, 1, NULL)').run('worker-flush');
+  db.close();
 
   const events = [
     { type: 'session.start', data: { sessionId: 'worker-flush' } },
@@ -541,7 +595,7 @@ test('wait_for_wake returns flushed final wake before PARENT_INACTIVE and honors
         toolRequests: [{ toolCallId: 'c_unfin', name: 'powershell', arguments: { command: 'echo ok' } }],
       },
     },
-    { type: 'session.shutdown', data: {} },
+    { type: 'tool.execution_start', data: { toolCallId: 'c_unfin', toolName: 'powershell' } },
   ];
   writeFileSync(join(sessionDir, 'events.jsonl'), `${events.map((e) => JSON.stringify(e)).join('\n')}\n`);
 
@@ -560,10 +614,11 @@ test('wait_for_wake returns flushed final wake before PARENT_INACTIVE and honors
   });
   assert.equal(secondWait.trim(), '');
   assert.deepEqual(JSON.parse(readFileSync(join(outDir, 'double-wake-bundle.json'), 'utf8')), bundle);
-  const auditing = JSON.parse(readFileSync(join(outDir, 'double-lifecycle.json'), 'utf8'));
-  assert.equal(auditing.phase, 'auditing');
-  assert.equal(auditing.monitors, 1);
-  assert.equal(auditing.monitor_pid, null);
+  const watching = JSON.parse(readFileSync(join(outDir, 'double-lifecycle.json'), 'utf8'));
+  assert.deepEqual({
+    phase: watching.phase, queued: watching.queued, monitors: watching.monitors,
+    monitor_pid: watching.monitor_pid, wake_accepted: watching.wake_accepted,
+  }, { phase: 'watching', queued: 0, monitors: 1, monitor_pid: null, wake_accepted: false });
 
   writeFileSync(join(outDir, 'double-audit.tsv'), auditHeader + auditRow('0-2'));
   const thirdWait = execFileSync('python', [watchScript, 'worker-flush', '--wait', '--out-dir', outDir, '--idle-exit-seconds', '0'], {
@@ -591,13 +646,19 @@ test('wait_for_wake returns flushed final wake before PARENT_INACTIVE and honors
   });
 });
 
-test('poll_once merges new wakes with unacknowledged wakes and refreshes their context', (t) => {
+test('poll_once merges and acknowledges wakes without changing lifecycle ownership', (t) => {
   const base = mkdtempSync(join(tmpdir(), 'double-pending-'));
   t.after(() => rmSync(base, { recursive: true, force: true }));
   const sessionDir = join(base, 'worker-pending');
   const outDir = join(base, 'out');
   mkdirSync(sessionDir, { recursive: true });
   mkdirSync(outDir);
+  const statePath = join(outDir, 'double-lifecycle.json');
+  const lifecycle = JSON.stringify({
+    worker_session_id: 'worker-pending', double_session_id: 'double-pending',
+    phase: 'watching', queued: 0, monitors: 1, monitor_pid: process.pid, wake_accepted: false,
+  });
+  writeFileSync(statePath, lifecycle);
   const events = [
     { type: 'session.start', data: { sessionId: 'worker-pending' } },
     { type: 'assistant.message', data: { content: 'Verified the first artifact.' } },
@@ -619,6 +680,13 @@ print(json.dumps(dw.poll_once(pathlib.Path(${JSON.stringify(sessionDir)}), pathl
     { id: 'pending-task', title: 'Audit the next artifact', status: 'in_progress' },
     { id: 'pending-task', title: 'Audit the next artifact', status: 'in_progress' },
   ]);
+  assert.equal(readFileSync(statePath, 'utf8'), lifecycle);
+  writeFileSync(join(outDir, 'double-audit.tsv'), auditHeader + auditRow('0-1') + auditRow('2-2'));
+  assert.deepEqual(poll(), []);
+  assert.deepEqual(JSON.parse(readFileSync(join(outDir, 'double-cursor.json'), 'utf8')).pending_wakes, []);
+  assert.equal(existsSync(join(outDir, 'double-wake-bundle.json')), false);
+  assert.equal(readFileSync(statePath, 'utf8'), lifecycle);
+  assert.equal(existsSync(join(outDir, 'double-lifecycle.lock')), false);
 });
 
 test('audit acknowledgment matches overlapping integer ranges and only falls back to new symbolic rows', (t) => {
@@ -1231,8 +1299,9 @@ await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
 console.log(JSON.stringify({ failed, retried: readState(), deliveries }));
 `);
   assert.deepEqual({
-    phase: result.failed.phase, wake_accepted: result.failed.wake_accepted, queued: result.failed.queued, last_error: result.failed.last_error,
-  }, { phase: 'unavailable', wake_accepted: false, queued: 0, last_error: 'interrupted transport' });
+    phase: result.failed.phase, wake_accepted: result.failed.wake_accepted, queued: result.failed.queued,
+    monitors: result.failed.monitors, monitor_pid: result.failed.monitor_pid,
+  }, { phase: 'idle', wake_accepted: false, queued: 0, monitors: 0, monitor_pid: null });
   assert.deepEqual(result.deliveries.map((d) => d.arguments.message), Array(3).fill(wakePrompt(harness)));
   assert.equal(result.retried.wake_accepted, true);
   assert.equal(result.retried.wake_count, 3);
@@ -1265,62 +1334,70 @@ console.log(JSON.stringify({ unrelated: unrelated ?? null, denied: denied ?? nul
   }]);
 });
 
-test('lifecycle coalesces live monitors and running supervisors, then recovers stale phases', (t) => {
+test('lifecycle coalesces watching and pending activation, then retries stale connections', (t) => {
   const harness = extensionHarness(t);
   const result = harness.run(`
 const observations = [];
-for (const phase of ['watching', 'auditing', 'acknowledging']) {
-  writeState(${JSON.stringify(lifecycleState('watching'))});
-  writeState({ ...readState(), phase, monitor_pid: process.pid });
-  await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
-  observations.push({ phase: readState().phase, queued: readState().queued, monitors: readState().monitors, worker_active: readState().worker_active });
-}
+writeState({ ...${JSON.stringify(lifecycleState('watching'))}, monitor_pid: process.pid });
+await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
+observations.push({ phase: readState().phase, queued: readState().queued, monitors: readState().monitors, worker_active: readState().worker_active });
 setRunning('double-child-99', 1);
 writeState(${JSON.stringify(lifecycleState('wake_pending', { queued: 1 }))});
 await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
 observations.push({ phase: readState().phase, queued: readState().queued, monitors: readState().monitors, worker_active: readState().worker_active });
 setRunning('double-child-99', 0);
-for (const phase of ['watching', 'auditing', 'acknowledging', 'wake_pending', 'unavailable', 'recovering']) {
+for (const phase of ['watching', 'wake_pending']) {
   writeState({ ...${JSON.stringify(lifecycleState('idle'))}, phase, updated_at: Date.now() - 16000, monitor_pid: 2147483647 });
   await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
   observations.push({ phase: readState().phase, queued: readState().queued, monitors: readState().monitors, wake_count: readState().wake_count });
 }
+for (const phase of ['watching', 'wake_pending']) {
+  writeState({ ...${JSON.stringify(lifecycleState('idle'))}, phase, updated_at: Date.now() - 16000, monitor_pid: 2147483647 });
+  await registeredHooks.onSessionEnd({}, inv);
+  observations.push({ phase: readState().phase, queued: readState().queued, monitors: readState().monitors, wake_count: readState().wake_count });
+}
 console.log(JSON.stringify({ observations, deliveries }));
 `);
-  assert.deepEqual(result.observations.slice(0, 4), [
+  assert.deepEqual(result.observations.slice(0, 2), [
     { phase: 'watching', queued: 0, monitors: 1, worker_active: true },
-    { phase: 'auditing', queued: 0, monitors: 1, worker_active: true },
-    { phase: 'acknowledging', queued: 0, monitors: 1, worker_active: true },
     { phase: 'watching', queued: 0, monitors: 1, worker_active: true },
   ]);
-  assert.deepEqual(result.observations.slice(4), Array.from({ length: 6 }, () => ({
+  assert.deepEqual(result.observations.slice(2, 4), Array.from({ length: 2 }, () => ({
     phase: 'wake_pending', queued: 1, monitors: 0, wake_count: 1,
   })));
-  assert.equal(result.deliveries.length, 6);
+  assert.deepEqual(result.observations.slice(4), Array.from({ length: 2 }, () => ({
+    phase: 'idle', queued: 0, monitors: 0, wake_count: 0,
+  })));
+  assert.equal(result.deliveries.length, 2);
   assert.equal(result.deliveries.every((delivery) => delivery.arguments.message === wakePrompt(harness)), true);
 });
 
-test('failed runtime transport leaves no queued wake and a later hook retries', (t) => {
-  const harness = extensionHarness(t);
-  const result = harness.run(`
-failNextDelivery('runtime unavailable');
+for (const sessionId of ['worker-ext', 'double-child-99']) {
+  test(`failed runtime transport through ${sessionId} leaves idle state and a later hook retries`, (t) => {
+    const harness = extensionHarness(t, { sessionId });
+    writeFileSync(harness.statePath, JSON.stringify(lifecycleState('idle')));
+    const result = harness.run(`
+setRunning('worker-ext', 1);
+failNextDelivery('transport rejected');
 const first = await registeredHooks.onUserPromptSubmitted({}, inv);
 const failed = readState();
 const second = await registeredHooks.onPostToolUseFailure({ toolName: 'powershell' }, inv);
 console.log(JSON.stringify({ first: first ?? null, second: second ?? null, failed, retried: readState(), deliveries }));
 `);
-  assert.equal(result.first, null);
-  assert.equal(result.second, null);
-  assert.deepEqual({
-    phase: result.failed.phase,
-    queued: result.failed.queued,
-    monitors: result.failed.monitors,
-    last_error: result.failed.last_error,
-  }, { phase: 'unavailable', queued: 0, monitors: 0, last_error: 'runtime unavailable' });
-  assert.equal(result.retried.phase, 'wake_pending');
-  assert.equal(result.retried.wake_count, 2);
-  assert.deepEqual(result.deliveries.map((delivery) => delivery.arguments.message), [wakePrompt(harness), wakePrompt(harness)]);
-});
+    assert.equal(result.first, null);
+    assert.equal(result.second, null);
+    assert.deepEqual({
+      phase: result.failed.phase,
+      queued: result.failed.queued,
+      monitors: result.failed.monitors,
+      monitor_pid: result.failed.monitor_pid,
+      wake_accepted: result.failed.wake_accepted,
+    }, { phase: 'idle', queued: 0, monitors: 0, monitor_pid: null, wake_accepted: false });
+    assert.equal(result.retried.phase, 'wake_pending');
+    assert.equal(result.retried.wake_count, 2);
+    assert.deepEqual(result.deliveries.map((delivery) => delivery.arguments?.message || delivery.prompt), [wakePrompt(harness), wakePrompt(harness)]);
+  });
+}
 
 test('unmarked and archived workers do not dispatch supervisor wakes', (t) => {
   const unmarked = extensionHarness(t, { marker: false });
@@ -1458,4 +1535,3 @@ console.log(JSON.stringify({ deliveries: deliveries.length, state: readState() }
   assert.equal(result.state.wake_accepted, true);
   assert.equal(result.state.wake_count, 1);
 });
-

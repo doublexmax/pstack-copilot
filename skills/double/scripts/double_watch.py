@@ -23,7 +23,6 @@ def copilot_home() -> pathlib.Path:
     return (base / ".copilot").resolve()
 
 
-ROOT = copilot_home() / "session-state"
 PATCH_FILE_RE = re.compile(r"^\*\*\*\s+(?:Add File|Update File|Delete File|Move to):\s*(.+)$")
 FACTUAL_CLAIM_RE = re.compile(
     r"\b(succeeded|passed|failed|reduced|matched|differed|reproduced|verified|confirmed|identical|no unrelated|remains additive|completed|is now the|routed correctly|fixed|root cause|because|caused by|(?<!\bi\s)(?<!\bwe\s)must be(?!\s+(?:mindful|careful|cautious|sure\b|able\b))|assumes)\b",
@@ -436,10 +435,6 @@ def lifecycle_lock(out_dir: pathlib.Path):
         conn.close()
 
 
-def save_cursor(cursor_file: pathlib.Path, state: dict) -> None:
-    write_json(cursor_file, state)
-
-
 def sync_audit_markdown(out_dir: pathlib.Path) -> None:
     audit_file = out_dir / "double-audit.tsv"
     if not audit_file.exists():
@@ -492,17 +487,20 @@ def wake_acknowledged(wake: dict, audit_ranges: list[tuple[int, int] | None], li
     return len(new_rows) >= required and all(r is None for r in new_rows)
 
 
-def poll_once(session_dir: pathlib.Path, out_dir: pathlib.Path, flush_pending: bool = False) -> list[dict]:
+def poll_once(session_dir: pathlib.Path, out_dir: pathlib.Path, flush_pending: bool = False, replay: bool = False) -> list[dict]:
     out_dir.mkdir(parents=True, exist_ok=True)
     cursor_file = out_dir / "double-cursor.json"
     bundle_file = out_dir / "double-wake-bundle.json"
     ev_file = session_dir / "events.jsonl"
     lines = ev_file.read_text(encoding="utf-8", errors="replace").splitlines() if ev_file.exists() else []
     own_start = find_own_session_start(lines, session_dir.name)
-    state = load_cursor(cursor_file, len(lines), own_start, session_dir.name)
+    state = (
+        {"next_idx": own_start, "last_wake_idx": own_start, "pending_wakes": []}
+        if replay else load_cursor(cursor_file, len(lines), own_start, session_dir.name)
+    )
     wakes, _, _, next_idx, last_wake, touched, verify_touched = scan_events(
         session_dir, state["last_wake_idx"],
-        lines=lines, flush_pending=flush_pending,
+        lines=lines, flush_pending=flush_pending or replay,
     )
     new_wakes = [w for w in wakes if w["event_range"][1] >= state["next_idx"]]
     audit_ranges = read_audit_ranges(out_dir, sync_markdown=False)
@@ -512,7 +510,7 @@ def poll_once(session_dir: pathlib.Path, out_dir: pathlib.Path, flush_pending: b
     pending_wakes = [w for w in pending.values() if not wake_acknowledged(w, audit_ranges, lines)]
     if not pending_wakes:
         sync_audit_markdown(out_dir)
-    save_cursor(cursor_file, {
+    write_json(cursor_file, {
         "worker_session_id": session_dir.name,
         "next_idx": next_idx,
         "last_wake_idx": last_wake,
@@ -520,27 +518,22 @@ def poll_once(session_dir: pathlib.Path, out_dir: pathlib.Path, flush_pending: b
         "verify_touched": verify_touched,
         "pending_wakes": pending_wakes,
     })
-    if any(wake_acknowledged(w, audit_ranges, lines) for w in state.get("pending_wakes", [])):
-        with lifecycle_lock(out_dir):
-            lifecycle = load_lifecycle(out_dir, session_dir.name)
-            for phase in ("acknowledging", "watching"):
-                lifecycle.update(phase=phase, queued=0, monitors=1, wake_accepted=False)
-                save_lifecycle(out_dir, lifecycle)
     enriched = []
     for w in pending_wakes:
         ctx = extract_range_context(session_dir, lines, own_start, w["event_range"][0], w["event_range"][1])
         enriched.append({**w, **ctx})
-    if enriched:
+    if enriched or replay:
         write_json(bundle_file, enriched)
-        with lifecycle_lock(out_dir):
-            lifecycle = load_lifecycle(out_dir, session_dir.name)
-            lifecycle.update(phase="auditing", queued=0, monitors=1, monitor_pid=None, wake_accepted=False)
-            save_lifecycle(out_dir, lifecycle)
+    elif bundle_file.exists():
+        bundle_file.unlink()
+    if replay:
+        print(f"Session {session_dir.name} (own_start={own_start}, total={len(lines)} events) -> {len(enriched)} wakes")
+        for w in enriched:
+            print(json.dumps(w))
+    elif enriched:
         print(f"WROTE {len(enriched)} wake(s) to {bundle_file}", file=sys.stderr, flush=True)
         for w in pending_wakes:
             print(json.dumps(w), file=sys.stderr, flush=True)
-    elif bundle_file.exists():
-        bundle_file.unlink()
     return pending_wakes
 
 
@@ -560,35 +553,6 @@ def resolve_session_dir(state_root: pathlib.Path, session_id: str) -> pathlib.Pa
             f"{', '.join(m.name for m in matches[:5])}"
         )
     return matches[0]
-
-
-def find_double_child(worker_sid: str) -> dict | None:
-    home = copilot_home()
-    db = home / "data.db"
-    if not db.exists():
-        return None
-    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-    try:
-        row = conn.execute(
-            """
-            SELECT c.session_id, s.title, s.is_running
-            FROM chat_parent_links c
-            JOIN sessions s ON s.id = c.session_id
-            WHERE c.parent_session_id = ? AND s.agent = 'double' AND s.archived_at IS NULL
-            ORDER BY s.created_at DESC LIMIT 1
-            """,
-            (worker_sid,),
-        ).fetchone()
-    finally:
-        conn.close()
-    marker = home / "session-state" / worker_sid / "double-supervised"
-    if not row:
-        if marker.exists():
-            marker.unlink()
-        return None
-    if marker.parent.exists() and not marker.exists():
-        marker.write_text(row[0] + "\n", encoding="utf-8")
-    return {"double_session_id": row[0], "title": row[1], "is_running": bool(row[2])}
 
 
 def check_parent_state(session_dir: pathlib.Path, lines: list[str], idle_grace_seconds: float = 10.0) -> tuple[bool, str]:
@@ -661,14 +625,14 @@ def wait_for_wake(session_dir: pathlib.Path, out_dir: pathlib.Path, interval: fl
             last_stat_size = current_size
             wakes = poll_once(session_dir, out_dir)
             if wakes:
-                return
+                break
 
         lines = ev_file.read_text(encoding="utf-8", errors="replace").splitlines() if ev_file.exists() else []
         active, reason = check_parent_state(session_dir, lines, idle_exit_seconds)
         if not active:
             wakes = poll_once(session_dir, out_dir, flush_pending=True)
             if wakes:
-                return
+                break
             lines = ev_file.read_text(encoding="utf-8", errors="replace").splitlines() if ev_file.exists() else []
             active, reason = check_parent_state(session_dir, lines, idle_exit_seconds)
             if active:
@@ -688,13 +652,17 @@ def wait_for_wake(session_dir: pathlib.Path, out_dir: pathlib.Path, interval: fl
 
         time.sleep(interval)
 
+    with lifecycle_lock(out_dir):
+        lifecycle = load_lifecycle(out_dir, session_dir.name)
+        lifecycle.update(phase="watching", queued=0, monitors=1, monitor_pid=None, wake_accepted=False)
+        save_lifecycle(out_dir, lifecycle)
+
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("session_id", help="Worker Session ID or prefix under ~/.copilot/session-state")
     parser.add_argument("--out-dir", type=str, default=".", help="Directory for double-cursor.json and double-wake-bundle.json (defaults to Double's own cwd)")
     group = parser.add_mutually_exclusive_group()
-    group.add_argument("--check-child", action="store_true", help="Print attached Double child session status from data.db")
     group.add_argument("--wait", action="store_true", help="Block at 0 tokens until a new wake fires or parent session goes idle")
     group.add_argument("--once", action="store_true", help="Single incremental poll writing double-wake-bundle.json to --out-dir")
     group.add_argument("--follow", action="store_true", help="Continuous tail loop")
@@ -706,12 +674,6 @@ def main():
     state_root = copilot_home() / "session-state"
     session_dir = resolve_session_dir(state_root, args.session_id)
     out_dir = pathlib.Path(args.out_dir).resolve()
-
-    if args.check_child:
-        info = find_double_child(session_dir.name)
-        if info:
-            print(json.dumps(info))
-        return
 
     if args.wait:
         wait_for_wake(session_dir, out_dir, args.interval, args.idle_exit_seconds)
@@ -726,30 +688,7 @@ def main():
             poll_once(session_dir, out_dir)
             time.sleep(args.interval)
 
-    wakes, lines, own_start, total, last_wake, touched, verify_touched = scan_events(session_dir, 0, flush_pending=True)
-    audit_ranges = read_audit_ranges(out_dir, sync_markdown=False)
-    pending_wakes = [
-        {**w, "delivered_audit_rows": len(audit_ranges)} for w in wakes
-        if not wake_acknowledged({**w, "delivered_audit_rows": len(audit_ranges)}, audit_ranges, lines)
-    ]
-    if not pending_wakes:
-        sync_audit_markdown(out_dir)
-    enriched = [
-        {**w, **extract_range_context(session_dir, lines, own_start, w["event_range"][0], w["event_range"][1])}
-        for w in pending_wakes
-    ]
-    save_cursor(out_dir / "double-cursor.json", {
-        "worker_session_id": session_dir.name,
-        "next_idx": total,
-        "last_wake_idx": last_wake,
-        "touched": touched,
-        "verify_touched": verify_touched,
-        "pending_wakes": pending_wakes,
-    })
-    write_json(out_dir / "double-wake-bundle.json", enriched)
-    print(f"Session {session_dir.name} (own_start={own_start}, total={total} events) -> {len(pending_wakes)} wakes")
-    for w in enriched:
-        print(json.dumps(w))
+    poll_once(session_dir, out_dir, replay=True)
 
 
 if __name__ == "__main__":

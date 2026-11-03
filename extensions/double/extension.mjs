@@ -7,7 +7,6 @@ import { joinSession } from "@github/copilot-sdk/extension";
 export const ENTRY_VERSION = "pstack-double-extension-v1";
 const pstackRoot = join(homedir(), ".copilot", "pstack");
 const watchScript = join(pstackRoot, "skills", "double", "scripts", "double_watch.py");
-const activePhases = new Set(["watching", "auditing", "acknowledging"]);
 const wakeTimeoutMs = 15_000;
 let session;
 let doubleTurnActive = false;
@@ -46,16 +45,9 @@ function findPair(column, sessionId) {
     }
 }
 
-function findDoubleChild(workerSessionId) {
-    return hasSupervisorMarker(workerSessionId) ? findPair("c.parent_session_id", workerSessionId) : null;
-}
-
-function findSupervisedWorker(doubleSessionId) {
-    return findPair("c.session_id", doubleSessionId);
-}
-
 function supervisorFor(sessionId) {
-    return findDoubleChild(sessionId) || findSupervisedWorker(sessionId);
+    return (hasSupervisorMarker(sessionId) ? findPair("c.parent_session_id", sessionId) : null)
+        || findPair("c.session_id", sessionId);
 }
 
 function readJson(path) {
@@ -98,8 +90,8 @@ function transition(outDir, state, phase, now) {
     Object.assign(state, {
         phase,
         queued: phase === "wake_pending" ? 1 : 0,
-        monitors: activePhases.has(phase) ? 1 : 0,
-        monitor_pid: activePhases.has(phase) ? state.monitor_pid : null,
+        monitors: phase === "watching" ? 1 : 0,
+        monitor_pid: phase === "watching" ? state.monitor_pid : null,
         wake_accepted: phase === "wake_pending" ? state.wake_accepted : false,
         updated_at: now,
     });
@@ -128,10 +120,6 @@ function lifecycleLock(outDir) {
     return () => db.close();
 }
 
-function isWakeMessage(message) {
-    return typeof message === "string" && (message.includes("double_watch.py") || message.includes("--wait"));
-}
-
 async function reconcileSupervisorLifecycle(sessionId, workerActivity = false, info = supervisorFor(sessionId)) {
     if (!info) return;
     const outDir = join(copilotHome(), "session-state", info.double_session_id, "files");
@@ -150,18 +138,17 @@ async function reconcileSupervisorLifecycle(sessionId, workerActivity = false, i
             }
         }
         state.worker_active ||= Boolean(info.worker_is_running) || (workerActivity && sessionId === info.worker_session_id);
-        if (activePhases.has(state.phase)) {
+        if (state.phase === "watching") {
             if (info.is_running || doubleTurnActive || pidAlive(state.monitor_pid)) {
                 state.queued = 0;
                 state.monitors = 1;
                 saveLifecycle(outDir, state);
                 return;
             }
-            transition(outDir, state, "recovering", now);
+            transition(outDir, state, "idle", now);
         }
         if (state.phase === "wake_pending") {
             if (info.is_running || doubleTurnActive) {
-                state.wake_accepted = false;
                 transition(outDir, state, "watching", now);
                 return;
             }
@@ -172,11 +159,8 @@ async function reconcileSupervisorLifecycle(sessionId, workerActivity = false, i
                 saveLifecycle(outDir, state);
                 return;
             }
-            state.wake_accepted = false;
-            transition(outDir, state, "recovering", now);
+            transition(outDir, state, "idle", now);
         }
-        if (state.phase === "unavailable") transition(outDir, state, "recovering", now);
-        if (state.phase === "recovering") transition(outDir, state, "idle", now);
         if (state.phase !== "idle") return;
         const eventsPath = join(copilotHome(), "session-state", info.worker_session_id, "events.jsonl");
         const eventSize = existsSync(eventsPath) ? statSync(eventsPath).size : 0;
@@ -193,7 +177,6 @@ async function reconcileSupervisorLifecycle(sessionId, workerActivity = false, i
         }
         state.wake_count += 1;
         state.wake_accepted = false;
-        delete state.last_error;
         transition(outDir, state, "wake_pending", now);
         wakePrompt = `Parent session active; run python "${watchScript}" ${info.worker_session_id} --wait --out-dir "${outDir}" and write double-audit.tsv and double-audit.md in "${outDir}".`;
     } finally {
@@ -208,7 +191,7 @@ async function reconcileSupervisorLifecycle(sessionId, workerActivity = false, i
                 arguments: { session_id: info.double_session_id, delivery_mode: "immediate", message: wakePrompt },
             });
         } else {
-            throw new Error("Double supervisor runtime transport is unavailable.");
+            throw new Error("Double supervisor runtime transport is missing.");
         }
         const release = lifecycleLock(outDir);
         try {
@@ -220,21 +203,18 @@ async function reconcileSupervisorLifecycle(sessionId, workerActivity = false, i
         } finally {
             release();
         }
-    } catch (error) {
+    } catch {
         const release = lifecycleLock(outDir);
         try {
             const state = loadLifecycle(outDir, info);
-            state.last_error = String(error?.message || error);
-            transition(outDir, state, "unavailable", Date.now());
+            transition(outDir, state, "idle", Date.now());
         } finally {
             release();
         }
     }
 }
 
-async function onWorkerActivity(_input, invocation) {
-    await reconcileSupervisorLifecycle(invocation.sessionId, true);
-}
+const onWorkerActivity = (_input, invocation) => reconcileSupervisorLifecycle(invocation.sessionId, true);
 
 session = await joinSession({
     hooks: {
@@ -242,8 +222,10 @@ session = await joinSession({
         onUserPromptSubmitted: onWorkerActivity,
         onPreToolUse: async (input, invocation) => {
             const info = supervisorFor(invocation.sessionId);
+            const message = input.toolArgs?.message;
             if (input.toolName === "send_session_message" && info
-                && input.toolArgs?.session_id === info.double_session_id && isWakeMessage(input.toolArgs?.message)) {
+                && input.toolArgs?.session_id === info.double_session_id && typeof message === "string"
+                && (message.includes("double_watch.py") || message.includes("--wait"))) {
                 return {
                     permissionDecision: "deny",
                     permissionDecisionReason: "Double supervisor activation is runtime-owned.",
@@ -259,7 +241,7 @@ session = await joinSession({
     },
 });
 
-if (findSupervisedWorker(session.sessionId)) {
+if (findPair("c.session_id", session.sessionId)) {
     session.on((event) => {
         if (event.type === "assistant.turn_start") doubleTurnActive = true;
         if (event.type === "session.idle") {
