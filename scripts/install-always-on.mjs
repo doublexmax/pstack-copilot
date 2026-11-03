@@ -1,7 +1,8 @@
 #!/usr/bin/env node
+import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir, platform } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -271,11 +272,30 @@ function installTrustedFolder(removing, dryRun) {
 }
 
 function powershellProfilePath() {
-  if (process.env.PSTACK_PROFILE_PATH) return process.env.PSTACK_PROFILE_PATH;
-  if (platform() === 'win32') {
-    return join(home, 'Documents', 'PowerShell', 'Microsoft.PowerShell_profile.ps1');
+  if (process.env.PSTACK_PROFILE_PATH) return resolve(process.env.PSTACK_PROFILE_PATH);
+  if (platform() !== 'win32') return null;
+  for (const shell of ['pwsh.exe', 'powershell.exe']) {
+    let output;
+    try {
+      output = execFileSync(shell, [
+        '-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
+        "$ErrorActionPreference = 'Stop'; [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); $PROFILE.CurrentUserCurrentHost",
+      ], {
+        encoding: 'utf8',
+        timeout: 10_000,
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (error) {
+      if (shell === 'pwsh.exe' && error.code === 'ENOENT') continue;
+      throw new Error(`cannot discover PowerShell profile with ${shell}: ${error.message}`);
+    }
+    const file = output.trim();
+    if (!isAbsolute(file) || /[\u0000-\u001f<>:"|?*]/.test(file.replace(/^[a-z]:/i, ''))) {
+      throw new Error(`invalid PowerShell profile path returned by ${shell}`);
+    }
+    return resolve(file);
   }
-  return null;
 }
 
 function unixRcPath() {
@@ -385,7 +405,7 @@ function writeShim(file, body, dryRun, executable) {
   console.log(`updated ${file}`);
 }
 
-function installShell(removing, dryRun, skipShell) {
+function installShell(removing, dryRun, skipShell, psProfile) {
   if (skipShell) {
     console.log('skipping shell wrapper (--skip-shell)');
     return;
@@ -393,7 +413,6 @@ function installShell(removing, dryRun, skipShell) {
 
   installBinShims(removing, dryRun);
 
-  const psProfile = powershellProfilePath();
   if (psProfile) {
     installProfileBlock(psProfile, powershellWrapperBody(), removing, dryRun);
   }
@@ -451,6 +470,7 @@ try {
     installDoubleExtension(extension, dryRun);
   } else {
     if (!skipTrust) readJson(configFile);
+    const psProfile = skipShell ? null : powershellProfilePath();
     const nativeHooks = hooks === 'skip' ? null : await planNativeHooks(removing);
     const extension = hooks === 'skip' ? null : planDoubleExtension(removing);
     installInstructions(removing, dryRun);
@@ -460,7 +480,7 @@ try {
     } else console.log('skipping native context hooks and double extension (--hooks skip)');
     if (skipTrust) console.log('skipping trustedFolders (--skip-trust)');
     else installTrustedFolder(removing, dryRun);
-    installShell(removing, dryRun, skipShell);
+    installShell(removing, dryRun, skipShell, psProfile);
   }
 } catch (error) {
   console.error(`error: ${error.message}`);
