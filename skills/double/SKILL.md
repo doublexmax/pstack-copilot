@@ -13,7 +13,7 @@ Choose the path that matches your invocation:
 
 | Situation | Path |
 | --- | --- |
-| User typed `/double`, "attach double", or "supervise session X" | [Attach a Double child session](#attach-a-double-child-session) |
+| Starting an autonomous or unattended run (`autonomous-run`, unattended `hillclimb`, "going to bed", "run until done", "trust it when i'm back"), or user typed `/double`, "attach double", or "supervise session X" | [Attach a Double child session](#attach-a-double-child-session) |
 | You are the `Double: <Name>` child session waking on kickoff or runtime activation | [Run a verification pass](#run-a-verification-pass) |
 | User asked to audit a past session once without a recurring schedule | Run `python "<skill_dir>\scripts\double_watch.py" <session_id> --replay --out-dir "<double_artifacts_dir>"`, then follow [Step 2 of Run a verification pass](#step-2-audit-each-wake-against-real-artifacts) |
 
