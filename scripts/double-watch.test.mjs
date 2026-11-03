@@ -456,6 +456,9 @@ test('double bindings, skill kickoff contract, and documentation stay aligned', 
   assert.match(skillText, /PSTACK_CONTEXT_V1/);
   assert.match(skillText, /"input":\s*\{/);
   assert.match(skillText, /double-supervised/);
+
+  const modelsText = readFileSync(join(root, 'models.default.md'), 'utf8');
+  assert.match(modelsText, /double verifier:\s+claude-opus-5\.5 \/ max, gpt-6\.1-sol \/ max, gemini-4-argon \/ high/);
   assert.match(skillText, /gpt-6\.1-sol \/ xhigh/);
 
   const agentText = readFileSync(join(root, 'agents', 'double.agent.md'), 'utf8');
