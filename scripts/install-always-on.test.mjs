@@ -30,15 +30,44 @@ function withHome(seed, { profile = true, shellRc = false, copilotName = '.copil
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, seed);
   }
+  let preload;
+  const mockPowerShell = (responses, osPlatform = 'win32') => {
+    const source = `
+      import childProcess from 'node:child_process';
+      import os from 'node:os';
+      import { syncBuiltinESMExports } from 'node:module';
+      import assert from 'node:assert/strict';
+      os.platform = () => ${JSON.stringify(osPlatform)};
+      const responses = ${JSON.stringify(responses)};
+      childProcess.execFileSync = (command, args, options) => {
+        assert.ok(Object.hasOwn(responses, command), 'unexpected PowerShell query: ' + command);
+        assert.ok(args.includes('-NoProfile'));
+        assert.ok(args.includes('-NonInteractive'));
+        assert.ok(args.includes('-Command'));
+        assert.match(args.at(-1), /\\$PROFILE\\.CurrentUserCurrentHost/);
+        assert.match(args.at(-1), /UTF8Encoding/);
+        assert.equal(options.encoding, 'utf8');
+        assert.ok(options.timeout > 0 && options.timeout <= 10000);
+        const response = responses[command];
+        if (typeof response === 'string') return response;
+        throw Object.assign(new Error(response.message || response.code || 'PowerShell query failed'), response);
+      };
+      for (const name of ['spawn', 'spawnSync', 'exec', 'execSync', 'execFile', 'fork']) {
+        childProcess[name] = () => { throw new Error('unexpected child process API: ' + name); };
+      }
+      syncBuiltinESMExports();
+    `;
+    preload = `data:text/javascript,${encodeURIComponent(source)}`;
+  };
   const run = (...args) =>
-    execFileSync(process.execPath, [script, ...args], {
+    execFileSync(process.execPath, [...(preload ? ['--import', preload] : []), script, ...args], {
       env: {
         ...process.env,
         HOME: home,
         USERPROFILE: home,
         COPILOT_HOME: copilotDir,
         ...(profile ? { PSTACK_PROFILE_PATH: profilePath } : { PSTACK_PROFILE_PATH: '' }),
-        ...(shellRc ? { PSTACK_SHELL_RC: shellRcPath } : {}),
+        PSTACK_SHELL_RC: shellRc ? shellRcPath : '',
       },
       encoding: 'utf8',
     });
@@ -55,6 +84,7 @@ function withHome(seed, { profile = true, shellRc = false, copilotName = '.copil
     readProfile,
     readRc,
     profilePath,
+    mockPowerShell,
     bin,
     target,
     config,
@@ -171,6 +201,140 @@ const cases = {
     assert.ok(profile.includes('--add-dir'), profile);
     assert.ok(profile.includes(join(h.home, '.copilot')) || profile.includes('.copilot'), profile);
     h.cleanup();
+  },
+  'default Windows profile discovery follows pwsh redirection and preserves user content'() {
+    const h = withHome(undefined, { profile: false });
+    try {
+      const profile = join(h.home, 'OneDrive - Work', 'Døcuments', 'PowerShell', 'Microsoft.PowerShell_profile.ps1');
+      const legacy = join(h.home, 'Redirected', 'WindowsPowerShell', 'Microsoft.PowerShell_profile.ps1');
+      h.mockPowerShell({ 'pwsh.exe': `${profile}\r\n`, 'powershell.exe': `${legacy}\r\n` });
+      mkdirSync(dirname(profile), { recursive: true });
+      const foreign = "Write-Output 'my profile'\n";
+      writeFileSync(profile, foreign);
+      const before = snapshot(h.home);
+      assert.ok(h.run('--dry-run').includes(`would update ${profile}`));
+      assert.deepStrictEqual(snapshot(h.home), before);
+      h.run();
+      const installed = readFileSync(profile, 'utf8');
+      assert.ok(installed.startsWith(foreign));
+      assert.ok(installed.includes('function pstack'));
+      assert.strictEqual(h.readProfile(), null);
+      assert.strictEqual(existsSync(legacy), false);
+      const once = snapshot(h.home);
+      h.run();
+      assert.deepStrictEqual(snapshot(h.home), once);
+      h.run('--uninstall');
+      assert.strictEqual(readFileSync(profile, 'utf8'), foreign);
+      assert.strictEqual(existsSync(h.bin('pstack.cmd')), false);
+    } finally { h.cleanup(); }
+  },
+  'Windows profile discovery falls back when pwsh is unavailable'() {
+    const h = withHome(undefined, { profile: false });
+    try {
+      const profile = join(h.home, 'OneDrive', 'Documents', 'WindowsPowerShell', 'Microsoft.PowerShell_profile.ps1');
+      h.mockPowerShell({ 'pwsh.exe': { code: 'ENOENT' }, 'powershell.exe': `${profile}\r\n` });
+      h.run();
+      assert.ok(readFileSync(profile, 'utf8').includes('function pstack'));
+      assert.strictEqual(h.readProfile(), null);
+      h.run('--uninstall');
+      assert.strictEqual(existsSync(profile), false);
+    } finally { h.cleanup(); }
+  },
+  'an explicit profile override bypasses discovery on Windows and Unix'() {
+    for (const osPlatform of ['win32', 'linux']) {
+      const h = withHome();
+      try {
+        h.mockPowerShell({}, osPlatform);
+        h.run();
+        assert.ok(h.readProfile().includes('function pstack'));
+        h.run('--uninstall');
+        assert.strictEqual(h.readProfile(), null);
+      } finally { h.cleanup(); }
+    }
+  },
+  'PowerShell query failures abort install and uninstall before any write'() {
+    for (const responses of [
+      { 'pwsh.exe': { status: 1, message: 'query failed' } },
+      { 'pwsh.exe': { code: 'EACCES' } },
+      { 'pwsh.exe': { code: 'ETIMEDOUT' } },
+      { 'pwsh.exe': { code: 'ENOENT' }, 'powershell.exe': { code: 'ENOENT' } },
+      { 'pwsh.exe': { code: 'ENOENT' }, 'powershell.exe': { status: 1, message: 'query failed' } },
+    ]) {
+      const h = withHome('keep these instructions\n', { profile: false });
+      try {
+        h.mockPowerShell({
+          'powershell.exe': `${join(h.home, 'fallback-profile.ps1')}\r\n`,
+          ...responses,
+        });
+        writeFileSync(h.config, `${JSON.stringify({ trustedFolders: [h.copilotDir] })}\n`);
+        mkdirSync(dirname(h.bin('pstack.cmd')), { recursive: true });
+        writeFileSync(h.bin('pstack.cmd'), 'keep this shim\n');
+        const before = snapshot(h.home);
+        for (const args of [[], ['--uninstall'], ['--dry-run']]) {
+          assert.throws(() => h.run(...args), /PowerShell profile/);
+          assert.deepStrictEqual(snapshot(h.home), before);
+        }
+      } finally { h.cleanup(); }
+    }
+  },
+  'empty and malformed discovered profile paths fail without guessing or writing'() {
+    const h = withHome(undefined, { profile: false });
+    try {
+      const profile = join(h.home, 'profile.ps1');
+      const before = snapshot(h.home);
+      for (const output of ['', ' \r\n', 'relative\\profile.ps1', 'C:relative\\profile.ps1',
+        `${profile}\n${profile}`, `"${profile}"`, `${profile}\0`, `${profile}?`, `${profile}:stream`]) {
+        h.mockPowerShell({
+          'pwsh.exe': output,
+          'powershell.exe': `${join(h.home, 'fallback-profile.ps1')}\r\n`,
+        });
+        assert.throws(() => h.run(), /invalid PowerShell profile path/i);
+        assert.deepStrictEqual(snapshot(h.home), before);
+        assert.throws(() => h.run('--dry-run'), /invalid PowerShell profile path/i);
+        assert.deepStrictEqual(snapshot(h.home), before);
+      }
+    } finally { h.cleanup(); }
+  },
+  'skip-shell bypasses default profile discovery for install and uninstall'() {
+    const h = withHome(undefined, { profile: false });
+    try {
+      h.mockPowerShell({});
+      h.run('--skip-shell');
+      assert.ok(h.read().includes('poteto mode'));
+      assert.deepStrictEqual(h.readConfig().trustedFolders, [h.copilotDir]);
+      assert.strictEqual(h.readProfile(), null);
+      assert.strictEqual(existsSync(h.bin('pstack.cmd')), false);
+      h.run('--uninstall', '--skip-shell');
+      assert.strictEqual(h.read(), '');
+      assert.strictEqual(existsSync(join(h.copilotDir, 'hooks', 'pstack-context.json')), false);
+    } finally { h.cleanup(); }
+  },
+  'hook-only removal bypasses profile discovery and preserves shell integration'() {
+    const h = withHome(undefined, { profile: false });
+    try {
+      const profile = join(h.home, 'Redirected', 'Microsoft.PowerShell_profile.ps1');
+      h.mockPowerShell({ 'pwsh.exe': `${profile}\r\n` });
+      h.run();
+      assert.ok(readFileSync(profile, 'utf8').includes('function pstack'));
+      const before = snapshot(h.home);
+      h.mockPowerShell({});
+      h.run('--hooks', 'remove');
+      delete before['.copilot/hooks/pstack-context.json'];
+      delete before['.copilot/hooks/context-hook.mjs'];
+      delete before['.copilot/extensions/double/extension.mjs'];
+      assert.deepStrictEqual(snapshot(h.home), before);
+    } finally { h.cleanup(); }
+  },
+  'non-Windows default discovery keeps Unix shell integration without PowerShell'() {
+    const h = withHome(undefined, { profile: false, shellRc: true });
+    try {
+      h.mockPowerShell({}, 'linux');
+      h.run();
+      assert.ok(h.readRc().includes('pstack()'));
+      assert.strictEqual(h.readProfile(), null);
+      h.run('--uninstall');
+      assert.strictEqual(h.readRc(), null);
+    } finally { h.cleanup(); }
   },
   'bin shims are written'() {
     const h = withHome();

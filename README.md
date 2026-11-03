@@ -360,6 +360,12 @@ unchanged, including JSONC comments. `COPILOT_HOME` isolates the target director
 `--hooks remove` removes only the owned hook config and copied entry.
 the default installer or `--hooks install` enables them again.
 `--uninstall` cannot be combined with `--hooks`.
+On Windows, the installer asks PowerShell for `$PROFILE.CurrentUserCurrentHost`
+instead of assuming where Documents is located. It prefers `pwsh.exe` and uses
+`powershell.exe` only when `pwsh.exe` is not installed. This targets one edition,
+not every installed PowerShell edition. Set `PSTACK_PROFILE_PATH` to select an
+explicit profile instead. Profile discovery failures stop the installer rather
+than falling back to a guessed path.
 `skip poteto mode`
 stands the mode down for a session without changing your preferences.
 without native hooks, that command does not update the durable opt-out marker.

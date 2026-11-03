@@ -36,6 +36,13 @@ That one command does four things:
 
 The block is user-scoped, so a repo you clone next month is covered without any per-repo setup. `--uninstall` removes the managed changes and leaves unrelated content and personal policy untouched. `--skip-shell` leaves profiles and shims alone. `--dry-run` prints what would change.
 
+On Windows, the installer queries `$PROFILE.CurrentUserCurrentHost` in `pwsh.exe`,
+or in `powershell.exe` when `pwsh.exe` is not installed. PowerShell supplies the
+profile path, including any Documents folder redirection. The installer targets
+one PowerShell edition. Set `PSTACK_PROFILE_PATH` to choose an explicit profile
+instead. Profile discovery errors stop the installer. Use `--skip-shell` to
+install without profile discovery or shell changes.
+
 To install the other integration without native hooks or the `double` extension, add `--hooks skip`.
 That flag leaves existing hooks and the `double` extension unchanged. It does not disable installed hooks.
 Use `--hooks remove` to remove only the owned hook config, copied hook entry, and `double` extension.
