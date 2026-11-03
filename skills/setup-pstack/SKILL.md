@@ -72,8 +72,10 @@ The `adaptive` policy keeps these choices launchable at the default tier.
 For panel roles (arena runners, architect runners, interrogate reviewers) the value is a
 list, and one subagent runs per entry, alias entries included, so the list length sets the
 count. `arena cross-judge pool` is also a list, but Arena selects one value from it whose
-model family differs from the parent's when possible. `swarm workers` is the default for
-every worker unless a race or comparison assigns another model per arm.
+model family differs from the parent's when possible. `double verifier` is also a pool, and
+Double selects the first entry whose vendor family differs from the supervised worker's.
+`swarm workers` is the default for every worker unless a race or comparison assigns another
+model per arm.
 
 Keep vendor diversity in the panel roles. The second-opinion rule depends on it, and four
 checkpoints from one vendor is not a panel.
@@ -137,6 +139,6 @@ Omit `--default` unless the user also requests a global change. Role-only update
 To restore inheritance, remove that exact key from `roles` in the returned `personalFile`.
 If the file or key is absent, it already inherits. To restore the shipped global default, remove only the `default` key.
 Keep `schemaVersion: 1` and all unrelated choices. Never edit the returned `policyFile` when it points to the shipped defaults.
-Keep combined role labels and the existing 17-role model map intact.
+Keep combined role labels and the existing 18-role model map intact.
 Report the returned policy file and mode. Direct workflows and always-on routing read it automatically.
 This does not resize the current session. Unknown child identity or support selects default under adaptive policy and blocks `always_long`.

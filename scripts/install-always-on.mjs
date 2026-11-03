@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir, platform } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +14,10 @@ const binDir = join(copilotDir, 'bin');
 const hookFile = join(copilotDir, 'hooks', 'pstack-context.json');
 const hookScript = join(root, 'scripts', 'context-hook.mjs');
 const hookEntry = join(copilotDir, 'hooks', 'context-hook.mjs');
+const extensionSource = join(root, 'extensions', 'double', 'extension.mjs');
+const extensionFile = join(copilotDir, 'extensions', 'double', 'extension.mjs');
+const extensionMarker = 'export const ENTRY_VERSION = "pstack-double-extension-v1";';
+const extensionRootLine = 'const pstackRoot = join(homedir(), ".copilot", "pstack");';
 
 const instructionsBegin = '<!-- pstack:begin poteto-mode -->';
 const instructionsEnd = '<!-- pstack:end poteto-mode -->';
@@ -22,12 +26,12 @@ const shellEnd = '# END pstack path trust';
 
 const USAGE = `usage: node install-always-on.mjs [--dry-run] [--uninstall] [--skip-shell] [--skip-trust] [--hooks <install|skip|remove>]
 
-Installs poteto-mode instructions and native pstack context hooks, adds ~/.copilot to config.json
-trustedFolders, and installs a pstack wrapper that runs copilot with
---add-dir ~/.copilot so playbooks and pstack-models.md are readable.
+Installs poteto-mode instructions, native pstack context hooks, and the double runtime
+extension, adds ~/.copilot to config.json trustedFolders, and installs a pstack wrapper
+that runs copilot with --add-dir ~/.copilot so playbooks and pstack-models.md are readable.
 --skip-trust leaves config.json untouched, including JSONC files.
---hooks install is the default; skip leaves existing hooks unchanged.
---hooks remove changes only owned hook files, not instructions, trust, or wrappers.
+--hooks install is the default; skip leaves existing hooks unchanged, including the double extension.
+--hooks remove changes only owned hook files and the double extension, not instructions, trust, or wrappers.
 --uninstall removes all managed integration and cannot be combined with --hooks.
 --hooks remove accepts --dry-run but cannot be combined with --skip-shell or --skip-trust.`;
 
@@ -167,6 +171,40 @@ function installNativeHooks(plan, dryRun) {
     writeFileSync(hookFile, plan.next);
   }
   console.log(`${plan.next === null ? 'removed' : 'installed'} native context hooks at ${hookFile}`);
+}
+
+function planDoubleExtension(removing) {
+  const current = existsSync(extensionFile) ? readFileSync(extensionFile, 'utf8') : null;
+  if (current !== null && !current.includes(extensionMarker)) {
+    throw new Error(`refusing to replace a foreign extension ${extensionFile}`);
+  }
+  if (removing) return { current, next: null };
+  requireFile(extensionSource);
+  const source = readFileSync(extensionSource, 'utf8');
+  if (!source.includes(extensionMarker) || !source.includes(extensionRootLine)) {
+    throw new Error(`${extensionSource}: missing ownership marker or pstack root binding`);
+  }
+  return { current, next: source.replace(extensionRootLine, `const pstackRoot = ${JSON.stringify(root)};`) };
+}
+
+function installDoubleExtension(plan, dryRun) {
+  if (plan.current === plan.next) {
+    console.log(`no changes needed at ${extensionFile}`);
+    return;
+  }
+  if (dryRun) {
+    console.log(`would ${plan.next === null ? 'remove' : 'install'} double extension at ${extensionFile}`);
+    return;
+  }
+  const dir = dirname(extensionFile);
+  if (plan.next === null) {
+    unlinkSync(extensionFile);
+    if (readdirSync(dir).length === 0) rmdirSync(dir);
+  } else {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(extensionFile, plan.next);
+  }
+  console.log(`${plan.next === null ? 'removed' : 'installed'} double extension at ${extensionFile}`);
 }
 
 function installInstructions(removing, dryRun) {
@@ -407,13 +445,19 @@ try {
   const skipTrust = flags.has('--skip-trust');
 
   if (hooks === 'remove') {
-    installNativeHooks(await planNativeHooks(true), dryRun);
+    const nativeHooks = await planNativeHooks(true);
+    const extension = planDoubleExtension(true);
+    installNativeHooks(nativeHooks, dryRun);
+    installDoubleExtension(extension, dryRun);
   } else {
     if (!skipTrust) readJson(configFile);
     const nativeHooks = hooks === 'skip' ? null : await planNativeHooks(removing);
+    const extension = hooks === 'skip' ? null : planDoubleExtension(removing);
     installInstructions(removing, dryRun);
-    if (nativeHooks) installNativeHooks(nativeHooks, dryRun);
-    else console.log('skipping native context hooks (--hooks skip)');
+    if (nativeHooks) {
+      installNativeHooks(nativeHooks, dryRun);
+      installDoubleExtension(extension, dryRun);
+    } else console.log('skipping native context hooks and double extension (--hooks skip)');
     if (skipTrust) console.log('skipping trustedFolders (--skip-trust)');
     else installTrustedFolder(removing, dryRun);
     installShell(removing, dryRun, skipShell);

@@ -4,8 +4,9 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const REQUIRED_BINDINGS = [
-  'agents/poteto.agent.md', 'agents/poteto-worker.agent.md', 'always-on/copilot-instructions.md',
-  ...['poteto-mode', 'how', 'why', 'architect', 'arena', 'swarm', 'interrogate', 'reflect',
+  'agents/poteto.agent.md', 'agents/poteto-worker.agent.md', 'agents/double.agent.md',
+  'always-on/copilot-instructions.md',
+  ...['poteto-mode', 'double', 'how', 'why', 'architect', 'arena', 'swarm', 'interrogate', 'reflect',
     'no-comments', 'show-me-your-work', 'recall', 'figure-it-out', 'setup-pstack',
     'principle-guard-the-context-window'].map((skill) => `skills/${skill}/SKILL.md`),
 ];

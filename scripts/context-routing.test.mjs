@@ -345,7 +345,7 @@ test('retired valid model-role lines are diagnostic and never rewritten or allow
   f.write('pstack-models.md', 'how critics: invalid / impossible\n');
   assert.throws(() => resolveRole(request(), f), /invalid model \/ effort/);
 });
-test('policy-only configuration is idempotent and preserves a full 17-role model map and parent preferences', (t) => {
+test('policy-only configuration is idempotent and preserves a full 18-role model map and parent preferences', (t) => {
   const f = fixture(t);
   const models = readFileSync(join(root, 'models.default.md'), 'utf8').match(/```\r?\n([\s\S]*?)\r?\n```/)[1];
   f.write('pstack-models.md', models);
@@ -355,7 +355,7 @@ test('policy-only configuration is idempotent and preserves a full 17-role model
   const once = readFileSync(changed.policyFile, 'utf8');
   configurePolicy({ defaultMode: 'adaptive', roles: { 'how explainer': 'default' } }, f);
   assert.equal(readFileSync(changed.policyFile, 'utf8'), once);
-  assert.equal(loadContextPolicy(f).roles.size, 17);
+  assert.equal(loadContextPolicy(f).roles.size, 18);
   assert.equal(readFileSync(join(f.home, 'pstack-models.md'), 'utf8'), models);
   assert.equal(readFileSync(join(f.home, 'settings.json'), 'utf8'), '{"contextTier":"default"}\n');
 });

@@ -2,7 +2,7 @@
 
 a port of [pstack](https://github.com/cursor/plugins/tree/main/pstack) by
 [poteto](https://x.com/poteto), rewritten to run on the github copilot
-app. 52 skills, 23 playbooks, 24 principles, and 3 agents. MIT, same as upstream.
+app. 53 skills, 23 playbooks, 24 principles, and 4 agents. MIT, same as upstream.
 
 this is not a mirror. the cursor plugin manifest, the `/add-plugin` install path,
 the event-triggered automations, and the graphite stacking layer are all gone.
@@ -29,7 +29,7 @@ git clone https://github.com/doublexmax/pstack-copilot ~/.copilot/pstack
 copilot skill add ~/.copilot/pstack/skills
 ```
 
-then copy the three agents so `poteto`, `poteto-worker`, and `comment-sicko`
+then copy the four agents so `poteto`, `poteto-worker`, `comment-sicko`, and `double`
 show up as spawnable subagents:
 
 ```bash
@@ -46,7 +46,8 @@ node ~/.copilot/pstack/scripts/install-always-on.mjs
 ```
 
 that writes the always-on block, adds `~/.copilot` to `config.json`
-`trustedFolders`, and installs a `pstack` wrapper that passes
+`trustedFolders`, installs the [double](./skills/double/SKILL.md) runtime extension
+bound to this clone, and installs a `pstack` wrapper that passes
 `--add-dir ~/.copilot` so headless runs can read playbooks and model
 overrides. see [always-on](#always-on) for what it does and how to take it
 back out. the [setup guide](./docs/guide/01-setup.md) has the path-trust
@@ -175,6 +176,7 @@ the full rules and playbooks live in [`skills/poteto-mode/SKILL.md`](./skills/po
 | [`/typescript-best-practices`](./skills/typescript-best-practices/SKILL.md) | you're reading or editing typescript. grounds the type-system-discipline principle in syntax. |
 | [`/figure-it-out`](./skills/figure-it-out/SKILL.md) | no bundled playbook fits. designs a rigorous, auditable playbook for the task. |
 | [`/show-me-your-work`](./skills/show-me-your-work/SKILL.md) | you want a reviewable decision trail. logs decisions to a tsv you can commit. |
+| [`/double`](./skills/double/SKILL.md) | you want an independent supervisor session on another model family to check factual claims and test edits against real session artifacts. |
 | [`/create-verification-skill`](./skills/create-verification-skill/SKILL.md) | your project has no scripted way to prove app behavior. generates a project-local verify skill with a feature map, for any language or platform. |
 | [`/maintain-verification-skill`](./skills/maintain-verification-skill/SKILL.md) | your verify skill's feature map has drifted from the app. source wave + one live pass, at most one PR of proven corrections. |
 | [`/unslop`](./skills/unslop/SKILL.md) | you're cleaning up writing or a code diff. prose path removes AI tells; code path is the old deslop pass. |
@@ -238,6 +240,8 @@ pstack also ships a subagent that runs my style end to end. spawn it from a pare
 [`/poteto-mode`](./skills/poteto-mode/SKILL.md) and [`agent_type: "poteto-worker"`](./agents/poteto-worker.agent.md) route through the same wrapper.
 
 pstack also ships [Comment Sicko](./agents/comment-sicko.agent.md), a read-only comment reviewer available as `agent_type: "comment-sicko"`. usually invoke it through [`/no-comments`](./skills/no-comments/SKILL.md), not directly.
+
+pstack also ships [Double](./agents/double.agent.md), an independent session supervisor. type [`/double`](./skills/double/SKILL.md) inside a worker session and it spawns a nested `Double: <name>` child on a different vendor family. a zero-token watcher wakes it only when the worker makes a load-bearing claim, and it messages the worker only to refute one with counter-evidence. it never writes the worker's code.
 
 ## principles
 

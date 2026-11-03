@@ -149,9 +149,10 @@ examples. Windows probes use PowerShell or the runtime's profiler.
 The port also ships files with no upstream source. The manifest does not track these, because
 it is a source-coverage gate, not a tree inventory.
 
-- `scripts/check-copilot-port.mjs`, `scripts/check-upstream-sync.mjs`, `scripts/install-always-on.mjs`, and their tests.
+- `scripts/check-copilot-port.mjs`, `scripts/check-upstream-sync.mjs`, `scripts/check-context-routing.mjs`, `scripts/context-routing.mjs`, `scripts/context-hook.mjs`, `scripts/install-always-on.mjs`, and their tests.
 - `always-on/copilot-instructions.md`, the managed block the installer writes.
-- `agents/poteto-worker.agent.md`. The other two agents map to upstream sources in the manifest.
-- `skills/create-skill/SKILL.md`.
+- `agents/poteto-worker.agent.md` and `agents/double.agent.md`. The other two agents map to upstream sources in the manifest.
+- `skills/create-skill/SKILL.md`, `skills/context-routing/SKILL.md`, and `skills/double/` (`SKILL.md` and `scripts/double_watch.py`).
+- `extensions/double/extension.mjs`.
 - `skills/poteto-mode/references/ado.md`.
-- `models.default.md`, `CONTRIBUTING.md`, `.github/`, and this page.
+- `models.default.md`, `context.default.json`, `CONTRIBUTING.md`, `.github/`, and this page.

@@ -60,7 +60,7 @@ test('copied agents invoke the registered skill in the documented separate insta
   copyFileSync(join(root, 'skills', 'context-routing', 'SKILL.md'), canonical);
   writeFileSync(join(home, 'settings.json'), JSON.stringify({ skillDirectories: [skills] }));
   mkdirSync(join(home, 'agents'));
-  for (const name of ['poteto', 'poteto-worker']) {
+  for (const name of ['poteto', 'poteto-worker', 'double']) {
     const file = join(home, 'agents', `${name}.agent.md`);
     copyFileSync(join(root, 'agents', `${name}.agent.md`), file);
     const body = readFileSync(file, 'utf8');
