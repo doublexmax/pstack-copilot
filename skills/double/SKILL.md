@@ -31,7 +31,7 @@ When spawning `Double: <worker_name>` from inside the worker session:
    Call `list_sessions_and_chats` to get the current session's `id` (`<worker_session_id>`) and `name` (`<worker_name>`).
 
 2. **Resolve the orthogonal model and kickoff context through `context-routing`.**
-   Read the first `session.start` line of `~/.copilot/session-state/<worker_session_id>/events.jsonl` to check `selectedModel`. Invoke [context-routing](../context-routing/SKILL.md) and run `show --role "double verifier"` to inspect the pool entries. Pick the zero-based `<member_index>` of the first entry whose vendor family differs from the worker's. With the shipped defaults, a `claude-*` worker selects member `1` (`gpt-6.1-sol / xhigh`) and every other worker selects member `0` (`claude-opus-5.5 / high`). Then resolve the session kickoff with `--target create_session` and `--member <member_index>`:
+   Read the first `session.start` line of `~/.copilot/session-state/<worker_session_id>/events.jsonl` to check `selectedModel`. Invoke [context-routing](../context-routing/SKILL.md) and run `show --role "double verifier"` to inspect the pool entries. Pick the zero-based `<member_index>` of the first entry whose vendor family differs from the worker's. With the shipped defaults (`claude-opus-5.5 / max, gpt-6.1-sol / max, gemini-4-argon / high`), a `claude-*` worker selects member `1` (`gpt-6.1-sol / max`), every other worker selects member `0` (`claude-opus-5.5 / max`), and member `2` (`gemini-4-argon / high`) provides a third vendor seat. Then resolve the session kickoff with `--target create_session` and `--member <member_index>`:
 
    ```powershell
    node "<pstack>\scripts\context-routing.mjs" resolve `

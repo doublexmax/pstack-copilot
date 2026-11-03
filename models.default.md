@@ -49,7 +49,7 @@ arena cross-judge pool:                 claude-opus-5.5 / max, gpt-6.1-sol / max
 swarm workers:                          grok-4.7 / xhigh
 architect runners:                      claude-opus-5.5 / max, gpt-6.1-sol / max, grok-4.7 / xhigh, gemini-4-argon / high
 interrogate reviewers:                  claude-opus-5.5 / max, gpt-6.1-sol / max, grok-4.7 / xhigh, gemini-4-argon / high
-double verifier:                        claude-opus-5.5 / high, gpt-6.1-sol / xhigh
+double verifier:                        claude-opus-5.5 / max, gpt-6.1-sol / max, gemini-4-argon / high
 ```
 
 Panel roles are lists. One subagent runs per entry, alias entries included, so the list
