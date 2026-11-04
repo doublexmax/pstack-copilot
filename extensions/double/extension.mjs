@@ -10,6 +10,7 @@ const watchScript = join(pstackRoot, "skills", "double", "scripts", "double_watc
 const wakeTimeoutMs = 15_000;
 let session;
 let doubleTurnActive = false;
+let doubleRuntimeReady = false;
 
 function copilotHome() {
     return process.env.COPILOT_HOME || join(process.env.USERPROFILE || process.env.HOME || homedir(), ".copilot");
@@ -131,6 +132,7 @@ async function reconcileSupervisorLifecycle(sessionId, workerActivity = false, i
         const hadLifecycleFile = existsSync(lifecyclePath);
         const state = loadLifecycle(outDir, info);
         if (session?.sessionId === info.double_session_id) {
+            ensureDoubleRuntime();
             state.double_ext_pid = process.pid;
             if (!hadLifecycleFile) {
                 transition(outDir, state, "wake_pending", now);
@@ -244,7 +246,9 @@ session = await joinSession({
     },
 });
 
-if (findPair("c.session_id", session.sessionId)) {
+function ensureDoubleRuntime() {
+    if (doubleRuntimeReady) return;
+    doubleRuntimeReady = true;
     session.on((event) => {
         if (event.type === "assistant.turn_start") doubleTurnActive = true;
         if (
@@ -260,5 +264,6 @@ if (findPair("c.session_id", session.sessionId)) {
     setInterval(() => {
         reconcileSupervisorLifecycle(session.sessionId).catch((error) => console.error("Double lifecycle reconciliation failed", error));
     }, 1000).unref();
-    await reconcileSupervisorLifecycle(session.sessionId);
 }
+
+await reconcileSupervisorLifecycle(session.sessionId);
