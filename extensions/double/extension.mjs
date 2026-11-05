@@ -137,6 +137,7 @@ async function reconcileSupervisorLifecycle(sessionId, workerActivity = false, i
         const lifecyclePath = join(outDir, "double-lifecycle.json");
         const hadLifecycleFile = existsSync(lifecyclePath);
         const state = loadLifecycle(outDir, info);
+        const priorUpdatedAt = state.updated_at;
         if (session?.sessionId === info.double_session_id) {
             ensureDoubleRuntime();
             state.double_ext_pid = process.pid;
@@ -183,7 +184,7 @@ async function reconcileSupervisorLifecycle(sessionId, workerActivity = false, i
             saveLifecycle(outDir, state);
             return;
         }
-        if (session?.sessionId !== info.double_session_id && pidAlive(state.double_ext_pid) && now - state.updated_at <= 3000) {
+        if (session?.sessionId !== info.double_session_id && pidAlive(state.double_ext_pid) && now - priorUpdatedAt <= 3000) {
             saveLifecycle(outDir, state);
             return;
         }

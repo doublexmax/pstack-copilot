@@ -1624,7 +1624,7 @@ for (let retry = 0; retry < 3; retry += 1) {
 }
 const delayed = readState();
 const delayedDeliveries = deliveries.length;
-writeState({ ...readState(), updated_at: Date.now() - 301000 });
+writeState({ ...readState(), double_ext_pid: process.pid, updated_at: Date.now() - 301000 });
 await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
 const expired = readState();
 setRunning('double-child-99', 1);
