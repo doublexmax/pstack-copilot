@@ -881,6 +881,83 @@ print(json.dumps([{"line": r.line, "span": r.span, "verdict": r.verdict, "claim"
   ]);
 });
 
+test('wake bundles include bounded newest-first open refutations and omit resolved ledger rows', (t) => {
+  const base = mkdtempSync(join(tmpdir(), 'double-open-refutations-'));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const sessionDir = join(base, 'worker-open-refutations');
+  const outDir = join(base, 'out');
+  mkdirSync(sessionDir);
+  mkdirSync(outDir);
+  writeEvents(sessionDir, [
+    { type: 'session.start', data: { sessionId: 'worker-open-refutations' } },
+    { type: 'assistant.message', data: { content: 'Verified the new artifact.' } },
+  ]);
+  const ledger = join(outDir, 'double-audit.tsv');
+  const original = auditHeader
+    + auditRow('[20, 21]', 'REFUTED', 'Fixed artifact', 'old-proof', 'Old mismatch')
+    + auditRow('[22, 23]', 'RESOLVED', 'L2 Fixed the artifact', 'fix-proof', 'The artifact matches.')
+    + Array.from({ length: 26 }, (_, index) => {
+      const number = index + 1;
+      return auditRow(number === 26 ? 'all' : `[${number + 19}, ${number + 20}]`,
+        'REFUTED', `Open claim ${number}`, `artifact-${number}`, `Mismatch ${number}`);
+    }).join('');
+  writeFileSync(ledger, original);
+  const poll = () => {
+    runWatcher(`
+dw.poll_once(pathlib.Path(${JSON.stringify(sessionDir)}), pathlib.Path(${JSON.stringify(outDir)}))
+`);
+    return JSON.parse(readFileSync(join(outDir, 'double-wake-bundle.json'), 'utf8'));
+  };
+  const expected = Array.from({ length: 26 }, (_, index) => {
+    const number = 26 - index;
+    return {
+      line: `L${number + 3}`,
+      event_range: number === 26 ? 'all' : [number + 19, number + 20],
+      claim: `Open claim ${number}`,
+      evidence_pointer: `artifact-${number}`,
+      observed_fact: `Mismatch ${number}`,
+    };
+  });
+  const first = poll();
+  assert.deepEqual(first.map((wake) => wake.event_range), [[0, 1]]);
+  assert.deepEqual(first[0].open_refutations, expected.slice(0, 25));
+  assert.equal(readFileSync(ledger, 'utf8'), original);
+  appendFileSync(ledger, auditRow('[24, 25]', 'RESOLVED', 'L29 L28 Fixed two more artifacts', 'new-proof'));
+  const next = poll();
+  assert.deepEqual(next.map((wake) => wake.event_range), [[0, 1]]);
+  assert.deepEqual(next[0].open_refutations, expected.slice(2));
+});
+
+test('wake bundles retain the last five human prompts and exclude supervisor notices', (t) => {
+  const base = mkdtempSync(join(tmpdir(), 'double-human-prompts-'));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const sessionDir = join(base, 'worker-human-prompts');
+  const outDir = join(base, 'out');
+  mkdirSync(sessionDir);
+  mkdirSync(outDir);
+  writeEvents(sessionDir, [
+    { type: 'session.start', data: { sessionId: 'worker-human-prompts' } },
+    ...Array.from({ length: 7 }, (_, index) => [
+      { type: 'user.message', data: { content: `Human prompt ${index + 1}.` } },
+      { type: 'user.message', data: { content: '[Double Supervisor Notice]\nRefuted claim: Artifact mismatch.' } },
+    ]).flat(),
+    { type: 'user.message', data: { content: `${'x'.repeat(650)}[Double Supervisor Notice]` } },
+    { type: 'assistant.message', data: { content: 'Verified the artifact.' } },
+  ]);
+  runWatcher(`
+dw.poll_once(pathlib.Path(${JSON.stringify(sessionDir)}), pathlib.Path(${JSON.stringify(outDir)}))
+`);
+  const bundle = JSON.parse(readFileSync(join(outDir, 'double-wake-bundle.json'), 'utf8'));
+  assert.deepEqual(bundle.map((wake) => wake.event_range), [[0, 16]]);
+  assert.deepEqual(bundle[0].recent_user_prompts, [
+    { event: 5, content: 'Human prompt 3.' },
+    { event: 7, content: 'Human prompt 4.' },
+    { event: 9, content: 'Human prompt 5.' },
+    { event: 11, content: 'Human prompt 6.' },
+    { event: 13, content: 'Human prompt 7.' },
+  ]);
+});
+
 test('RESOLVED rows close cited refutations and report unmatched line citations', (t) => {
   const base = mkdtempSync(join(tmpdir(), 'double-resolutions-'));
   t.after(() => rmSync(base, { recursive: true, force: true }));
@@ -1384,7 +1461,9 @@ export let registeredHooks;
 export const deliveries = [];
 const listeners = new Set();
 let deliveryError;
+let deliveryResult;
 export function failNextDelivery(message) { deliveryError = new Error(message); }
+export function denyNextDeliveryResult(result = { resultType: 'denied' }) { deliveryResult = result; }
 async function deliver(value) {
   deliveries.push(value);
   if (deliveryError) {
@@ -1395,7 +1474,24 @@ async function deliver(value) {
 }
 export const session = {
   sessionId: process.env.DOUBLE_TEST_SESSION_ID,
-  rpc: { tools: { execute: async (request) => deliver({ transport: 'rpc', ...request }) } },
+  rpc: { tools: { execute: async (request) => {
+    const decision = await registeredHooks?.onPreToolUse?.({
+      toolName: request.name, toolArgs: request.arguments,
+    }, { sessionId: session.sessionId });
+    if (decision?.permissionDecision === 'deny') {
+      return {
+        resultType: 'denied',
+        permissionDecision: 'deny',
+        textResultForLlm: \`Denied by preToolUse hook: \${decision.permissionDecisionReason}\`,
+      };
+    }
+    if (deliveryResult !== undefined) {
+      const result = deliveryResult;
+      deliveryResult = undefined;
+      return result;
+    }
+    return deliver({ transport: 'rpc', ...request });
+  } } },
   send: async (request) => deliver({ transport: 'send', ...request }),
   on: (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
 };
@@ -1432,7 +1528,7 @@ export async function joinSession(cfg) { registeredHooks = cfg.hooks; return ses
       const runner = join(base, 'run.mjs');
       writeFileSync(runner, `
 import './extension.mjs';
-import { registeredHooks, session, deliveries, emit, failNextDelivery } from '@github/copilot-sdk/extension';
+import { registeredHooks, session, deliveries, emit, failNextDelivery, denyNextDeliveryResult } from '@github/copilot-sdk/extension';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -1482,7 +1578,7 @@ function wakePrompt(harness) {
   return `Parent session active; run python "${watchScript}" worker-ext --wait --out-dir "${harness.outDir}" and append audit rows to double-audit.tsv in "${harness.outDir}".`;
 }
 
-test('worker hooks dispatch one runtime wake with no worker dialogue', (t) => {
+test('worker hooks dispatch one runtime wake through pre-tool hooks and deny identical model wake prompts', (t) => {
   const harness = extensionHarness(t);
   const result = harness.run(`
 const results = [];
@@ -1490,7 +1586,11 @@ for (const name of ['onSessionStart', 'onUserPromptSubmitted', 'onPreToolUse', '
   results.push(await registeredHooks[name]?.({ toolName: 'view' }, inv));
 }
 await Promise.all(Array.from({ length: 10 }, () => registeredHooks.onPostToolUse({ toolName: 'view' }, inv)));
-console.log(JSON.stringify({ results, deliveries, state: readState() }));
+const denied = await registeredHooks.onPreToolUse({
+  toolName: 'send_session_message',
+  toolArgs: { session_id: 'double-child-99', message: ${JSON.stringify(wakePrompt(harness))} },
+}, inv);
+console.log(JSON.stringify({ results, deliveries, denied, state: readState() }));
 `);
   assert.deepEqual(result.results, [null, null, null, null, null, null]);
   assert.deepEqual(result.deliveries, [{
@@ -1502,12 +1602,17 @@ console.log(JSON.stringify({ results, deliveries, state: readState() }));
   assert.equal(result.state.queued, 1);
   assert.equal(result.state.monitors, 0);
   assert.equal(result.state.wake_count, 1);
+  assert.equal(result.state.wake_accepted, true);
   assert.equal(result.state.worker_session_id, 'worker-ext');
   assert.equal(result.state.double_session_id, 'double-child-99');
+  assert.deepEqual(result.denied, {
+    permissionDecision: 'deny',
+    permissionDecisionReason: 'Double supervisor activation is runtime-owned.',
+  });
 });
 
 for (const sessionId of ['worker-ext', 'double-child-99']) {
-  test(`accepted wakes stay coalesced past delayed startup through ${sessionId}`, (t) => {
+  test(`accepted wakes coalesce at 16 seconds and retry after five minutes through ${sessionId}`, (t) => {
     const harness = extensionHarness(t, { sessionId, workerRunning: 1 });
     writeFileSync(harness.statePath, JSON.stringify(lifecycleState('idle')));
     const result = harness.run(`
@@ -1518,22 +1623,63 @@ for (let retry = 0; retry < 3; retry += 1) {
   await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
 }
 const delayed = readState();
+const delayedDeliveries = deliveries.length;
+writeState({ ...readState(), updated_at: Date.now() - 301000 });
+await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
+const expired = readState();
 setRunning('double-child-99', 1);
 await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
-console.log(JSON.stringify({ accepted, delayed, started: readState(), deliveries }));
+console.log(JSON.stringify({ accepted, delayed, delayedDeliveries, expired, started: readState(), deliveries }));
 `);
     const delivery = sessionId === 'worker-ext'
       ? { transport: 'rpc', name: 'send_session_message', arguments: { session_id: 'double-child-99', delivery_mode: 'immediate', message: wakePrompt(harness) } }
       : { transport: 'send', prompt: wakePrompt(harness) };
-    assert.deepEqual(result.deliveries, [delivery]);
+    assert.deepEqual(result.deliveries, [delivery, delivery]);
+    assert.equal(result.delayedDeliveries, 1);
     assert.equal(result.accepted.wake_accepted, true);
     assert.deepEqual({
       phase: result.delayed.phase, queued: result.delayed.queued, monitors: result.delayed.monitors,
       monitor_pid: result.delayed.monitor_pid, wake_count: result.delayed.wake_count, wake_accepted: result.delayed.wake_accepted,
     }, { phase: 'wake_pending', queued: 1, monitors: 0, monitor_pid: null, wake_count: 1, wake_accepted: true });
     assert.deepEqual({
+      phase: result.expired.phase, queued: result.expired.queued, monitors: result.expired.monitors,
+      monitor_pid: result.expired.monitor_pid, wake_count: result.expired.wake_count, wake_accepted: result.expired.wake_accepted,
+    }, { phase: 'wake_pending', queued: 1, monitors: 0, monitor_pid: null, wake_count: 2, wake_accepted: true });
+    assert.deepEqual({
       phase: result.started.phase, queued: result.started.queued, monitors: result.started.monitors, wake_accepted: result.started.wake_accepted,
     }, { phase: 'watching', queued: 0, monitors: 1, wake_accepted: false });
+  });
+}
+
+for (const [name, deliveryResult] of [
+  ['denied result type', { resultType: 'denied' }],
+  ['failure result type', { resultType: 'failure' }],
+  ['denied permission', { permissionDecision: 'deny' }],
+  ['error result', { error: { message: 'Dispatch failed.' } }],
+  ['denied text result', { textResultForLlm: 'Denied by preToolUse hook: Runtime-owned activation.' }],
+  ['denied string result', 'Denied by preToolUse hook: Runtime-owned activation.'],
+]) {
+  test(`non-throwing ${name} resets runtime wake acceptance and permits retry`, (t) => {
+    const harness = extensionHarness(t);
+    const result = harness.run(`
+denyNextDeliveryResult(${JSON.stringify(deliveryResult)});
+await registeredHooks.onUserPromptSubmitted({}, inv);
+const failed = readState();
+await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
+console.log(JSON.stringify({ failed, retried: readState(), deliveries }));
+`);
+    assert.deepEqual({
+      phase: result.failed.phase, wake_accepted: result.failed.wake_accepted, queued: result.failed.queued,
+      monitors: result.failed.monitors, monitor_pid: result.failed.monitor_pid,
+    }, { phase: 'idle', wake_accepted: false, queued: 0, monitors: 0, monitor_pid: null });
+    assert.deepEqual({
+      phase: result.retried.phase, wake_accepted: result.retried.wake_accepted, wake_count: result.retried.wake_count,
+    }, { phase: 'wake_pending', wake_accepted: true, wake_count: 2 });
+    assert.deepEqual(result.deliveries, [{
+      transport: 'rpc',
+      name: 'send_session_message',
+      arguments: { session_id: 'double-child-99', delivery_mode: 'immediate', message: wakePrompt(harness) },
+    }]);
   });
 }
 
