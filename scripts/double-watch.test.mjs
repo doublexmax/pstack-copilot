@@ -34,7 +34,7 @@ function writeEvents(sessionDir, events) {
 }
 
 const auditHeader = 'ts\tevent_range\ttrigger\tverdict\tclaim\tevidence_pointer\tobserved_fact\n';
-const auditRow = (range, verdict = 'VERIFIED', claim = 'claim') => `2026-11-02T00:00:00Z\t${range}\tT1_HUMAN_GATE\t${verdict}\t${claim}\tartifact\tobserved\n`;
+const auditRow = (range, verdict = 'VERIFIED', claim = 'claim', evidence = 'artifact', observed = 'observed') => `2026-11-02T00:00:00Z\t${range}\tT1_HUMAN_GATE\t${verdict}\t${claim}\t${evidence}\t${observed}\n`;
 
 test('extract_files parses apply_patch headers and preserves edit/create path when content contains File:', () => {
   const out = runPy(`
@@ -840,6 +840,255 @@ print(json.dumps(dw.poll_once(pathlib.Path(${JSON.stringify(sessionDir)}), pathl
   assert.equal(readFileSync(ledger, 'utf8'), completedLedger);
 });
 
+test('completed polls do not create markdown for a missing or empty ledger', (t) => {
+  const base = mkdtempSync(join(tmpdir(), 'double-empty-ledger-'));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const sessionDir = join(base, 'worker-empty');
+  const outDir = join(base, 'out');
+  mkdirSync(sessionDir);
+  mkdirSync(outDir);
+  writeEvents(sessionDir, [{ type: 'session.start', data: { sessionId: 'worker-empty' } }]);
+  const poll = () => JSON.parse(runWatcher(`
+print(json.dumps(dw.poll_once(pathlib.Path(${JSON.stringify(sessionDir)}), pathlib.Path(${JSON.stringify(outDir)}))))
+`));
+  assert.deepEqual(poll(), []);
+  const markdown = join(outDir, 'double-audit.md');
+  assert.equal(existsSync(markdown), false);
+  const ledger = join(outDir, 'double-audit.tsv');
+  writeFileSync(ledger, auditHeader);
+  assert.deepEqual(poll(), []);
+  assert.equal(existsSync(markdown), false);
+  writeFileSync(ledger, auditHeader + auditRow('[0, 0]', 'VERIFIED', 'The ledger now has a claim'));
+  assert.deepEqual(poll(), []);
+  assert.match(readFileSync(markdown, 'utf8'), /\| L2 \| \[0, 0\] \| VERIFIED \| The ledger now has a claim \| observed \|/);
+});
+
+test('ledger rows retain physical line IDs, observed facts, and ordered resolution references', (t) => {
+  const outDir = mkdtempSync(join(tmpdir(), 'double-ledger-'));
+  t.after(() => rmSync(outDir, { recursive: true, force: true }));
+  writeFileSync(join(outDir, 'double-audit.tsv'), '\uFEFF' + auditHeader + '\nmalformed\n'
+    + auditRow('3..1', ' refuted ', '"Quoted claim')
+    + auditRow('all', 'VERIFIED', 'Another claim', 'artifact', 'Fact with\textra cells')
+    + auditRow('[4, 5]', 'RESOLVED', 'L4 L4 Fixed claim', 'resolves:L5,L4; proof', 'The fix matches.'));
+  const rows = JSON.parse(runWatcher(`
+rows = dw.read_ledger(pathlib.Path(${JSON.stringify(outDir)}))
+print(json.dumps([{"line": r.line, "span": r.span, "verdict": r.verdict, "claim": r.claim, "observed": r.observed, "resolves": r.resolves} for r in rows]))
+`));
+  assert.deepEqual(rows, [
+    { line: 4, span: [1, 3], verdict: 'REFUTED', claim: '"Quoted claim', observed: 'observed', resolves: [] },
+    { line: 5, span: null, verdict: 'VERIFIED', claim: 'Another claim', observed: 'Fact with extra cells', resolves: [] },
+    { line: 6, span: [4, 5], verdict: 'RESOLVED', claim: 'L4 L4 Fixed claim', observed: 'The fix matches.', resolves: [4, 5] },
+  ]);
+});
+
+test('RESOLVED rows close cited refutations and report unmatched line citations', (t) => {
+  const base = mkdtempSync(join(tmpdir(), 'double-resolutions-'));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const sessionDir = join(base, 'worker-resolutions');
+  const outDir = join(base, 'out');
+  mkdirSync(sessionDir);
+  mkdirSync(outDir);
+  writeEvents(sessionDir, [{ type: 'session.start', data: { sessionId: 'worker-resolutions' } }]);
+  const ledger = join(outDir, 'double-audit.tsv');
+  const original = auditHeader
+    + auditRow('[0, 1]', 'REFUTED', 'Artifact A', 'source-a', 'Counter-evidence A')
+    + auditRow('[0, 1]', 'REFUTED', 'Artifact B')
+    + auditRow('[0, 1]', 'VERIFIED', 'Unrelated claim')
+    + auditRow('[2, 3]', 'RESOLVED', 'L2 L2 Fixed A and B', 'resolves:L3,L2; fix-proof', 'Both artifacts now match.')
+    + auditRow('[2, 3]', 'RESOLVED', 'Invalid citations', 'resolves:L4,L9,L99; bad-proof')
+    + auditRow('[2, 3]', 'RESOLVED', 'No leading citation', 'proof mentions L4 later')
+    + auditRow('[2, 3]', 'RESOLVED', 'L2 Repeated resolution', 'later-proof');
+  writeFileSync(ledger, original);
+  const poll = () => JSON.parse(runWatcher(`
+print(json.dumps(dw.poll_once(pathlib.Path(${JSON.stringify(sessionDir)}), pathlib.Path(${JSON.stringify(outDir)}))))
+`));
+  assert.deepEqual(poll(), []);
+  const markdown = join(outDir, 'double-audit.md');
+  const text = readFileSync(markdown, 'utf8');
+  assert.match(text, /## Open refutations \(0\)\n\nNone\./);
+  assert.match(text, /\| Refutations \| 0 open, 2 resolved \|/);
+  assert.match(text, /## Resolved refutations \(2\)/);
+  assert.match(text, /\| L3 \| L5 \| Artifact B \| resolves:L3,L2; fix-proof \|/);
+  assert.match(text, /\| L2 \| L5 \| Artifact A \| resolves:L3,L2; fix-proof \|/);
+  assert.match(text, /- L6 cites L4\./);
+  assert.match(text, /- L6 cites L9\./);
+  assert.match(text, /- L6 cites L99\./);
+  assert.match(text, /- L7 cites no L<line> id\./);
+  assert.equal(readFileSync(ledger, 'utf8'), original);
+  appendFileSync(ledger, auditRow('[4, 5]', 'REFUTED', 'Artifact A'));
+  assert.deepEqual(poll(), []);
+  const recurrence = readFileSync(markdown, 'utf8');
+  assert.match(recurrence, /## Open refutations \(1\)/);
+  assert.match(recurrence, /\| L9 \| \[4, 5\] \| Artifact A \|/);
+  assert.match(recurrence, /- L6 cites L9\./);
+});
+
+for (const range of ['[0, 1]', 'all', '*']) {
+  test(`RESOLVED rows with event_range ${range} never acknowledge a pending wake`, (t) => {
+    const base = mkdtempSync(join(tmpdir(), 'double-resolved-ack-'));
+    t.after(() => rmSync(base, { recursive: true, force: true }));
+    const sessionDir = join(base, 'worker-resolved-ack');
+    const outDir = join(base, 'out');
+    mkdirSync(sessionDir);
+    mkdirSync(outDir);
+    writeEvents(sessionDir, [
+      { type: 'session.start', data: { sessionId: 'worker-resolved-ack' } },
+      { type: 'assistant.message', data: { content: 'Verified the fixed artifact.' } },
+    ]);
+    const ledger = join(outDir, 'double-audit.tsv');
+    writeFileSync(ledger, auditHeader + auditRow('[20, 21]', 'REFUTED', 'Old artifact'));
+    const markdown = join(outDir, 'double-audit.md');
+    writeFileSync(markdown, 'The previous complete audit.\n');
+    const poll = () => JSON.parse(runWatcher(`
+print(json.dumps(dw.poll_once(pathlib.Path(${JSON.stringify(sessionDir)}), pathlib.Path(${JSON.stringify(outDir)}))))
+`));
+    assert.deepEqual(poll().map((w) => w.event_range), [[0, 1]]);
+    appendFileSync(ledger, auditRow(range, 'RESOLVED', 'L2 Fixed the artifact'));
+    assert.deepEqual(poll().map((w) => w.event_range), [[0, 1]]);
+    assert.equal(readFileSync(markdown, 'utf8'), 'The previous complete audit.\n');
+    appendFileSync(ledger, auditRow('[0, 1]', 'VERIFIED', 'Fixed artifact'));
+    assert.deepEqual(poll(), []);
+    assert.match(readFileSync(markdown, 'utf8'), /## Open refutations \(0\)/);
+    assert.match(readFileSync(markdown, 'utf8'), /\| L2 \| L3 \| Old artifact \|/);
+  });
+}
+
+for (const answer of ['tool.execution_complete', 'user.message']) {
+  test(`Pending question shows narrowest-span premises and clears after ${answer} without a ledger change`, (t) => {
+    const base = mkdtempSync(join(tmpdir(), 'double-pending-question-'));
+    t.after(() => rmSync(base, { recursive: true, force: true }));
+    const sessionDir = join(base, 'worker-question');
+    const outDir = join(base, 'out');
+    mkdirSync(sessionDir);
+    mkdirSync(outDir);
+    const events = [
+      { type: 'session.start', data: { sessionId: 'worker-question' } },
+      { type: 'assistant.message', data: { toolRequests: [{
+        name: 'ask_user', toolCallId: 'ask-gate',
+        arguments: JSON.stringify({ question: 'Which comparator owns the check?', choices: ['A preserves fields | values', 'B replays\nfixtures'] }),
+      }] } },
+      { type: 'tool.execution_start', data: { toolCallId: 'ask-gate', toolName: 'ask_user' } },
+      { type: 'assistant.message', data: { parentToolCallId: 'child', toolRequests: [{
+        name: 'ask_user', toolCallId: 'nested-ask', arguments: { question: 'Nested question' },
+      }] } },
+      { type: 'user.message', data: { parentToolCallId: 'child', content: 'Nested answer' } },
+      { type: 'tool.execution_complete', data: { toolCallId: 'unrelated', result: { content: 'The ask-gate is still pending.' } } },
+    ];
+    writeEvents(sessionDir, events);
+    const poll = () => JSON.parse(runWatcher(`
+print(json.dumps(dw.poll_once(pathlib.Path(${JSON.stringify(sessionDir)}), pathlib.Path(${JSON.stringify(outDir)}))))
+`));
+    assert.deepEqual(poll().map((w) => w.event_range), [[0, 2]]);
+    const markdown = join(outDir, 'double-audit.md');
+    assert.equal(existsSync(markdown), false);
+    const ledger = join(outDir, 'double-audit.tsv');
+    const recorded = auditHeader
+      + auditRow('[0, 100]', 'NOTE', 'Broad trail is not a gate premise')
+      + auditRow('all', 'NOTE', 'Symbolic fallback is not a gate premise')
+      + auditRow('[0, 2]', 'VERIFIED', 'A preserves both fields', 'comparator', 'Both deterministic fields remain.')
+      + auditRow('[0, 2]', 'ESCALATE_TRADEOFF', 'B replays the fixtures', 'replay', 'The replay covers both fixtures.')
+      + auditRow('[0, 2]', 'RESOLVED', 'L99 Resolution is not a gate premise');
+    writeFileSync(ledger, recorded);
+    assert.deepEqual(poll(), []);
+    const text = readFileSync(markdown, 'utf8');
+    assert.match(text, /## Pending question\n/);
+    const pending = text.split('## Pending question\n')[1].split('## Open refutations')[0];
+    assert.match(pending, /Worker event 1 is waiting on this `ask_user` question\./);
+    assert.match(pending, /> Which comparator owns the check\?/);
+    assert.match(pending, /- A preserves fields \\\| values/);
+    assert.match(pending, /- B replays fixtures/);
+    assert.match(pending, /\| L4 \| VERIFIED \| A preserves both fields \| Both deterministic fields remain\. \|/);
+    assert.match(pending, /\| L5 \| ESCALATE_TRADEOFF \| B replays the fixtures \| The replay covers both fixtures\. \|/);
+    assert.doesNotMatch(pending, /Broad trail|Symbolic fallback|Resolution is not|Nested/);
+    const ledgerMtime = statSync(ledger).mtimeMs;
+    writeEvents(sessionDir, [...events, {
+      type: answer,
+      data: answer === 'user.message'
+        ? { content: 'Use A.' }
+        : { toolCallId: 'ask-gate', success: true, result: { content: 'Use A.' } },
+    }]);
+    assert.deepEqual(poll(), []);
+    const answered = readFileSync(markdown, 'utf8');
+    assert.doesNotMatch(answered, /## Pending question/);
+    assert.match(answered, /## Recent claims/);
+    assert.equal(readFileSync(ledger, 'utf8'), recorded);
+    assert.equal(statSync(ledger).mtimeMs, ledgerMtime);
+  });
+}
+
+test('a forked worker never displays an inherited or nested ask_user gate', (t) => {
+  const base = mkdtempSync(join(tmpdir(), 'double-fork-question-'));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const sessionDir = join(base, 'worker-fork');
+  const outDir = join(base, 'out');
+  mkdirSync(sessionDir);
+  mkdirSync(outDir);
+  writeEvents(sessionDir, [
+    { type: 'session.start', data: { sessionId: 'parent' } },
+    { type: 'assistant.message', data: { toolRequests: [{
+      name: 'ask_user', toolCallId: 'parent-ask', arguments: { question: 'Inherited question' },
+    }] } },
+    { type: 'tool.execution_start', data: { toolCallId: 'parent-ask', toolName: 'ask_user' } },
+    { type: 'session.start', data: { sessionId: 'worker-fork' } },
+    { type: 'assistant.message', data: { parentToolCallId: 'child', toolRequests: [{
+      name: 'ask_user', toolCallId: 'nested-ask', arguments: { question: 'Nested question' },
+    }] } },
+  ]);
+  writeFileSync(join(outDir, 'double-audit.tsv'), auditHeader + auditRow('[0, 2]', 'VERIFIED', 'Parent premise'));
+  assert.deepEqual(JSON.parse(runWatcher(`
+print(json.dumps(dw.poll_once(pathlib.Path(${JSON.stringify(sessionDir)}), pathlib.Path(${JSON.stringify(outDir)}))))
+`)), []);
+  const text = readFileSync(join(outDir, 'double-audit.md'), 'utf8');
+  assert.match(text, /\| Worker session \| `worker-fork` \|/);
+  assert.doesNotMatch(text, /## Pending question|Inherited question|Nested question/);
+});
+
+test('audit markdown stays bounded and unchanged polls preserve its mtime', (t) => {
+  const base = mkdtempSync(join(tmpdir(), 'double-bounded-audit-'));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const sessionDir = join(base, 'worker-bounded');
+  const outDir = join(base, 'out');
+  mkdirSync(sessionDir);
+  mkdirSync(outDir);
+  writeEvents(sessionDir, [{ type: 'session.start', data: { sessionId: 'worker-bounded' } }]);
+  const long = 'Long | claim and evidence text. '.repeat(100);
+  const rows = Array.from({ length: 300 }, (_, index) => {
+    const range = `[${index * 10}, ${index * 10 + 9}]`;
+    return auditRow(range, 'REFUTED', long, long, long)
+      + auditRow(range, 'RESOLVED', `L${index * 4 + 2} Fixed ${long}`, long, long)
+      + auditRow(range, 'REFUTED', long, long, long)
+      + auditRow(range, 'VERIFIED', long, long, long);
+  }).join('');
+  const ledger = join(outDir, 'double-audit.tsv');
+  writeFileSync(ledger, auditHeader + rows);
+  const poll = () => JSON.parse(runWatcher(`
+print(json.dumps(dw.poll_once(pathlib.Path(${JSON.stringify(sessionDir)}), pathlib.Path(${JSON.stringify(outDir)}))))
+`));
+  assert.deepEqual(poll(), []);
+  const markdown = join(outDir, 'double-audit.md');
+  const text = readFileSync(markdown, 'utf8');
+  assert.ok(Buffer.byteLength(text) < 40_000, `${Buffer.byteLength(text)} bytes`);
+  assert.match(text, /1200 rows across 300 wakes/);
+  assert.match(text, /## Recent wakes \(last 20 of 300\)/);
+  assert.match(text, /## Recent claims \(last 15\)/);
+  assert.match(text, /275 older open refutations, L4 to L1100, are in double-audit\.tsv\./);
+  assert.match(text, /290 older resolutions are in double-audit\.tsv\./);
+  assert.match(text, /Long \\\| claim/);
+  assert.match(text, /\.\.\./);
+  const past = new Date('2000-01-01T00:00:00Z');
+  utimesSync(markdown, past, past);
+  const mtime = statSync(markdown).mtimeMs;
+  assert.deepEqual(poll(), []);
+  assert.equal(readFileSync(markdown, 'utf8'), text);
+  assert.equal(statSync(markdown).mtimeMs, mtime);
+  writeFileSync(markdown, 'A manually edited summary.\n');
+  const future = new Date(Date.now() + 60_000);
+  utimesSync(markdown, future, future);
+  assert.deepEqual(poll(), []);
+  assert.equal(readFileSync(markdown, 'utf8'), text);
+  assert.equal(readFileSync(ledger, 'utf8'), auditHeader + rows);
+});
+
 test('wake bundles list top-level prose claims, fall back to reasoning, and require one row for claim-free gates', (t) => {
   const base = mkdtempSync(join(tmpdir(), 'double-claim-context-'));
   t.after(() => rmSync(base, { recursive: true, force: true }));
@@ -1230,7 +1479,7 @@ function lifecycleState(phase, values = {}) {
 }
 
 function wakePrompt(harness) {
-  return `Parent session active; run python "${watchScript}" worker-ext --wait --out-dir "${harness.outDir}" and write double-audit.tsv and double-audit.md in "${harness.outDir}".`;
+  return `Parent session active; run python "${watchScript}" worker-ext --wait --out-dir "${harness.outDir}" and append audit rows to double-audit.tsv in "${harness.outDir}".`;
 }
 
 test('worker hooks dispatch one runtime wake with no worker dialogue', (t) => {
@@ -1484,7 +1733,7 @@ console.log(JSON.stringify({ deliveries, state: readState() }));
   assert.equal(result.state.monitors, 0);
 });
 
-test('fresh Double startup records double_ext_pid without duplicate kickoff wake, worker delegates when double_ext_pid is alive, and read_audit_ranges backfills double-audit.md', (t) => {
+test('fresh Double startup records double_ext_pid without duplicate kickoff wake, worker delegates when double_ext_pid is alive, and completed polls render double-audit.md', (t) => {
   const freshDouble = extensionHarness(t, { sessionId: 'double-child-99', workerRunning: 1 });
   const startup = freshDouble.run(`
 console.log(JSON.stringify({ deliveries, state: readState() }));
@@ -1510,9 +1759,15 @@ console.log(JSON.stringify({ deliveries, state: readState() }));
 print(json.dumps(dw.read_audit_ranges(pathlib.Path(${JSON.stringify(delegated.outDir)}))))
 `));
   assert.deepEqual(ranges, [[0, 3]]);
+  assert.equal(existsSync(join(delegated.outDir, 'double-audit.md')), false);
+  assert.deepEqual(JSON.parse(runWatcher(`
+print(json.dumps(dw.poll_once(pathlib.Path(${JSON.stringify(delegated.workerDir)}), pathlib.Path(${JSON.stringify(delegated.outDir)}))))
+`)), []);
   const mdText = readFileSync(join(delegated.outDir, 'double-audit.md'), 'utf8');
   assert.match(mdText, /# Double audit/);
-  assert.match(mdText, /\|\s*0-3\s*\|\s*T1_HUMAN_GATE\s*\|\s*VERIFIED\s*\|/);
+  assert.match(mdText, /\| Worker session \| `worker-ext` \|/);
+  assert.match(mdText, /\| \[0, 3\] \| T1_HUMAN_GATE \| 2026-11-02T00:00 \| 1 VERIFIED \|/);
+  assert.match(mdText, /\| L2 \| \[0, 3\] \| VERIFIED \| claim \| observed \|/);
 });
 
 test('extension resolves supervisor pair even when sessions table omits was_interrupted', (t) => {
