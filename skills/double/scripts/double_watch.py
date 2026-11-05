@@ -158,7 +158,9 @@ def extract_range_context(session_dir: pathlib.Path, lines: list[str], own_start
             try:
                 ev = json.loads(lines[idx])
                 if ev.get("type") == "user.message":
-                    user_prompts.append({"event": idx, "content": (ev["data"].get("content") or "")[:600]})
+                    content = ev["data"].get("content") or ""
+                    if "[Double Supervisor Notice]" not in content:
+                        user_prompts.append({"event": idx, "content": content[:600]})
             except Exception:
                 pass
 
@@ -558,7 +560,9 @@ def label(key: tuple[int, int] | str) -> str:
     return f"[{key[0]}, {key[1]}]" if isinstance(key, tuple) else cell(key, 60)
 
 
-def render_audit_markdown(worker_session_id: str, rows: list[LedgerRow], gate: AskGate | None) -> str:
+def match_resolutions(rows: list[LedgerRow]) -> tuple[
+    list[LedgerRow], list[tuple[LedgerRow, LedgerRow]], list[tuple[LedgerRow, int | None]],
+]:
     by_line = {r.line: r for r in rows}
     resolved_by: dict[int, LedgerRow] = {}
     unmatched: list[tuple[LedgerRow, int | None]] = []
@@ -572,11 +576,16 @@ def render_audit_markdown(worker_session_id: str, rows: list[LedgerRow], gate: A
                 resolved_by.setdefault(ref, row)
             else:
                 unmatched.append((row, ref))
-    newest = list(reversed(rows))
-    open_rows = [r for r in newest if r.verdict == "REFUTED" and r.line not in resolved_by]
+    open_rows = [r for r in reversed(rows) if r.verdict == "REFUTED" and r.line not in resolved_by]
     resolutions = sorted(
         ((by_line[ref], res) for ref, res in resolved_by.items()), key=lambda pair: (-pair[1].line, -pair[0].line),
     )
+    return open_rows, resolutions, unmatched
+
+
+def render_audit_markdown(worker_session_id: str, rows: list[LedgerRow], gate: AskGate | None) -> str:
+    open_rows, resolutions, unmatched = match_resolutions(rows)
+    newest = list(reversed(rows))
     wakes: dict[tuple[int, int] | str, list[LedgerRow]] = {}
     for row in rows:
         wakes.setdefault(row.wake_key, []).append(row)
@@ -596,7 +605,7 @@ def render_audit_markdown(worker_session_id: str, rows: list[LedgerRow], gate: A
         )),
         ("Ledger", f"[double-audit.tsv](double-audit.tsv), {len(rows)} rows across {len(wakes)} wakes"),
         ("Verdicts", verdict_summary(counts)),
-        ("Refutations", f"{len(open_rows)} open, {len(resolved_by)} resolved"),
+        ("Refutations", f"{len(open_rows)} open, {len(resolutions)} resolved"),
     ])
 
     if gate is not None:
@@ -735,10 +744,23 @@ def poll_once(session_dir: pathlib.Path, out_dir: pathlib.Path, flush_pending: b
         "verify_touched": verify_touched,
         "pending_wakes": pending_wakes,
     })
+    open_rows, _, _ = match_resolutions(rows)
     enriched = []
     for w in pending_wakes:
         ctx = extract_range_context(session_dir, lines, own_start, w["event_range"][0], w["event_range"][1])
-        enriched.append({**w, **ctx})
+        enriched.append({
+            **w, **ctx,
+            "open_refutations": [
+                {
+                    "line": f"L{r.line}",
+                    "event_range": list(r.span) if r.span is not None else r.event_range,
+                    "claim": r.claim,
+                    "evidence_pointer": r.evidence,
+                    "observed_fact": r.observed,
+                }
+                for r in open_rows[:OPEN_LIMIT]
+            ],
+        })
     if enriched or replay:
         write_json(bundle_file, enriched)
     elif bundle_file.exists():
