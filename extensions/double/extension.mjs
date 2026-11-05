@@ -183,7 +183,7 @@ async function reconcileSupervisorLifecycle(sessionId, workerActivity = false, i
         state.wake_count += 1;
         state.wake_accepted = false;
         transition(outDir, state, "wake_pending", now);
-        wakePrompt = `Parent session active; run python "${watchScript}" ${info.worker_session_id} --wait --out-dir "${outDir}" and write double-audit.tsv and double-audit.md in "${outDir}".`;
+        wakePrompt = `Parent session active; run python "${watchScript}" ${info.worker_session_id} --wait --out-dir "${outDir}" and append audit rows to double-audit.tsv in "${outDir}".`;
     } finally {
         release();
     }

@@ -78,8 +78,9 @@ The extension and Python monitor share `<double_artifacts_dir>/double-lifecycle.
 - Inside Double, the extension registers its listener and unref'd one-second timer idempotently when its pair resolves, even after startup. It tracks `assistant.turn_start` and `session.idle` and checks the worker even when no worker hook runs. This is a local runtime check, not an App automation or model turn. Already-running sessions keep their loaded extension in memory until reloaded or respawned after an extension update.
 - `double_watch.py --wait` claims one monitor PID and sleeps at zero LLM tokens. A second live monitor receives `DUPLICATE_MONITOR_SUPPRESSED`. When a wake fires, the monitor keeps `watching` and clears `monitor_pid` before returning control to Double's verification turn. Polling and replay do not change lifecycle state.
 - Each wake in `double-wake-bundle.json` includes `claims` and `claim_count`. The monitor extracts top-level prose claims, ignores fenced code, and uses `reasoningText` only when that message's `content` has no claims. `claim_count` is at least one, including claim-free human gates.
-- `double-cursor.json` retains `pending_wakes` until `double-audit.tsv` contains at least `claim_count` non-`NOTE` rows whose numeric `event_range` overlaps that wake. A partial audit does not acknowledge the wake. Numeric `NOTE` rows are metadata, not claim verdicts.
-- If no numeric verdict overlaps a wake, symbolic rows can acknowledge it instead. At least `claim_count` rows must have appeared since delivery, and all those rows must be symbolic. This includes `all` and `*`, even with verdict `NOTE`. These rows acknowledge only wakes delivered before the rows were written, never future wakes. A numeric verdict in the same batch prevents symbolic fallback. Later polls redeliver only unacknowledged wakes and leave prior ledger rows unchanged.
+- `double-cursor.json` retains `pending_wakes` until `double-audit.tsv` contains at least `claim_count` claim verdict rows whose numeric `event_range` overlaps that wake. Claim verdicts are `VERIFIED`, `REFUTED`, and `ESCALATE_TRADEOFF`. A partial audit does not acknowledge the wake. Numeric `NOTE` rows and every `RESOLVED` row are metadata, not claim verdicts.
+- If no numeric verdict overlaps a wake, symbolic rows can acknowledge it instead. At least `claim_count` rows must have appeared since delivery, and all those rows must be symbolic. This includes `all` and `*`, even with verdict `NOTE`, but never `RESOLVED`. These rows acknowledge only wakes delivered before the rows were written, never future wakes. A numeric verdict in the same batch prevents symbolic fallback. Later polls redeliver only unacknowledged wakes and leave prior ledger rows unchanged.
+- When no wakes are pending, `double_watch.py` renders `double-audit.md` deterministically from `double-audit.tsv` and the worker's `events.jsonl`. The view shows a status table, the pending `ask_user` question and its premise verdicts, open refutations newest-first, the last 20 wakes, recent claims, and resolved refutations. The monitor rewrites the markdown only when its text changes.
 - Before returning `PARENT_INACTIVE`, the monitor flushes final events and redelivers any unaudited wakes. Only after acknowledgment can an inactive worker move the pair to `idle` with no queued wake or monitor. Double then ends its turn so its sidebar spinner stops. The runtime wakes Double again when the worker needs attention.
 
 `--replay` also seeds `double-cursor.json`. Record replay verdicts, then continue with `--wait` in the same output directory to avoid duplicate audits.
@@ -97,7 +98,7 @@ python "<skill_dir>\scripts\double_watch.py" <worker_session_id> --wait --out-di
 ```
 
 - `double_watch.py --wait` sleeps in Python at **0 LLM tokens** while the worker session is actively running its turn.
-- **If it writes `<double_artifacts_dir>\double-wake-bundle.json`:** Audit the wakes in Step 2, update `<double_artifacts_dir>\double-audit.tsv` and `<double_artifacts_dir>\double-audit.md` in Step 3, route any `REFUTED` notice in Step 4, and immediately call `double_watch.py <worker_session_id> --wait --out-dir "<double_artifacts_dir>"` again so you catch any subsequent wakes in the same turn.
+- **If it writes `<double_artifacts_dir>\double-wake-bundle.json`:** Audit the wakes in Step 2 and append rows to `<double_artifacts_dir>\double-audit.tsv` in Step 3. Route any `REFUTED` notice in Step 4. Immediately call `double_watch.py <worker_session_id> --wait --out-dir "<double_artifacts_dir>"` again to catch subsequent wakes in the same turn.
 - **If it prints `{"status": "DUPLICATE_MONITOR_SUPPRESSED"}`:** A live monitor already owns the pair. Do not start a second monitor.
 - **If it prints `{"status": "PARENT_INACTIVE"}`:** The worker session has finished its turn and gone idle. End your turn immediately with a brief status line and no further tool calls so your session goes completely idle (stopping the sidebar spinner). When the worker starts a new turn later, the runtime extension hook will wake you back up.
 
@@ -119,10 +120,11 @@ For each wake entry in `<double_artifacts_dir>\double-wake-bundle.json`:
    - **Truncation guard:** If a tool event in `double-wake-bundle.json` has `"output_truncated": true`, never refute an absence claim from `output_preview` alone; read the full event in `<worker_session_dir>\events.jsonl` or query the live source first.
    - Never write temporary files (`ev.txt`, `double-cursor.json`, `double-audit.tsv`) into `<worker_session_dir>\files\`. Keep all Double files in your own `<double_artifacts_dir>` (`<double_session_dir>\files\`).
 
-### Step 3. Record in `<double_artifacts_dir>\double-audit.tsv` and the Editor Canvas
+### Step 3. Record verdicts in `<double_artifacts_dir>\double-audit.tsv`
 
-1. Append one row per audited claim to `<double_artifacts_dir>\double-audit.tsv` (`ts`, `event_range`, `trigger`, `verdict`, `claim`, `evidence_pointer`, `observed_fact`). Use the wake's numeric `event_range`, such as `[394, 405]`. Record at least `claim_count` non-`NOTE` rows overlapping each wake before acknowledgment. Resume partial audits by appending only missing claims. Never duplicate recorded claim rows.
-2. Write the updated markdown summary table directly to `<double_artifacts_dir>\double-audit.md` on disk. The monitor backfills missing or stale markdown from `double-audit.tsv` only when no pending wakes remain. Open or refresh it in the Editor Canvas, where `scope: "workspace"` resolves relative to `<double_session_dir>\files\`:
+1. Append one row per audited claim to `<double_artifacts_dir>\double-audit.tsv` (`ts`, `event_range`, `trigger`, `verdict`, `claim`, `evidence_pointer`, `observed_fact`). Use the wake's numeric `event_range`, such as `[394, 405]`. Record at least `claim_count` claim verdict rows overlapping each wake before acknowledgment. Use `VERIFIED`, `REFUTED`, or `ESCALATE_TRADEOFF` for those rows. Resume partial audits by appending only missing claims. Never duplicate recorded claim rows.
+2. When a wake proves the worker fixed an earlier `REFUTED` claim, append a `RESOLVED` row alongside that wake's claim verdicts. Use the current wake's `event_range` and `trigger`. Start `claim` with the `L<line>` IDs of the `REFUTED` rows it closes, such as `L1299 L1300 Fixed comparator check`. Each ID is the row's 1-based line number in `double-audit.tsv`, shown in the `Line` column of `double-audit.md`. Put the fix proof in `evidence_pointer` and `observed_fact`. `RESOLVED` rows never acknowledge a wake. Never edit prior `REFUTED` rows.
+3. Never write `double-audit.md` or pass replacement `content` to `open_canvas`. `double_watch.py` renders the markdown when no pending wakes remain. Open or refresh the file in the Editor Canvas, where `scope: "workspace"` resolves relative to `<double_session_dir>\files\`:
    ```json
    {
      "canvasId": "editor",
@@ -131,8 +133,7 @@ For each wake entry in `<double_artifacts_dir>\double-wake-bundle.json`:
        "scope": "workspace",
        "path": "double-audit.md",
        "title": "Double audit",
-       "createIfMissing": true,
-       "content": "<updated markdown summary table>"
+       "createIfMissing": true
      }
    }
    ```
@@ -140,7 +141,7 @@ For each wake entry in `<double_artifacts_dir>\double-wake-bundle.json`:
 ### Step 4. Route the verdict
 
 - **All claims `VERIFIED`:** Stay silent. Never send "looks good" messages to the worker.
-- **`ESCALATE_TRADEOFF` (worker is at `ask_user` and all factual premises in the question are `VERIFIED`):** Record the verified premises at the top of `double-audit.md` so the human can answer the prompt with zero manual checking.
+- **`ESCALATE_TRADEOFF` (worker is at `ask_user` and all factual premises in the question are `VERIFIED`):** Stay silent. Record the verified premise rows in `double-audit.tsv` for the gate's wake. `double_watch.py` renders the pending question and those premises under `## Pending question` until the `ask_user` completes or a later `user.message` arrives.
 - **Any claim `REFUTED`:**
   1. Call `get_session(project_session_id=session_id)` to check whether the worker is blocked on `ask_user`.
   2. If `awaiting_input` is present and the question rests on the refuted premise (with `allow_freeform: true`), call `answer_session_input` with the three-field notice below.
