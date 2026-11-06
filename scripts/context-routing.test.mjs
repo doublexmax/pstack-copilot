@@ -186,7 +186,7 @@ test('known unavailable models and unproven host fields block rather than replac
   }
 });
 
-test('Double defaults prefer GPT Sol xhigh and retain distinct-vendor fallbacks', (t) => {
+test('Double default pool resolves GPT Sol xhigh before its vendor alternatives', (t) => {
   const f = fixture(t, null);
   const choices = [
     { model: 'gpt-6.1-sol', reasoning_effort: 'xhigh', context_tier: 'long_context' },
@@ -202,6 +202,18 @@ test('Double defaults prefer GPT Sol xhigh and retain distinct-vendor fallbacks'
   assert.deepEqual(resolveRole(request(), f).toolArguments, {
     model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: 'long_context',
   });
+});
+
+test('a single-model Double override replaces the entire default pool', (t) => {
+  const f = fixture(t, null);
+  f.write('pstack-models.md', 'double verifier: gpt-6.1-sol / xhigh\n');
+  const launch = request({
+    role: 'double verifier', member: 0, model: undefined, effort: undefined, target: 'create_session',
+  });
+  assert.deepEqual(resolveRole(launch, f).toolArguments, {
+    kickoff: { model: 'gpt-6.1-sol', reasoning_effort: 'xhigh', context_tier: 'long_context' },
+  });
+  assert.throws(() => resolveRole({ ...launch, member: 1 }, f), /invalid panel member/);
 });
 
 test('legacy model configuration and mixed panels resolve every member independently', (t) => {
