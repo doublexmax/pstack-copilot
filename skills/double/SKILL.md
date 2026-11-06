@@ -33,9 +33,9 @@ When spawning `Double: <worker_name>` from inside the worker session:
 2. **Resolve the verifier model and kickoff context through `context-routing`.**
    Read the first `session.start` line of `~/.copilot/session-state/<worker_session_id>/events.jsonl` to check `selectedModel`. Invoke [context-routing](../context-routing/SKILL.md) and run `show --role "double verifier"` to inspect the configured pool.
 
-   Prefer the first entry whose vendor family differs from the worker's. If none differs, select member `0`. A one-entry pool always selects member `0`, even when the vendor matches. Use only the configured pool. Do not add another model to satisfy the vendor preference. `<member_index>` is zero-based.
+   Prefer the first entry whose vendor family differs from the worker's. If none differs, select member `0`. Use only the configured pool. `<member_index>` is zero-based.
 
-   With the shipped defaults (`gpt-6.1-sol / xhigh, claude-opus-5.5 / max, gemini-4-argon / high`), an OpenAI worker selects member `1` (`claude-opus-5.5 / max`), and every other worker selects member `0` (`gpt-6.1-sol / xhigh`). A personal override containing only `gpt-6.1-sol / xhigh` selects member `0` for every worker. Resolve the session kickoff with `--target create_session` and `--member <member_index>`:
+   Resolve the session kickoff with `--target create_session` and `--member <member_index>`:
 
    ```powershell
    node "<pstack>\scripts\context-routing.mjs" resolve `

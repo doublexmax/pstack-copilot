@@ -241,7 +241,7 @@ pstack also ships a subagent that runs my style end to end. spawn it from a pare
 
 pstack also ships [Comment Sicko](./agents/comment-sicko.agent.md), a read-only comment reviewer available as `agent_type: "comment-sicko"`. usually invoke it through [`/no-comments`](./skills/no-comments/SKILL.md), not directly.
 
-pstack also ships [Double](./agents/double.agent.md), an independent session supervisor. type [`/double`](./skills/double/SKILL.md) inside a worker session and it spawns a nested `Double: <name>` child. it prefers a different vendor family from the configured pool, or uses the first entry if none differs. a one-entry pool uses that model for every worker. a zero-token watcher wakes it only when the worker makes a load-bearing claim, and it messages the worker only to refute one with counter-evidence. it never writes the worker's code.
+pstack also ships [Double](./agents/double.agent.md), an independent session supervisor. type [`/double`](./skills/double/SKILL.md) inside a worker session and it spawns a nested `Double: <name>` child. it prefers a different vendor family from the configured pool, or uses the first entry if none differs. a zero-token watcher wakes it only when the worker makes a load-bearing claim, and it messages the worker only to refute one with counter-evidence. it never writes the worker's code.
 
 ## principles
 

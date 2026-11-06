@@ -186,11 +186,11 @@ test('known unavailable models and unproven host fields block rather than replac
   }
 });
 
-test('Double default pool resolves GPT Sol xhigh before its vendor alternatives', (t) => {
+test('Double resolves the original shipped multi-vendor pool without personal overrides', (t) => {
   const f = fixture(t, null);
   const choices = [
-    { model: 'gpt-6.1-sol', reasoning_effort: 'xhigh', context_tier: 'long_context' },
     { model: 'claude-opus-5.5', reasoning_effort: 'max', context_tier: 'long_context' },
+    { model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: 'long_context' },
     { model: 'gemini-4-argon', reasoning_effort: 'high', context_tier: 'long_context' },
   ];
   for (const [member, expected] of choices.entries()) {
@@ -199,7 +199,7 @@ test('Double default pool resolves GPT Sol xhigh before its vendor alternatives'
     }), f);
     assert.deepEqual(result.toolArguments, { kickoff: expected });
   }
-  assert.deepEqual(resolveRole(request(), f).toolArguments, {
+  assert.deepEqual(resolveRole(request({ model: undefined, effort: undefined }), f).toolArguments, {
     model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: 'long_context',
   });
 });

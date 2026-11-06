@@ -74,8 +74,7 @@ list, and one subagent runs per entry, alias entries included, so the list lengt
 count. `arena cross-judge pool` is also a list, but Arena selects one value from it whose
 model family differs from the parent's when possible. `double verifier` is also a pool, and
 Double prefers the first entry whose vendor family differs from the supervised worker's.
-If none differs, Double selects the first configured entry. A one-entry pool uses that
-model for every worker, even when the vendor matches.
+If none differs, Double selects the first configured entry.
 `swarm workers` is the default for every worker unless a race or comparison assigns another
 model per arm.
 

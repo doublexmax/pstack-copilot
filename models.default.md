@@ -49,16 +49,14 @@ arena cross-judge pool:                 claude-opus-5.5 / max, gpt-6.1-sol / max
 swarm workers:                          grok-4.7 / xhigh
 architect runners:                      claude-opus-5.5 / max, gpt-6.1-sol / max, grok-4.7 / xhigh, gemini-4-argon / high
 interrogate reviewers:                  claude-opus-5.5 / max, gpt-6.1-sol / max, grok-4.7 / xhigh, gemini-4-argon / high
-double verifier:                        gpt-6.1-sol / xhigh, claude-opus-5.5 / max, gemini-4-argon / high
+double verifier:                        claude-opus-5.5 / max, gpt-6.1-sol / max, gemini-4-argon / high
 ```
 
 Panel roles are lists. One subagent runs per entry, alias entries included, so the list
 length sets the fan-out. `arena cross-judge pool` is a list Arena selects one value from,
 preferring a family different from the parent's. `double verifier` is also a pool. Double
 prefers the first entry whose family differs from the supervised worker's. If none differs,
-it takes the first configured entry. A one-entry pool therefore uses that model for every
-worker, even when the vendor matches. The default pool prefers GPT-6.1 Sol at `xhigh`.
-OpenAI workers use Claude Opus 5.5 at `max`.
+it takes the first configured entry.
 
 `setup-pstack` also writes a `# budget` line. It rewrites `reasoning_effort` across every
 role at once, clamped to each model's maximum.
