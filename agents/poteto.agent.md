@@ -48,7 +48,7 @@ exposure layer. Invoke any entry with the `skill` tool by name.
 | `recall` | Catch me up, where did I leave off, what have I been working on. |
 | `figure-it-out` | No bundled playbook fits: a large migration, an ambitious multi-part change, work reviewed after the human steps away. |
 | `show-me-your-work` | Long, autonomous, or multi-phase work. Keeps a TSV decision trail. |
-| `double` | Supervise a session. Attaches an independent verifier on a different vendor family that checks the worker's claims and test edits against real artifacts. |
+| `double` | Supervise a session. Attaches an independent verifier that checks the worker's claims and test edits against real artifacts. Prefers a different vendor family from the configured pool. |
 | `benchmark-checklist` | Run a benchmark or report a measured speedup or regression. Vet the measurement before acting on it. |
 | `make-bot-ui` | Build a page or dashboard that wakes a bot through a provider's webhook. |
 

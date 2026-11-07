@@ -73,7 +73,8 @@ For panel roles (arena runners, architect runners, interrogate reviewers) the va
 list, and one subagent runs per entry, alias entries included, so the list length sets the
 count. `arena cross-judge pool` is also a list, but Arena selects one value from it whose
 model family differs from the parent's when possible. `double verifier` is also a pool, and
-Double selects the first entry whose vendor family differs from the supervised worker's.
+Double prefers the first entry whose vendor family differs from the supervised worker's.
+If none differs, Double selects the first configured entry.
 `swarm workers` is the default for every worker unless a race or comparison assigns another
 model per arm.
 
