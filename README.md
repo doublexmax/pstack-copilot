@@ -1,4 +1,11 @@
-# pstack for copilot
+# pstack for GitHub Copilot
+
+pstack brings multi-agent workflows, engineering playbooks, and Azure DevOps
+integration to GitHub Copilot. Use it to investigate bugs, review code, and build
+features with explicit verification rather than just generating more code.
+
+[Project overview and quick start](https://doublexmax.github.io/pstack-copilot/)
+| [Full guide](./docs/guide/README.md)
 
 a port of [pstack](https://github.com/cursor/plugins/tree/main/pstack) by
 [poteto](https://x.com/poteto), rewritten to run on the github copilot
