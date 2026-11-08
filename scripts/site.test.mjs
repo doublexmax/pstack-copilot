@@ -47,6 +47,6 @@ test('sitemap lists only the canonical public page', () => {
 
 test('README links to the public project overview', () => {
   const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
-  assert.match(readme, /^# pstack for GitHub Copilot\n/);
+  assert.match(readme, /^# pstack for GitHub Copilot\r?\n/);
   assert.ok(readme.includes(`](${canonical})`));
 });
