@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>pstack for GitHub Copilot | Multi-agent engineering workflows</title>
+  <meta name="description" content="Bring multi-agent workflows, engineering playbooks, and Azure DevOps integration to GitHub Copilot. Install pstack and start with a verifiable task.">
+  <link rel="canonical" href="https://doublexmax.github.io/pstack-copilot/">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <header>
+      <p class="eyebrow">Open-source skills and agents</p>
+      <h1>pstack for GitHub Copilot</h1>
+      <p class="intro">Multi-agent engineering workflows for GitHub Copilot:
+        investigate bugs, review code, and build features with evidence that the work is correct.</p>
+      <nav aria-label="Project links">
+        <a href="https://github.com/doublexmax/pstack-copilot">View the repository</a>
+        <a href="#install">Install pstack</a>
+        <a href="https://github.com/doublexmax/pstack-copilot/blob/main/docs/guide/README.md">Read the guide</a>
+      </nav>
+    </header>
+
+    <section aria-labelledby="workflows">
+      <h2 id="workflows">Engineering playbooks, not just code generation</h2>
+      <p>Start with a goal and a way to verify it. The <code>/poteto-mode</code> skill
+        selects a playbook and coordinates the skills and agents needed for the task.
+        Workflows cover investigation, bug fixes, feature development, code review,
+        performance work, and longer autonomous runs.</p>
+      <p>Choose the models used for delegated work and review panels with
+        <code>/setup-pstack</code>. The port also includes Azure DevOps pull request
+        workflows in place of upstream's Graphite stacking and GitHub review flows.</p>
+      <p>pstack Copilot is an independent port of
+        <a href="https://github.com/cursor/plugins/tree/main/pstack">pstack for Cursor</a>
+        by <a href="https://github.com/poteto">poteto</a>.
+        It is MIT-licensed and adapted to Copilot, not a mirror of the Cursor plugin.</p>
+    </section>
+
+    <section aria-labelledby="install">
+      <h2 id="install">Install pstack for GitHub Copilot</h2>
+      <p>You need Git, Node.js, and the GitHub Copilot CLI with access to the models
+        you select. In a POSIX shell, clone the project, register its skills, and copy its agents:</p>
+      <pre><code>git clone https://github.com/doublexmax/pstack-copilot ~/.copilot/pstack
+copilot skill add ~/.copilot/pstack/skills
+mkdir -p ~/.copilot/agents
+cp ~/.copilot/pstack/agents/*.agent.md ~/.copilot/agents/
+copilot skill list</code></pre>
+      <p>For always-on mode, run the installer. It updates your Copilot instructions,
+        path trust, shell wrapper, and runtime hooks. Preview the changes first if needed:</p>
+      <pre><code>node ~/.copilot/pstack/scripts/install-always-on.mjs --dry-run
+node ~/.copilot/pstack/scripts/install-always-on.mjs</code></pre>
+      <p>Then start Copilot and run <code>/setup-pstack</code> to choose your models.
+        See the <a href="https://github.com/doublexmax/pstack-copilot/blob/main/docs/guide/01-setup.md">setup guide</a>
+        for Windows, permissions, context policy, and uninstall instructions.</p>
+    </section>
+
+    <section aria-labelledby="examples">
+      <h2 id="examples">Two tasks to try</h2>
+      <h3>Investigate and fix a bug</h3>
+      <pre><code>/poteto-mode the export writes duplicate rows when a retry lands mid-run.
+Reproduce it first, fix the root cause, and verify the result.</code></pre>
+      <h3>Review a change before shipping</h3>
+      <pre><code>/poteto-mode review this PR for correctness and regressions.
+Explain the evidence for each finding and what still needs verification.</code></pre>
+      <p>You do not need to name every skill or prescribe the delegation plan.
+        Describe the outcome and what would prove it works.</p>
+    </section>
+
+    <footer>
+      <p><a href="https://github.com/doublexmax/pstack-copilot">Source and contributions</a>
+        &middot; <a href="https://github.com/doublexmax/pstack-copilot/blob/main/LICENSE">MIT license</a></p>
+      <p>An independent community project, not an official GitHub product.</p>
+    </footer>
+  </main>
+</body>
+</html>
