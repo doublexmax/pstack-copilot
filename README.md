@@ -1,4 +1,11 @@
-# pstack for copilot
+# pstack for GitHub Copilot
+
+pstack brings multi-agent workflows, engineering playbooks, and Azure DevOps
+integration to GitHub Copilot. Use it to investigate bugs, review code, and build
+features with explicit verification rather than just generating more code.
+
+[Project overview and quick start](https://doublexmax.github.io/pstack-copilot/)
+| [Full guide](./docs/guide/README.md)
 
 a port of [pstack](https://github.com/cursor/plugins/tree/main/pstack) by
 [poteto](https://x.com/poteto), rewritten to run on the github copilot
@@ -241,7 +248,7 @@ pstack also ships a subagent that runs my style end to end. spawn it from a pare
 
 pstack also ships [Comment Sicko](./agents/comment-sicko.agent.md), a read-only comment reviewer available as `agent_type: "comment-sicko"`. usually invoke it through [`/no-comments`](./skills/no-comments/SKILL.md), not directly.
 
-pstack also ships [Double](./agents/double.agent.md), an independent session supervisor. type [`/double`](./skills/double/SKILL.md) inside a worker session and it spawns a nested `Double: <name>` child on a different vendor family. a zero-token watcher wakes it only when the worker makes a load-bearing claim, and it messages the worker only to refute one with counter-evidence. it never writes the worker's code.
+pstack also ships [Double](./agents/double.agent.md), an independent session supervisor. type [`/double`](./skills/double/SKILL.md) inside a worker session and it spawns a nested `Double: <name>` child. it prefers a different vendor family from the configured pool, or uses the first entry if none differs. a zero-token watcher wakes it only when the worker makes a load-bearing claim, and it messages the worker only to refute one with counter-evidence. it never writes the worker's code.
 
 ## principles
 

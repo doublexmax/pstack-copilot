@@ -186,6 +186,36 @@ test('known unavailable models and unproven host fields block rather than replac
   }
 });
 
+test('Double resolves the original shipped multi-vendor pool without personal overrides', (t) => {
+  const f = fixture(t, null);
+  const choices = [
+    { model: 'claude-opus-5.5', reasoning_effort: 'max', context_tier: 'long_context' },
+    { model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: 'long_context' },
+    { model: 'gemini-4-argon', reasoning_effort: 'high', context_tier: 'long_context' },
+  ];
+  for (const [member, expected] of choices.entries()) {
+    const result = resolveRole(request({
+      role: 'double verifier', member, model: undefined, effort: undefined, target: 'create_session',
+    }), f);
+    assert.deepEqual(result.toolArguments, { kickoff: expected });
+  }
+  assert.deepEqual(resolveRole(request({ model: undefined, effort: undefined }), f).toolArguments, {
+    model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: 'long_context',
+  });
+});
+
+test('a single-model Double override replaces the entire default pool', (t) => {
+  const f = fixture(t, null);
+  f.write('pstack-models.md', 'double verifier: gpt-6.1-sol / xhigh\n');
+  const launch = request({
+    role: 'double verifier', member: 0, model: undefined, effort: undefined, target: 'create_session',
+  });
+  assert.deepEqual(resolveRole(launch, f).toolArguments, {
+    kickoff: { model: 'gpt-6.1-sol', reasoning_effort: 'xhigh', context_tier: 'long_context' },
+  });
+  assert.throws(() => resolveRole({ ...launch, member: 1 }, f), /invalid panel member/);
+});
+
 test('legacy model configuration and mixed panels resolve every member independently', (t) => {
   const f = fixture(t);
   const models = '# budget: unlimited (max)\n'

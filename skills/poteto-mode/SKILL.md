@@ -36,8 +36,8 @@ Remaining triggers:
 - Asked to land or ship a green stack → the **Shipping** playbook (`playbooks/shipping.md`). Green is not safe. Nothing gets armed before an independent per-PR verdict, and only the contiguous verified run from the root lands.
 - A review bot or the agentic security review commented → skeptical posture. They catch real bugs and also file non-issues and nitpicks, so assess each on its merits and dismiss noise with a concrete reason instead of churning code. Triage fix / dismiss / ask per `references/bugbot-triage.md`.
 - Broken skill mid-task → fix it in its own PR. Don't block. Don't silently work around it.
-- Long, autonomous, or multi-phase work, or any task the user steps away from to review later ("going to bed", "trust it when i'm back", autopilot mode, "run until X") → a decision trail via the **show-me-your-work** skill and live cross-family supervision via the **double** skill. Commit the trail when stakes need an auditable record. Keep it local otherwise.
-- The user asks to supervise or double-check any session (`/double`, "attach double", "supervise session X") → the **double** skill. It attaches an independent verifier session on a different vendor family that falsifies the worker's factual claims and test or comparator edits against real artifacts. It never writes the worker's code.
+- Long, autonomous, or multi-phase work, or any task the user steps away from to review later ("going to bed", "trust it when i'm back", autopilot mode, "run until X") → a decision trail via the **show-me-your-work** skill and live independent supervision via the **double** skill. Commit the trail when stakes need an auditable record. Keep it local otherwise.
+- The user asks to supervise or double-check any session (`/double`, "attach double", "supervise session X") → the **double** skill. It attaches an independent verifier session that prefers a different vendor family from the configured pool. It falsifies the worker's factual claims and test or comparator edits against real artifacts. It never writes the worker's code.
 
 ## Principles
 

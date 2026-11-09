@@ -33,6 +33,12 @@ one path with
 - Use the issue templates (bug report / feature request) so we have enough
   context to act on it.
 
+## Project page
+
+The static project page lives in `site/`. Run `node --test scripts/site.test.mjs`
+after editing it. See [search discovery](docs/search-discovery.md) for publishing,
+repository metadata, and Google Search Console verification.
+
 ## Code of conduct
 
 Be respectful. Assume good intent. Disagree on substance, not people.
