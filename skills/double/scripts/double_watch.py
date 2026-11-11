@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import argparse
-import csv
+from collections import Counter
 from contextlib import contextmanager
+import csv
 import json
 import os
 import pathlib
@@ -10,6 +11,7 @@ import re
 import sqlite3
 import sys
 import time
+from typing import NamedTuple
 
 sys.stdout.reconfigure(encoding="utf-8")
 
@@ -32,6 +34,49 @@ VERIFY_OR_SCOPE_RE = re.compile(
     r"(test|spec|bench|verify|assert|\.pop\(|skip|xfail|equivalen|\.build[/\\]|Tables[/\\])",
     re.I,
 )
+LEDGER_HEADER = ["ts", "event_range"]
+NEW_LEDGER_ROW_RE = re.compile(r'^\s*"?\d{4}-\d{2}-\d{2}[T\s][^\t]*\t')
+RESOLVED_REFS_RE = re.compile(r"\s*((?:L\d+\b[\s,;]*)+)")
+VERDICT_ORDER = ("VERIFIED", "REFUTED", "UNVERIFIED", "NOTE", "RESOLVED")
+OPEN_LIMIT, WAKE_LIMIT, CLAIM_LIMIT, RESOLVED_LIMIT, PREMISE_LIMIT, UNMATCHED_LIMIT = 25, 20, 15, 10, 12, 5
+
+
+class LedgerRow(NamedTuple):
+    line: int
+    ts: str
+    event_range: str
+    span: tuple[int, int] | None
+    trigger: str
+    verdict: str
+    claim: str
+    evidence: str
+    observed: str
+
+    @property
+    def acknowledges(self) -> bool:
+        return bool(self.verdict) and self.verdict != "RESOLVED" and not (self.span is not None and self.verdict == "NOTE")
+
+    @property
+    def resolves(self) -> tuple[int, ...]:
+        if self.verdict != "RESOLVED":
+            return ()
+        refs = []
+        evidence_refs = self.evidence[9:] if self.evidence[:9].lower() == "resolves:" else ""
+        for text in (self.claim, evidence_refs):
+            match = RESOLVED_REFS_RE.match(text)
+            if match:
+                refs.extend(int(n) for n in re.findall(r"L(\d+)", match.group(1)))
+        return tuple(dict.fromkeys(refs))
+
+    @property
+    def wake_key(self) -> tuple[int, int] | str:
+        return self.span if self.span is not None else self.event_range
+
+
+class AskGate(NamedTuple):
+    event: int
+    question: str
+    choices: tuple[str, ...]
 
 
 def extract_files(args_obj) -> list[str]:
@@ -115,7 +160,9 @@ def extract_range_context(session_dir: pathlib.Path, lines: list[str], own_start
             try:
                 ev = json.loads(lines[idx])
                 if ev.get("type") == "user.message":
-                    user_prompts.append({"event": idx, "content": (ev["data"].get("content") or "")[:600]})
+                    content = ev["data"].get("content") or ""
+                    if "[Double Supervisor Notice]" not in content:
+                        user_prompts.append({"event": idx, "content": content[:600]})
             except Exception:
                 pass
 
@@ -435,46 +482,278 @@ def lifecycle_lock(out_dir: pathlib.Path):
         conn.close()
 
 
-def sync_audit_markdown(out_dir: pathlib.Path) -> None:
-    audit_file = out_dir / "double-audit.tsv"
-    if not audit_file.exists():
-        return
-    with audit_file.open(encoding="utf-8-sig", newline="") as audit:
-        rows = [row for row in csv.reader(audit, delimiter="\t") if len(row) >= 2 and row[:2] != ["ts", "event_range"]]
-    md_file = out_dir / "double-audit.md"
-    if rows and (not md_file.exists() or md_file.stat().st_mtime < audit_file.stat().st_mtime):
-        lines = [
-            "# Double audit",
-            "",
-            "| Timestamp | Event range | Trigger | Verdict | Claim | Evidence | Observed fact |",
-            "| --- | --- | --- | --- | --- | --- | --- |",
-        ]
-        for r in rows:
-            padded = (list(r) + [""] * 7)[:7]
-            escaped = [c.replace("|", "\\|").replace("\n", " ").strip() for c in padded]
-            lines.append(f"| {' | '.join(escaped)} |")
-        temporary = md_file.with_name(f"{md_file.name}.{os.getpid()}.tmp")
-        temporary.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        temporary.replace(md_file)
+def parse_span(cell: str) -> tuple[int, int] | None:
+    numbers = [int(n) for n in re.findall(r"\b\d+\b", cell.strip())]
+    return (min(numbers), max(numbers)) if 1 <= len(numbers) <= 2 else None
 
 
-def read_audit_ranges(out_dir: pathlib.Path, *, sync_markdown: bool = True) -> list[tuple[int, int] | None]:
+def decode_ledger_record(lines: list[str], idx: int) -> tuple[list[str], int]:
+    raw = lines[idx].rstrip("\r\n")
+    if '"' in raw:
+        try:
+            return next(csv.reader([raw], delimiter="\t", strict=True, skipinitialspace=True)), 1
+        except csv.Error:
+            try:
+                reader = csv.reader(lines[idx:], delimiter="\t", strict=True, skipinitialspace=True)
+                cells = next(reader)
+                consumed = max(1, reader.line_num)
+                if not any(NEW_LEDGER_ROW_RE.match(cont) for cont in lines[idx + 1:idx + consumed]):
+                    return cells, consumed
+            except csv.Error:
+                pass
+    return raw.split("\t"), 1
+
+
+def read_ledger(out_dir: pathlib.Path) -> list[LedgerRow]:
     audit_file = out_dir / "double-audit.tsv"
     if not audit_file.exists():
         return []
-    ranges = []
-    with audit_file.open(encoding="utf-8-sig", newline="") as audit:
-        for row in csv.reader(audit, delimiter="\t"):
-            if len(row) < 2 or row[:2] == ["ts", "event_range"]:
+    rows = []
+    lines = audit_file.read_text(encoding="utf-8-sig", errors="replace").splitlines(keepends=True)
+    idx = 0
+    while idx < len(lines):
+        line_no = idx + 1
+        cells, consumed = decode_ledger_record(lines, idx)
+        idx += consumed
+        stripped = [c.strip() for c in cells]
+        if len(stripped) < 2 or stripped[:2] == LEDGER_HEADER:
+            continue
+        padded = (stripped[:6] + [" ".join(stripped[6:])] + [""] * 7)[:7]
+        ts, event_range, trigger, verdict, claim, evidence, observed = (c.strip() for c in padded)
+        rows.append(LedgerRow(
+            line_no, ts, event_range, parse_span(event_range), trigger, verdict.upper(), claim, evidence, observed,
+        ))
+    return rows
+
+
+def find_open_ask_gate(lines: list[str], own_start: int = 0) -> AskGate | None:
+    completed_calls = set()
+    markers = (
+        '"user.message"', '"ask_user"', '"tool.execution_complete"',
+        '"assistant.message"', '"assistant.turn_start"', '"session.shutdown"', '"sessionEnd"',
+    )
+    for idx in range(len(lines) - 1, max(0, own_start) - 1, -1):
+        line = lines[idx]
+        if not any(marker in line for marker in markers):
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        data = event.get("data", {})
+        ev_type = event.get("type")
+        if ev_type == "tool.execution_complete":
+            completed_calls.add(data.get("toolCallId"))
+            continue
+        if data.get("parentToolCallId"):
+            continue
+        if ev_type in ("user.message", "assistant.turn_start", "session.shutdown") or (
+            ev_type == "hook.start" and data.get("hookType") == "sessionEnd"
+        ):
+            return None
+        if ev_type != "assistant.message":
+            continue
+        request = next((tr for tr in data.get("toolRequests") or [] if tr.get("name") == "ask_user"), None)
+        if request is None:
+            return None
+        call_id = request.get("toolCallId")
+        if call_id and call_id in completed_calls:
+            return None
+        args = request.get("arguments") or {}
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except json.JSONDecodeError:
+                args = {"question": args}
+        if not isinstance(args, dict):
+            return None
+        return AskGate(idx, str(args.get("question") or ""), tuple(str(c) for c in args.get("choices") or ()))
+    return None
+
+
+def cell(text: str, budget: int) -> str:
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) > budget:
+        text = text[:budget - 3].rstrip() + "..."
+    return text.replace("|", "\\|")
+
+
+def table(header: tuple[str, ...], body: list[tuple[str, ...]]) -> list[str]:
+    return [
+        f"| {' | '.join(header)} |",
+        f"| {' | '.join('---' for _ in header)} |",
+        *(f"| {' | '.join(row)} |" for row in body),
+    ]
+
+
+def label(key: tuple[int, int] | str) -> str:
+    return f"[{key[0]}, {key[1]}]" if isinstance(key, tuple) else cell(key, 60)
+
+
+def match_resolutions(rows: list[LedgerRow]) -> tuple[
+    list[LedgerRow], list[tuple[LedgerRow, LedgerRow]], list[tuple[LedgerRow, int | None]],
+]:
+    by_line = {r.line: r for r in rows}
+    resolved_by: dict[int, LedgerRow] = {}
+    unmatched: list[tuple[LedgerRow, int | None]] = []
+    for row in rows:
+        refs = row.resolves
+        if row.verdict == "RESOLVED" and not refs:
+            unmatched.append((row, None))
+        for ref in refs:
+            target = by_line.get(ref)
+            if target is not None and target.verdict == "REFUTED" and ref < row.line:
+                resolved_by.setdefault(ref, row)
+            else:
+                unmatched.append((row, ref))
+    open_rows = [r for r in reversed(rows) if r.verdict == "REFUTED" and r.line not in resolved_by]
+    resolutions = sorted(
+        ((by_line[ref], res) for ref, res in resolved_by.items()), key=lambda pair: (-pair[1].line, -pair[0].line),
+    )
+    return open_rows, resolutions, unmatched
+
+
+def render_audit_markdown(worker_session_id: str, rows: list[LedgerRow], gate: AskGate | None) -> str:
+    open_rows, resolutions, unmatched = match_resolutions(rows)
+    newest = list(reversed(rows))
+    wakes: dict[tuple[int, int] | str, list[LedgerRow]] = {}
+    for row in rows:
+        wakes.setdefault(row.wake_key, []).append(row)
+    counts = Counter(r.verdict for r in rows)
+    spans = [r for r in rows if r.span is not None]
+    last = max(spans, key=lambda r: (r.span[1], r.line), default=None)
+
+    def verdict_summary(counts: Counter) -> str:
+        names = [v for v in VERDICT_ORDER if counts[v]] + sorted(v for v in counts if v not in VERDICT_ORDER)
+        return cell(", ".join(f"{counts[v]} {v or '(blank)'}" for v in names) or "none", 200)
+
+    out = ["# Double audit", ""]
+    out += table(("Status", "Value"), [
+        ("Worker session", f"`{cell(worker_session_id, 80)}`"),
+        ("Last audited event", "none" if last is None else cell(
+            f"{last.span[1]} in wake {label(last.wake_key)}, {last.trigger}, {last.ts[:16]}", 280,
+        )),
+        ("Ledger", f"[double-audit.tsv](double-audit.tsv), {len(rows)} rows across {len(wakes)} wakes"),
+        ("Verdicts", verdict_summary(counts)),
+        ("Refutations", f"{len(open_rows)} open, {len(resolutions)} resolved"),
+    ])
+
+    if gate is not None:
+        containing = {
+            r.span for r in rows
+            if r.span is not None and r.verdict != "RESOLVED" and r.span[0] <= gate.event <= r.span[1]
+        }
+        gate_span = min(containing, key=lambda span: (span[1] - span[0], -span[1]), default=None)
+        premises = [r for r in rows if gate_span is not None and r.span == gate_span and r.verdict != "RESOLVED"]
+        out += ["", "## Pending question", "", f"Worker event {gate.event} is waiting on this `ask_user` question.", ""]
+        out.append(f"> {cell(gate.question, 400)}")
+        if gate.choices:
+            out += ["", "Choices:"] + [f"- {cell(choice, 150)}" for choice in gate.choices[:6]]
+        out.append("")
+        if premises:
+            out += table(("Line", "Verdict", "Premise", "Observed fact"), [
+                (f"L{r.line}", cell(r.verdict, 40), cell(r.claim, 200), cell(r.observed, 280))
+                for r in premises[:PREMISE_LIMIT]
+            ])
+            if len(premises) > PREMISE_LIMIT:
+                out += ["", f"{len(premises) - PREMISE_LIMIT} more premise rows are in double-audit.tsv."]
+        else:
+            out.append("Double has not recorded verdicts for this question yet.")
+
+    out += ["", f"## Open refutations ({len(open_rows)})", ""]
+    if open_rows:
+        out += table(("Line", "Event range", "Claim", "Observed fact", "Evidence"), [
+            (f"L{r.line}", label(r.wake_key), cell(r.claim, 200), cell(r.observed, 280), cell(r.evidence, 120))
+            for r in open_rows[:OPEN_LIMIT]
+        ])
+        hidden = open_rows[OPEN_LIMIT:]
+        if hidden:
+            out += ["", f"{len(hidden)} older open refutations, L{hidden[-1].line} to L{hidden[0].line}, are in double-audit.tsv."]
+    else:
+        out.append("None.")
+
+    recent_wakes = sorted(wakes.items(), key=lambda item: -item[1][-1].line)[:WAKE_LIMIT]
+    out += ["", f"## Recent wakes (last {len(recent_wakes)} of {len(wakes)})", ""]
+    if recent_wakes:
+        out += table(("Event range", "Trigger", "Audited", "Verdicts"), [
+            (
+                label(key), cell(", ".join(dict.fromkeys(r.trigger for r in group)), 60), cell(group[-1].ts[:16], 16),
+                verdict_summary(Counter(r.verdict for r in group)),
+            )
+            for key, group in recent_wakes
+        ])
+    else:
+        out.append("None.")
+
+    claims = [r for r in newest if r.verdict not in ("REFUTED", "RESOLVED")][:CLAIM_LIMIT]
+    out += ["", f"## Recent claims (last {len(claims)})", ""]
+    if claims:
+        out += table(("Line", "Event range", "Verdict", "Claim", "Observed fact"), [
+            (f"L{r.line}", label(r.wake_key), cell(r.verdict, 40), cell(r.claim, 200), cell(r.observed, 240)) for r in claims
+        ])
+    else:
+        out.append("None.")
+
+    out += ["", f"## Resolved refutations ({len(resolutions)})", ""]
+    if resolutions:
+        out += table(("Line", "Resolved by", "Claim", "Fix evidence"), [
+            (f"L{ref.line}", f"L{res.line}", cell(ref.claim, 160), cell(res.evidence or res.observed, 120))
+            for ref, res in resolutions[:RESOLVED_LIMIT]
+        ])
+        if len(resolutions) > RESOLVED_LIMIT:
+            out += ["", f"{len(resolutions) - RESOLVED_LIMIT} older resolutions are in double-audit.tsv."]
+    else:
+        out.append("None.")
+    if unmatched:
+        out += ["", "These RESOLVED citations close no earlier REFUTED row.", ""]
+        out += [
+            f"- L{row.line} cites {'no L<line> id' if ref is None else f'L{ref}'}."
+            for row, ref in unmatched[-UNMATCHED_LIMIT:]
+        ]
+        if len(unmatched) > UNMATCHED_LIMIT:
+            out += ["", f"{len(unmatched) - UNMATCHED_LIMIT} more unmatched citations are in double-audit.tsv."]
+    return "\n".join(out) + "\n"
+
+
+def sync_audit_markdown(
+    out_dir: pathlib.Path,
+    worker_session_id: str = "unknown",
+    rows: list[LedgerRow] | None = None,
+    lines: list[str] | None = None,
+    own_start: int = 0,
+) -> None:
+    if rows is None:
+        rows = read_ledger(out_dir)
+    if not rows:
+        return
+    if worker_session_id == "unknown":
+        for name in ("double-cursor.json", "double-lifecycle.json"):
+            try:
+                saved = json.loads((out_dir / name).read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
                 continue
-            numbers = [int(n) for n in re.findall(r"\b\d+\b", row[1].strip())]
-            numeric = 1 <= len(numbers) <= 2
-            if numeric and len(row) > 3 and row[3].strip().upper() == "NOTE":
-                continue
-            ranges.append((min(numbers), max(numbers)) if numeric else None)
+            if isinstance(saved, dict) and isinstance(saved.get("worker_session_id"), str) and saved["worker_session_id"]:
+                worker_session_id = saved["worker_session_id"]
+                break
+    if lines is None and worker_session_id != "unknown":
+        ev_file = copilot_home() / "session-state" / worker_session_id / "events.jsonl"
+        if ev_file.exists():
+            lines = ev_file.read_text(encoding="utf-8", errors="replace").splitlines()
+            own_start = find_own_session_start(lines, worker_session_id)
+    md_file = out_dir / "double-audit.md"
+    rendered = render_audit_markdown(worker_session_id, rows, find_open_ask_gate(lines or [], own_start))
+    if md_file.exists() and md_file.read_text(encoding="utf-8", errors="replace") == rendered:
+        return
+    temporary = md_file.with_name(f"{md_file.name}.{os.getpid()}.tmp")
+    with temporary.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(rendered)
+    temporary.replace(md_file)
+
+
+def read_audit_ranges(out_dir: pathlib.Path, *, sync_markdown: bool = False) -> list[tuple[int, int] | None]:
     if sync_markdown:
         sync_audit_markdown(out_dir)
-    return ranges
+    return [row.span for row in read_ledger(out_dir) if row.acknowledges]
 
 
 def wake_acknowledged(wake: dict, audit_ranges: list[tuple[int, int] | None], lines: list[str] | None = None) -> bool:
@@ -503,13 +782,14 @@ def poll_once(session_dir: pathlib.Path, out_dir: pathlib.Path, flush_pending: b
         lines=lines, flush_pending=flush_pending or replay,
     )
     new_wakes = [w for w in wakes if w["event_range"][1] >= state["next_idx"]]
-    audit_ranges = read_audit_ranges(out_dir, sync_markdown=False)
+    rows = read_ledger(out_dir)
+    audit_ranges = [row.span for row in rows if row.acknowledges]
     pending = {tuple(w["event_range"]): w for w in state.get("pending_wakes", [])}
     for w in new_wakes:
         pending.setdefault(tuple(w["event_range"]), {**w, "delivered_audit_rows": len(audit_ranges)})
     pending_wakes = [w for w in pending.values() if not wake_acknowledged(w, audit_ranges, lines)]
     if not pending_wakes:
-        sync_audit_markdown(out_dir)
+        sync_audit_markdown(out_dir, worker_session_id=session_dir.name, rows=rows, lines=lines, own_start=own_start)
     write_json(cursor_file, {
         "worker_session_id": session_dir.name,
         "next_idx": next_idx,
@@ -518,10 +798,23 @@ def poll_once(session_dir: pathlib.Path, out_dir: pathlib.Path, flush_pending: b
         "verify_touched": verify_touched,
         "pending_wakes": pending_wakes,
     })
+    open_rows, _, _ = match_resolutions(rows)
     enriched = []
     for w in pending_wakes:
         ctx = extract_range_context(session_dir, lines, own_start, w["event_range"][0], w["event_range"][1])
-        enriched.append({**w, **ctx})
+        enriched.append({
+            **w, **ctx,
+            "open_refutations": [
+                {
+                    "line": f"L{r.line}",
+                    "event_range": list(r.span) if r.span is not None else r.event_range,
+                    "claim": r.claim,
+                    "evidence_pointer": r.evidence,
+                    "observed_fact": r.observed,
+                }
+                for r in open_rows[:OPEN_LIMIT]
+            ],
+        })
     if enriched or replay:
         write_json(bundle_file, enriched)
     elif bundle_file.exists():

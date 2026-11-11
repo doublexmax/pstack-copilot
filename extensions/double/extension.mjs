@@ -8,12 +8,18 @@ export const ENTRY_VERSION = "pstack-double-extension-v1";
 const pstackRoot = join(homedir(), ".copilot", "pstack");
 const watchScript = join(pstackRoot, "skills", "double", "scripts", "double_watch.py");
 const wakeTimeoutMs = 15_000;
+const wakeAcceptedTimeoutMs = 300_000;
 let session;
 let doubleTurnActive = false;
 let doubleRuntimeReady = false;
+let runtimeWakeDispatches = 0;
 
 function copilotHome() {
     return process.env.COPILOT_HOME || join(process.env.USERPROFILE || process.env.HOME || homedir(), ".copilot");
+}
+
+function buildWakePrompt(workerSessionId, outDir) {
+    return `Parent session active; run python "${watchScript}" ${workerSessionId} --wait --out-dir "${outDir}" and append audit rows to double-audit.tsv in "${outDir}".`;
 }
 
 export function hasSupervisorMarker(sessionId, home = copilotHome()) {
@@ -125,12 +131,14 @@ async function reconcileSupervisorLifecycle(sessionId, workerActivity = false, i
     if (!info) return;
     const outDir = join(copilotHome(), "session-state", info.double_session_id, "files");
     let wakePrompt;
+    let wakeCount = 0;
     const release = lifecycleLock(outDir);
     try {
         const now = Date.now();
         const lifecyclePath = join(outDir, "double-lifecycle.json");
         const hadLifecycleFile = existsSync(lifecyclePath);
         const state = loadLifecycle(outDir, info);
+        const priorUpdatedAt = state.updated_at;
         if (session?.sessionId === info.double_session_id) {
             ensureDoubleRuntime();
             state.double_ext_pid = process.pid;
@@ -154,7 +162,8 @@ async function reconcileSupervisorLifecycle(sessionId, workerActivity = false, i
                 transition(outDir, state, "watching", now);
                 return;
             }
-            if ((state.wake_accepted && !info.was_interrupted) || now - state.updated_at <= wakeTimeoutMs) {
+            if ((state.wake_accepted && !info.was_interrupted && now - state.updated_at <= wakeAcceptedTimeoutMs)
+                || now - state.updated_at <= wakeTimeoutMs) {
                 state.queued = 1;
                 state.monitors = 0;
                 state.monitor_pid = null;
@@ -176,14 +185,15 @@ async function reconcileSupervisorLifecycle(sessionId, workerActivity = false, i
             saveLifecycle(outDir, state);
             return;
         }
-        if (session?.sessionId !== info.double_session_id && pidAlive(state.double_ext_pid) && now - state.updated_at <= 3000) {
+        if (session?.sessionId !== info.double_session_id && pidAlive(state.double_ext_pid) && now - priorUpdatedAt <= 3000) {
             saveLifecycle(outDir, state);
             return;
         }
         state.wake_count += 1;
+        wakeCount = state.wake_count;
         state.wake_accepted = false;
         transition(outDir, state, "wake_pending", now);
-        wakePrompt = `Parent session active; run python "${watchScript}" ${info.worker_session_id} --wait --out-dir "${outDir}" and write double-audit.tsv and double-audit.md in "${outDir}".`;
+        wakePrompt = buildWakePrompt(info.worker_session_id, outDir);
     } finally {
         release();
     }
@@ -191,17 +201,29 @@ async function reconcileSupervisorLifecycle(sessionId, workerActivity = false, i
         if (session?.sessionId === info.double_session_id && typeof session.send === "function") {
             await session.send({ prompt: wakePrompt });
         } else if (typeof session?.rpc?.tools?.execute === "function") {
-            await session.rpc.tools.execute({
-                name: "send_session_message",
-                arguments: { session_id: info.double_session_id, delivery_mode: "immediate", message: wakePrompt },
-            });
+            runtimeWakeDispatches += 1;
+            try {
+                const result = await session.rpc.tools.execute({
+                    name: "send_session_message",
+                    arguments: { session_id: info.double_session_id, delivery_mode: "immediate", message: wakePrompt },
+                });
+                if (result?.permissionDecision === "deny"
+                    || (typeof result?.resultType === "string" && result.resultType !== "success")
+                    || Boolean(result?.error)
+                    || (typeof result?.textResultForLlm === "string" && result.textResultForLlm.startsWith("Denied by preToolUse hook:"))
+                    || (typeof result === "string" && result.startsWith("Denied by preToolUse hook:"))) {
+                    throw new Error("Double supervisor runtime wake was denied or failed.");
+                }
+            } finally {
+                runtimeWakeDispatches -= 1;
+            }
         } else {
             throw new Error("Double supervisor runtime transport is missing.");
         }
         const release = lifecycleLock(outDir);
         try {
             const state = loadLifecycle(outDir, info);
-            if (state.phase === "wake_pending") {
+            if (state.phase === "wake_pending" && state.wake_count === wakeCount) {
                 state.wake_accepted = true;
                 saveLifecycle(outDir, state);
             }
@@ -212,7 +234,9 @@ async function reconcileSupervisorLifecycle(sessionId, workerActivity = false, i
         const release = lifecycleLock(outDir);
         try {
             const state = loadLifecycle(outDir, info);
-            transition(outDir, state, "idle", Date.now());
+            if (state.phase === "wake_pending" && state.wake_count === wakeCount) {
+                transition(outDir, state, "idle", Date.now());
+            }
         } finally {
             release();
         }
@@ -231,6 +255,10 @@ session = await joinSession({
             if (input.toolName === "send_session_message" && info
                 && input.toolArgs?.session_id === info.double_session_id && typeof message === "string"
                 && (message.includes("double_watch.py") || message.includes("--wait"))) {
+                const outDir = join(copilotHome(), "session-state", info.double_session_id, "files");
+                if (runtimeWakeDispatches > 0 && message === buildWakePrompt(info.worker_session_id, outDir)) {
+                    return undefined;
+                }
                 return {
                     permissionDecision: "deny",
                     permissionDecisionReason: "Double supervisor activation is runtime-owned.",
