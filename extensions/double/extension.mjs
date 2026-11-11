@@ -131,6 +131,7 @@ async function reconcileSupervisorLifecycle(sessionId, workerActivity = false, i
     if (!info) return;
     const outDir = join(copilotHome(), "session-state", info.double_session_id, "files");
     let wakePrompt;
+    let wakeCount = 0;
     const release = lifecycleLock(outDir);
     try {
         const now = Date.now();
@@ -189,6 +190,7 @@ async function reconcileSupervisorLifecycle(sessionId, workerActivity = false, i
             return;
         }
         state.wake_count += 1;
+        wakeCount = state.wake_count;
         state.wake_accepted = false;
         transition(outDir, state, "wake_pending", now);
         wakePrompt = buildWakePrompt(info.worker_session_id, outDir);
@@ -221,7 +223,7 @@ async function reconcileSupervisorLifecycle(sessionId, workerActivity = false, i
         const release = lifecycleLock(outDir);
         try {
             const state = loadLifecycle(outDir, info);
-            if (state.phase === "wake_pending") {
+            if (state.phase === "wake_pending" && state.wake_count === wakeCount) {
                 state.wake_accepted = true;
                 saveLifecycle(outDir, state);
             }
@@ -232,7 +234,9 @@ async function reconcileSupervisorLifecycle(sessionId, workerActivity = false, i
         const release = lifecycleLock(outDir);
         try {
             const state = loadLifecycle(outDir, info);
-            transition(outDir, state, "idle", Date.now());
+            if (state.phase === "wake_pending" && state.wake_count === wakeCount) {
+                transition(outDir, state, "idle", Date.now());
+            }
         } finally {
             release();
         }

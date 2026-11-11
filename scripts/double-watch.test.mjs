@@ -1994,3 +1994,153 @@ console.log(JSON.stringify({ startup, registrations, afterHooks, idle, beforeAct
   assert.equal(result.state.wake_count, 1);
   assert.equal(result.state.wake_accepted, true);
 });
+
+test('CSV-quoted TSV rows decode verdicts, tabs, and multi-line claims while preserving physical line IDs and LF markdown', (t) => {
+  const base = mkdtempSync(join(tmpdir(), 'double-quoted-tsv-'));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const sessionDir = join(base, 'worker-quoted');
+  const outDir = join(base, 'out');
+  mkdirSync(sessionDir);
+  mkdirSync(outDir);
+  writeEvents(sessionDir, [
+    { type: 'session.start', data: { sessionId: 'worker-quoted' } },
+    { type: 'assistant.message', data: { content: 'Verified quoted TSV handling.' } },
+  ]);
+
+  const initial = JSON.parse(runWatcher(`
+import csv
+out_dir = pathlib.Path(${JSON.stringify(outDir)})
+session_dir = pathlib.Path(${JSON.stringify(sessionDir)})
+with (out_dir / "double-audit.tsv").open("w", encoding="utf-8", newline="") as handle:
+    writer = csv.writer(handle, delimiter="\\t", quoting=csv.QUOTE_ALL, lineterminator="\\n")
+    writer.writerow(["ts", "event_range", "trigger", "verdict", "claim", "evidence_pointer", "observed_fact"])
+    writer.writerow(["2026-11-02T00:00:00Z", "[0, 1]", "T1_HUMAN_GATE", "NOTE", "Metadata row", "meta", "Note does not ack"])
+    writer.writerow(["2026-11-02T00:00:00Z", "[20, 21]", "T2_MIDRUN_CLAIM", "REFUTED", "Multiline\\nrefuted claim", "src.py:10", "Mismatch\\tdetail"])
+ranges = dw.read_audit_ranges(out_dir)
+wakes = dw.poll_once(session_dir, out_dir)
+bundle = json.loads((out_dir / "double-wake-bundle.json").read_text(encoding="utf-8"))
+print(json.dumps({"ranges": ranges, "wakes": [w["event_range"] for w in wakes], "open": bundle[0]["open_refutations"]}))
+`));
+  assert.deepEqual(initial, {
+    ranges: [[20, 21]],
+    wakes: [[0, 1]],
+    open: [{
+      line: 'L3',
+      event_range: [20, 21],
+      claim: 'Multiline\nrefuted claim',
+      evidence_pointer: 'src.py:10',
+      observed_fact: 'Mismatch\tdetail',
+    }],
+  });
+
+  const resolved = JSON.parse(runWatcher(`
+import csv
+out_dir = pathlib.Path(${JSON.stringify(outDir)})
+session_dir = pathlib.Path(${JSON.stringify(sessionDir)})
+with (out_dir / "double-audit.tsv").open("a", encoding="utf-8", newline="") as handle:
+    handle.write('2026-11-02T00:01:00Z\\t[0, 1]\\tT1_HUMAN_GATE\\tVERIFIED\\t"Unclosed raw quote\\tproof.py\\tMatches now\\n')
+    writer = csv.writer(handle, delimiter="\\t", quoting=csv.QUOTE_ALL, lineterminator="\\n")
+    writer.writerow(["2026-11-02T00:02:00Z", "[0, 1]", "T1_HUMAN_GATE", "RESOLVED", "L3 Fixed\\tclaim", "Resolves: L3; commit-1", "Verified"])
+wakes = dw.poll_once(session_dir, out_dir)
+rows = dw.read_ledger(out_dir)
+print(json.dumps({
+    "wakes": wakes,
+    "rows": [{"line": r.line, "verdict": r.verdict, "claim": r.claim, "resolves": list(r.resolves)} for r in rows],
+}))
+`));
+  assert.deepEqual(resolved, {
+    wakes: [],
+    rows: [
+      { line: 2, verdict: 'NOTE', claim: 'Metadata row', resolves: [] },
+      { line: 3, verdict: 'REFUTED', claim: 'Multiline\nrefuted claim', resolves: [] },
+      { line: 5, verdict: 'VERIFIED', claim: '"Unclosed raw quote', resolves: [] },
+      { line: 6, verdict: 'RESOLVED', claim: 'L3 Fixed\tclaim', resolves: [3] },
+    ],
+  });
+  const mdBytes = readFileSync(join(outDir, 'double-audit.md'));
+  assert.equal(mdBytes.includes(0x0d), false);
+  const mdText = mdBytes.toString('utf8');
+  assert.match(mdText, /\| Refutations \| 0 open, 1 resolved \|/);
+  assert.match(mdText, /\| L3 \| L6 \| Multiline refuted claim \| Resolves: L3; commit-1 \|/);
+});
+
+test('ask_user gates ignore narrower RESOLVED spans, standalone sync preserves worker context, and later turns clear unanswered gates', (t) => {
+  const home = mkdtempSync(join(tmpdir(), 'double-gate-edge-'));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const sessionDir = join(home, 'session-state', 'worker-gate-edge');
+  const outDir = join(home, 'out');
+  mkdirSync(sessionDir, { recursive: true });
+  mkdirSync(outDir, { recursive: true });
+  const askEvents = [
+    { type: 'session.start', data: { sessionId: 'worker-gate-edge' } },
+    { type: 'assistant.message', data: { toolRequests: [{
+      name: 'ask_user', toolCallId: 'gate-1', arguments: { question: 'Proceed with migration?' },
+    }] } },
+    { type: 'tool.execution_start', data: { toolCallId: 'gate-1', toolName: 'ask_user' } },
+  ];
+  writeEvents(sessionDir, askEvents);
+  const ledger = join(outDir, 'double-audit.tsv');
+  writeFileSync(ledger, `${auditHeader}2026-11-02T00:00:00Z\t[0, 2]\n`);
+  const unacked = JSON.parse(runWatcher(`
+print(json.dumps(dw.poll_once(pathlib.Path(${JSON.stringify(sessionDir)}), pathlib.Path(${JSON.stringify(outDir)}))))
+`, { COPILOT_HOME: home }));
+  assert.deepEqual(unacked.map((w) => w.event_range), [[0, 2]]);
+
+  writeFileSync(ledger, auditHeader
+    + auditRow('[0, 0]', 'REFUTED', 'Old issue')
+    + auditRow('[1, 1]', 'RESOLVED', 'L2 Closed old issue', '', 'Fixed in migration')
+    + auditRow('[0, 2]', 'VERIFIED', 'Schema backup exists', 'backup.sql', 'Backup verified.'));
+  assert.deepEqual(JSON.parse(runWatcher(`
+print(json.dumps(dw.poll_once(pathlib.Path(${JSON.stringify(sessionDir)}), pathlib.Path(${JSON.stringify(outDir)}))))
+`, { COPILOT_HOME: home })), []);
+
+  rmSync(join(outDir, 'double-audit.md'));
+  runWatcher(`dw.read_audit_ranges(pathlib.Path(${JSON.stringify(outDir)}), sync_markdown=True)`, { COPILOT_HOME: home });
+  const synced = readFileSync(join(outDir, 'double-audit.md'), 'utf8');
+  assert.match(synced, /\| Worker session \| `worker-gate-edge` \|/);
+  assert.match(synced, /## Pending question[\s\S]*\| L4 \| VERIFIED \| Schema backup exists \| Backup verified\. \|/);
+  assert.match(synced, /\| L2 \| L3 \| Old issue \| Fixed in migration \|/);
+
+  writeEvents(sessionDir, [
+    ...askEvents,
+    { type: 'assistant.message', data: { content: 'Resumed after cancellation.' } },
+  ]);
+  writeFileSync(ledger, auditHeader
+    + auditRow('[0, 3]', 'REFUTED', 'Only refutation')
+    + auditRow('[0, 3]', 'RESOLVED', 'L2 Closed refutation', 'proof'));
+  rmSync(join(outDir, 'double-audit.md'));
+  runWatcher(`dw.sync_audit_markdown(pathlib.Path(${JSON.stringify(outDir)}))`, { COPILOT_HOME: home });
+  const cleared = readFileSync(join(outDir, 'double-audit.md'), 'utf8');
+  assert.doesNotMatch(cleared, /## Pending question/);
+  assert.match(cleared, /## Recent claims \(last 0\)\n\nNone\./);
+});
+
+test('late failed RPC wake does not overwrite an active watching lifecycle', (t) => {
+  const harness = extensionHarness(t);
+  const result = harness.run(`
+const originalExecute = session.rpc.tools.execute;
+session.rpc.tools.execute = async (request) => {
+  writeState({
+    worker_session_id: 'worker-ext',
+    double_session_id: 'double-child-99',
+    phase: 'watching',
+    queued: 0,
+    monitors: 1,
+    monitor_pid: ${process.pid},
+    worker_active: true,
+    wake_count: 2,
+    wake_accepted: false,
+    last_event_size: 0,
+    updated_at: Date.now(),
+  });
+  return { resultType: 'failure', error: { message: 'Late transport timeout' } };
+};
+await registeredHooks.onUserPromptSubmitted({}, inv);
+session.rpc.tools.execute = originalExecute;
+console.log(JSON.stringify(readState()));
+`);
+  assert.equal(result.phase, 'watching');
+  assert.equal(result.monitors, 1);
+  assert.equal(result.monitor_pid, process.pid);
+  assert.equal(result.wake_count, 2);
+});

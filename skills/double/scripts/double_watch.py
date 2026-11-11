@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 from contextlib import contextmanager
+import csv
 import json
 import os
 import pathlib
@@ -34,6 +35,7 @@ VERIFY_OR_SCOPE_RE = re.compile(
     re.I,
 )
 LEDGER_HEADER = ["ts", "event_range"]
+NEW_LEDGER_ROW_RE = re.compile(r'^\s*"?\d{4}-\d{2}-\d{2}[T\s][^\t]*\t')
 RESOLVED_REFS_RE = re.compile(r"\s*((?:L\d+\b[\s,;]*)+)")
 VERDICT_ORDER = ("VERIFIED", "REFUTED", "UNVERIFIED", "NOTE", "RESOLVED")
 OPEN_LIMIT, WAKE_LIMIT, CLAIM_LIMIT, RESOLVED_LIMIT, PREMISE_LIMIT, UNMATCHED_LIMIT = 25, 20, 15, 10, 12, 5
@@ -52,14 +54,14 @@ class LedgerRow(NamedTuple):
 
     @property
     def acknowledges(self) -> bool:
-        return self.verdict != "RESOLVED" and not (self.span is not None and self.verdict == "NOTE")
+        return bool(self.verdict) and self.verdict != "RESOLVED" and not (self.span is not None and self.verdict == "NOTE")
 
     @property
     def resolves(self) -> tuple[int, ...]:
         if self.verdict != "RESOLVED":
             return ()
         refs = []
-        evidence_refs = self.evidence.removeprefix("resolves:") if self.evidence.startswith("resolves:") else ""
+        evidence_refs = self.evidence[9:] if self.evidence[:9].lower() == "resolves:" else ""
         for text in (self.claim, evidence_refs):
             match = RESOLVED_REFS_RE.match(text)
             if match:
@@ -485,18 +487,39 @@ def parse_span(cell: str) -> tuple[int, int] | None:
     return (min(numbers), max(numbers)) if 1 <= len(numbers) <= 2 else None
 
 
+def decode_ledger_record(lines: list[str], idx: int) -> tuple[list[str], int]:
+    raw = lines[idx].rstrip("\r\n")
+    if '"' in raw:
+        try:
+            return next(csv.reader([raw], delimiter="\t", strict=True, skipinitialspace=True)), 1
+        except csv.Error:
+            try:
+                reader = csv.reader(lines[idx:], delimiter="\t", strict=True, skipinitialspace=True)
+                cells = next(reader)
+                consumed = max(1, reader.line_num)
+                if not any(NEW_LEDGER_ROW_RE.match(cont) for cont in lines[idx + 1:idx + consumed]):
+                    return cells, consumed
+            except csv.Error:
+                pass
+    return raw.split("\t"), 1
+
+
 def read_ledger(out_dir: pathlib.Path) -> list[LedgerRow]:
     audit_file = out_dir / "double-audit.tsv"
     if not audit_file.exists():
         return []
     rows = []
-    text = audit_file.read_text(encoding="utf-8-sig", errors="replace")
-    for line_no, line in enumerate(text.split("\n"), start=1):
-        cells = line.rstrip("\r").split("\t")
-        if len(cells) < 2 or cells[:2] == LEDGER_HEADER:
+    lines = audit_file.read_text(encoding="utf-8-sig", errors="replace").splitlines(keepends=True)
+    idx = 0
+    while idx < len(lines):
+        line_no = idx + 1
+        cells, consumed = decode_ledger_record(lines, idx)
+        idx += consumed
+        stripped = [c.strip() for c in cells]
+        if len(stripped) < 2 or stripped[:2] == LEDGER_HEADER:
             continue
-        cells = (cells[:6] + [" ".join(cells[6:])] + [""] * 7)[:7]
-        ts, event_range, trigger, verdict, claim, evidence, observed = (c.strip() for c in cells)
+        padded = (stripped[:6] + [" ".join(stripped[6:])] + [""] * 7)[:7]
+        ts, event_range, trigger, verdict, claim, evidence, observed = (c.strip() for c in padded)
         rows.append(LedgerRow(
             line_no, ts, event_range, parse_span(event_range), trigger, verdict.upper(), claim, evidence, observed,
         ))
@@ -505,27 +528,34 @@ def read_ledger(out_dir: pathlib.Path) -> list[LedgerRow]:
 
 def find_open_ask_gate(lines: list[str], own_start: int = 0) -> AskGate | None:
     completed_calls = set()
+    markers = (
+        '"user.message"', '"ask_user"', '"tool.execution_complete"',
+        '"assistant.message"', '"assistant.turn_start"', '"session.shutdown"', '"sessionEnd"',
+    )
     for idx in range(len(lines) - 1, max(0, own_start) - 1, -1):
         line = lines[idx]
-        if not any(marker in line for marker in ('"user.message"', '"ask_user"', '"tool.execution_complete"')):
+        if not any(marker in line for marker in markers):
             continue
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
             continue
         data = event.get("data", {})
-        if event.get("type") == "tool.execution_complete":
+        ev_type = event.get("type")
+        if ev_type == "tool.execution_complete":
             completed_calls.add(data.get("toolCallId"))
             continue
         if data.get("parentToolCallId"):
             continue
-        if event.get("type") == "user.message":
+        if ev_type in ("user.message", "assistant.turn_start", "session.shutdown") or (
+            ev_type == "hook.start" and data.get("hookType") == "sessionEnd"
+        ):
             return None
-        if event.get("type") != "assistant.message":
+        if ev_type != "assistant.message":
             continue
         request = next((tr for tr in data.get("toolRequests") or [] if tr.get("name") == "ask_user"), None)
         if request is None:
-            continue
+            return None
         call_id = request.get("toolCallId")
         if call_id and call_id in completed_calls:
             return None
@@ -609,7 +639,10 @@ def render_audit_markdown(worker_session_id: str, rows: list[LedgerRow], gate: A
     ])
 
     if gate is not None:
-        containing = {r.span for r in rows if r.span is not None and r.span[0] <= gate.event <= r.span[1]}
+        containing = {
+            r.span for r in rows
+            if r.span is not None and r.verdict != "RESOLVED" and r.span[0] <= gate.event <= r.span[1]
+        }
         gate_span = min(containing, key=lambda span: (span[1] - span[0], -span[1]), default=None)
         premises = [r for r in rows if gate_span is not None and r.span == gate_span and r.verdict != "RESOLVED"]
         out += ["", "## Pending question", "", f"Worker event {gate.event} is waiting on this `ask_user` question.", ""]
@@ -639,26 +672,32 @@ def render_audit_markdown(worker_session_id: str, rows: list[LedgerRow], gate: A
     else:
         out.append("None.")
 
-    recent_wakes = sorted(wakes.items(), key=lambda item: -item[1][0].line)[:WAKE_LIMIT]
+    recent_wakes = sorted(wakes.items(), key=lambda item: -item[1][-1].line)[:WAKE_LIMIT]
     out += ["", f"## Recent wakes (last {len(recent_wakes)} of {len(wakes)})", ""]
-    out += table(("Event range", "Trigger", "Audited", "Verdicts"), [
-        (
-            label(key), cell(", ".join(dict.fromkeys(r.trigger for r in group)), 60), cell(group[-1].ts[:16], 16),
-            verdict_summary(Counter(r.verdict for r in group)),
-        )
-        for key, group in recent_wakes
-    ])
+    if recent_wakes:
+        out += table(("Event range", "Trigger", "Audited", "Verdicts"), [
+            (
+                label(key), cell(", ".join(dict.fromkeys(r.trigger for r in group)), 60), cell(group[-1].ts[:16], 16),
+                verdict_summary(Counter(r.verdict for r in group)),
+            )
+            for key, group in recent_wakes
+        ])
+    else:
+        out.append("None.")
 
     claims = [r for r in newest if r.verdict not in ("REFUTED", "RESOLVED")][:CLAIM_LIMIT]
     out += ["", f"## Recent claims (last {len(claims)})", ""]
-    out += table(("Line", "Event range", "Verdict", "Claim", "Observed fact"), [
-        (f"L{r.line}", label(r.wake_key), cell(r.verdict, 40), cell(r.claim, 200), cell(r.observed, 240)) for r in claims
-    ])
+    if claims:
+        out += table(("Line", "Event range", "Verdict", "Claim", "Observed fact"), [
+            (f"L{r.line}", label(r.wake_key), cell(r.verdict, 40), cell(r.claim, 200), cell(r.observed, 240)) for r in claims
+        ])
+    else:
+        out.append("None.")
 
     out += ["", f"## Resolved refutations ({len(resolutions)})", ""]
     if resolutions:
         out += table(("Line", "Resolved by", "Claim", "Fix evidence"), [
-            (f"L{ref.line}", f"L{res.line}", cell(ref.claim, 160), cell(res.evidence, 120))
+            (f"L{ref.line}", f"L{res.line}", cell(ref.claim, 160), cell(res.evidence or res.observed, 120))
             for ref, res in resolutions[:RESOLVED_LIMIT]
         ])
         if len(resolutions) > RESOLVED_LIMIT:
@@ -687,12 +726,27 @@ def sync_audit_markdown(
         rows = read_ledger(out_dir)
     if not rows:
         return
+    if worker_session_id == "unknown":
+        for name in ("double-cursor.json", "double-lifecycle.json"):
+            try:
+                saved = json.loads((out_dir / name).read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(saved, dict) and isinstance(saved.get("worker_session_id"), str) and saved["worker_session_id"]:
+                worker_session_id = saved["worker_session_id"]
+                break
+    if lines is None and worker_session_id != "unknown":
+        ev_file = copilot_home() / "session-state" / worker_session_id / "events.jsonl"
+        if ev_file.exists():
+            lines = ev_file.read_text(encoding="utf-8", errors="replace").splitlines()
+            own_start = find_own_session_start(lines, worker_session_id)
     md_file = out_dir / "double-audit.md"
     rendered = render_audit_markdown(worker_session_id, rows, find_open_ask_gate(lines or [], own_start))
     if md_file.exists() and md_file.read_text(encoding="utf-8", errors="replace") == rendered:
         return
     temporary = md_file.with_name(f"{md_file.name}.{os.getpid()}.tmp")
-    temporary.write_text(rendered, encoding="utf-8", newline="\n")
+    with temporary.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(rendered)
     temporary.replace(md_file)
 
 
