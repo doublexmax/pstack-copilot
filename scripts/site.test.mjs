@@ -100,3 +100,34 @@ test('Double documents its provenance, verifier selection, and supervision limit
   assert.match(install, /Python/);
   assert.match(install, /runtime extension/i);
 });
+
+test('README separates Double additions from upstream adaptations', () => {
+  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  assert.match(readme, /\]\(#double-supervisor\)/);
+  const double = readme.match(/(?:^|\n)## double supervisor\r?\n([\s\S]*?)(?:\r?\n## |$)/)?.[1];
+  assert.ok(double, 'Missing Double supervisor section');
+  assert.match(double, /^### attach double\r?$/m);
+  assert.match(double, /\[@doublexmax\]\(https:\/\/github\.com\/doublexmax\)/);
+  assert.match(double, /not (?:available )?in upstream/i);
+  assert.match(double, /cursor\/plugins/);
+  const upstream = readme.match(/(?:^|\n)## what changed from upstream\r?\n([\s\S]*?)(?:\r?\n## |$)/)[1];
+  assert.match(upstream, /^### port adaptations\r?$/m);
+  assert.match(upstream, /^### custom additions\r?$/m);
+  assert.ok(upstream.indexOf('### port adaptations') < upstream.indexOf('### custom additions'));
+  const additions = upstream.split('### custom additions')[1];
+  assert.match(additions, /@doublexmax/);
+  assert.match(additions, /not (?:available )?in upstream/i);
+  assert.match(additions, /cursor\/plugins/);
+  assert.match(additions, /\]\(\.\/docs\/upstream-sync\.md#local-only-files\)/);
+  const alwaysOn = readme.match(/(?:^|\n)## always-on\r?\n([\s\S]*?)(?:\r?\n## |$)/)[1];
+  assert.match(alwaysOn, /five user-scoped changes/);
+  assert.match(alwaysOn, /~\/\.copilot\/extensions\/double\/extension\.mjs/);
+  assert.match(alwaysOn, /`--uninstall`[^.]*double runtime extension/);
+  assert.match(alwaysOn, /`--hooks skip`[^.]*double runtime extension[^.]*unchanged/);
+  assert.match(alwaysOn, /`--hooks remove`[^.]*double runtime extension/);
+  const skill = readme.split(/\r?\n/).find((line) => line.startsWith('| [`/double`]'));
+  assert.match(skill, /prefer[^|]*vendor family/);
+  assert.match(skill, /configured[^|]*pool/);
+  assert.match(skill, /custom[^|]*@doublexmax/);
+  assert.doesNotMatch(readme, /pstack also ships \[Double\]|on another model family/i);
+});
