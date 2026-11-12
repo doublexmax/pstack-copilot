@@ -117,11 +117,13 @@ const cases = {
     const configOnce = readFileSync(h.config, 'utf8');
     const profileOnce = h.readProfile();
     const hooksOnce = readFileSync(join(h.copilotDir, 'hooks', 'pstack-context.json'), 'utf8');
+    const doubleHookOnce = readFileSync(join(h.copilotDir, 'hooks', 'pstack-double.json'), 'utf8');
     h.run();
     assert.strictEqual(h.read(), once);
     assert.strictEqual(readFileSync(h.config, 'utf8'), configOnce);
     assert.strictEqual(h.readProfile(), profileOnce);
     assert.strictEqual(readFileSync(join(h.copilotDir, 'hooks', 'pstack-context.json'), 'utf8'), hooksOnce);
+    assert.strictEqual(readFileSync(join(h.copilotDir, 'hooks', 'pstack-double.json'), 'utf8'), doubleHookOnce);
     h.cleanup();
   },
   'foreign content survives install and uninstall byte-identical'() {
@@ -321,6 +323,7 @@ const cases = {
       h.run('--hooks', 'remove');
       delete before['.copilot/hooks/pstack-context.json'];
       delete before['.copilot/hooks/context-hook.mjs'];
+      delete before['.copilot/hooks/pstack-double.json'];
       delete before['.copilot/extensions/double/extension.mjs'];
       assert.deepStrictEqual(snapshot(h.home), before);
     } finally { h.cleanup(); }
@@ -468,6 +471,12 @@ const cases = {
       input: JSON.stringify({ toolName: 'task', toolArgs: { name: 'ordinary', prompt: 'Read one file.' } }),
     });
     assert.deepStrictEqual(JSON.parse(output), {});
+    const extension = join(h.copilotDir, 'extensions', 'double', 'extension.mjs');
+    const ordinary = execFileSync(process.execPath, [extension, '--pstack-double-hook', 'preToolUse'], {
+      env: { ...process.env, COPILOT_HOME: h.copilotDir }, encoding: 'utf8',
+      input: JSON.stringify({ sessionId: 'unattached', toolName: 'send_session_message', toolArgs: { message: 'Ready.' } }),
+    });
+    assert.strictEqual(ordinary, '{}\n');
     const brokenRoot = join(h.home, 'broken-checkout');
     mkdirSync(join(brokenRoot, 'scripts'), { recursive: true });
     writeFileSync(join(brokenRoot, 'scripts', 'install-always-on.mjs'), readFileSync(script));
@@ -477,6 +486,8 @@ const cases = {
     });
     assert.strictEqual(existsSync(entry), false);
     assert.strictEqual(existsSync(join(h.copilotDir, 'hooks', 'pstack-context.json')), false);
+    assert.strictEqual(existsSync(join(h.copilotDir, 'hooks', 'pstack-double.json')), false);
+    assert.strictEqual(existsSync(extension), false);
     h.cleanup();
   },
   'fresh hook skip installs the other integration without native hook files'() {
@@ -489,6 +500,8 @@ const cases = {
       assert.ok(existsSync(h.bin('pstack.cmd')));
       assert.strictEqual(existsSync(join(h.copilotDir, 'hooks', 'pstack-context.json')), false);
       assert.strictEqual(existsSync(join(h.copilotDir, 'hooks', 'context-hook.mjs')), false);
+      assert.strictEqual(existsSync(join(h.copilotDir, 'hooks', 'pstack-double.json')), false);
+      assert.strictEqual(existsSync(join(h.copilotDir, 'extensions', 'double', 'extension.mjs')), false);
       const once = snapshot(h.home);
       h.run('--hooks', 'skip');
       assert.deepStrictEqual(snapshot(h.home), once);
@@ -501,11 +514,15 @@ const cases = {
       const dir = join(h.copilotDir, 'hooks');
       writeFileSync(join(dir, 'context-hook.mjs'), 'user entry\n');
       writeFileSync(join(dir, 'pstack-context.json'), '{invalid but untouched}\n');
+      writeFileSync(join(dir, 'pstack-double.json'), '{foreign double guard}\n');
+      const extension = join(h.copilotDir, 'extensions', 'double', 'extension.mjs');
+      writeFileSync(extension, 'foreign extension\n');
       const hooks = snapshot(dir);
       writeFileSync(h.target, 'my notes\n');
       h.run('--hooks', 'skip');
       assert.ok(h.read().startsWith('my notes\n\n<!-- pstack:begin poteto-mode -->'));
       assert.deepStrictEqual(snapshot(dir), hooks);
+      assert.strictEqual(readFileSync(extension, 'utf8'), 'foreign extension\n');
     } finally { h.cleanup(); }
   },
   'hook-only removal preserves instructions, policy, models, trust, wrappers, agents, and session state'() {
@@ -527,12 +544,14 @@ const cases = {
       const expected = { ...before };
       delete expected['.copilot/hooks/pstack-context.json'];
       delete expected['.copilot/hooks/context-hook.mjs'];
+      delete expected['.copilot/hooks/pstack-double.json'];
       delete expected['.copilot/extensions/double/extension.mjs'];
       h.run('--hooks', 'remove', '--dry-run');
       assert.deepStrictEqual(snapshot(h.home), before);
       h.run('--hooks', 'remove');
       assert.strictEqual(existsSync(join(dir, 'hooks', 'pstack-context.json')), false);
       assert.strictEqual(existsSync(join(dir, 'hooks', 'context-hook.mjs')), false);
+      assert.strictEqual(existsSync(join(dir, 'hooks', 'pstack-double.json')), false);
       assert.strictEqual(existsSync(join(dir, 'extensions', 'double')), false);
       assert.deepStrictEqual(snapshot(h.home), expected);
       h.run('--hooks', 'remove');
@@ -552,6 +571,8 @@ const cases = {
       });
       assert.strictEqual(existsSync(join(h.copilotDir, 'hooks', 'context-hook.mjs')), false);
       assert.strictEqual(existsSync(join(h.copilotDir, 'hooks', 'pstack-context.json')), false);
+      assert.strictEqual(existsSync(join(h.copilotDir, 'hooks', 'pstack-double.json')), false);
+      assert.strictEqual(existsSync(join(h.copilotDir, 'extensions', 'double', 'extension.mjs')), false);
       assert.strictEqual(h.read(), before);
     } finally { h.cleanup(); }
   },
@@ -560,6 +581,8 @@ const cases = {
       ['pstack-context.json', '{"version":1,"hooks":{}}\n', /foreign hook file/],
       ['pstack-context.json', '{\n', /invalid hook file/],
       ['context-hook.mjs', 'user entry\n', /foreign hook entry/],
+      ['pstack-double.json', '{"version":1,"hooks":{}}\n', /foreign hook file/],
+      ['pstack-double.json', '{\n', /invalid hook file/],
     ]) {
       const h = withHome();
       try {
@@ -573,24 +596,42 @@ const cases = {
       } finally { h.cleanup(); }
     }
   },
-  'double extension binds the installing clone and follows the hook lifecycle'() {
+  'double runtime binds the installing clone and installs one native wake guard'() {
     const h = withHome();
     try {
       const file = join(h.copilotDir, 'extensions', 'double', 'extension.mjs');
+      const guardFile = join(h.copilotDir, 'hooks', 'pstack-double.json');
       h.run('--skip-trust', '--skip-shell');
       const installed = readFileSync(file, 'utf8');
       assert.ok(installed.includes(`const pstackRoot = ${JSON.stringify(root)};`), 'bound to this clone');
       assert.ok(!installed.includes('".copilot", "pstack"'), 'default root replaced');
       assert.ok(existsSync(join(root, 'skills', 'double', 'scripts', 'double_watch.py')), 'bound watcher exists');
+      const guard = JSON.parse(readFileSync(guardFile, 'utf8'));
+      assert.deepStrictEqual(guard, {
+        version: 1,
+        hooks: {
+          preToolUse: [{
+            type: 'command', exec: process.execPath,
+            args: [file, '--pstack-double-hook', 'preToolUse'],
+            env: { PSTACK_DOUBLE_MANAGED: '1' }, matcher: 'send_session_message', timeoutSec: 10,
+          }],
+        },
+      });
+      assert.strictEqual(execFileSync(guard.hooks.preToolUse[0].exec, guard.hooks.preToolUse[0].args, {
+        input: JSON.stringify({ toolName: 'send_session_message', toolArgs: { message: 'Ready.' } }),
+        env: { ...process.env, COPILOT_HOME: h.copilotDir }, encoding: 'utf8',
+      }), '{}\n');
       const once = snapshot(h.home);
       h.run('--skip-trust', '--skip-shell');
       assert.deepStrictEqual(snapshot(h.home), once);
       h.run('--hooks', 'remove');
+      assert.strictEqual(existsSync(guardFile), false);
       assert.strictEqual(existsSync(join(h.copilotDir, 'extensions', 'double')), false);
       h.run('--skip-trust', '--skip-shell');
       assert.strictEqual(readFileSync(file, 'utf8'), installed);
       h.run('--uninstall', '--skip-trust', '--skip-shell');
       assert.strictEqual(existsSync(file), false);
+      assert.strictEqual(existsSync(guardFile), false);
       mkdirSync(dirname(file), { recursive: true });
       writeFileSync(file, 'user extension\n');
       const before = snapshot(h.home);
@@ -599,6 +640,67 @@ const cases = {
       assert.deepStrictEqual(snapshot(h.home), before);
       h.run('--hooks', 'skip', '--skip-trust', '--skip-shell');
       assert.strictEqual(readFileSync(file, 'utf8'), 'user extension\n');
+    } finally { h.cleanup(); }
+  },
+  'double guard ownership rejects every foreign shape before install, removal, or dry-run writes'() {
+    const h = withHome();
+    try {
+      h.run('--skip-trust', '--skip-shell');
+      const guardFile = join(h.copilotDir, 'hooks', 'pstack-double.json');
+      const entry = {
+        type: 'command', exec: process.execPath,
+        args: [join(h.copilotDir, 'extensions', 'double', 'extension.mjs'), '--pstack-double-hook', 'preToolUse'],
+        env: { PSTACK_DOUBLE_MANAGED: '1' }, matcher: 'send_session_message', timeoutSec: 10,
+      };
+      for (const patch of [
+        { type: 'shell' }, { exec: null }, { matcher: '*' },
+        { env: { PSTACK_DOUBLE_MANAGED: '1', FOREIGN: '1' } },
+        { args: ['foreign.mjs', '--pstack-double-hook', 'preToolUse'] },
+        { args: [...entry.args, 'extra'] }, { args: [entry.args[0], '--foreign', 'preToolUse'] },
+        { args: [entry.args[0], '--pstack-double-hook', 'postToolUse'] }, { extra: 'foreign' },
+      ]) {
+        writeFileSync(guardFile, JSON.stringify({ version: 1, hooks: { preToolUse: [{ ...entry, ...patch }] } }));
+        const before = snapshot(h.home);
+        for (const args of [
+          ['--skip-trust', '--skip-shell'], ['--hooks', 'remove'], ['--hooks', 'remove', '--dry-run'],
+          ['--uninstall', '--skip-trust', '--skip-shell'],
+        ]) {
+          assert.throws(() => h.run(...args), /refusing to replace a foreign hook file/);
+          assert.deepStrictEqual(snapshot(h.home), before);
+        }
+      }
+      for (const value of [
+        { version: 2, hooks: { preToolUse: [entry] } },
+        { version: 1, hooks: { preToolUse: [entry], postToolUse: [entry] } },
+        { version: 1, hooks: { preToolUse: [entry, entry] } },
+        { version: 1, hooks: { preToolUse: [entry] }, extra: true },
+      ]) {
+        writeFileSync(guardFile, JSON.stringify(value));
+        const before = snapshot(h.home);
+        assert.throws(() => h.run('--hooks', 'remove'), /refusing to replace a foreign hook file/);
+        assert.deepStrictEqual(snapshot(h.home), before);
+      }
+    } finally { h.cleanup(); }
+  },
+  'double runtime refuses a source without its native hook entry before any write'() {
+    const h = withHome();
+    try {
+      const clone = join(h.home, 'incomplete-checkout');
+      for (const file of [
+        'scripts/install-always-on.mjs', 'scripts/context-hook.mjs', 'scripts/context-routing.mjs',
+        'context.default.json', 'models.default.md', 'always-on/copilot-instructions.md', 'extensions/double/extension.mjs',
+      ]) {
+        mkdirSync(dirname(join(clone, file)), { recursive: true });
+        copyFileSync(join(root, file), join(clone, file));
+      }
+      const source = join(clone, 'extensions', 'double', 'extension.mjs');
+      writeFileSync(source, readFileSync(source, 'utf8').replace('export const NATIVE_HOOK_FLAG = "--pstack-double-hook";', ''));
+      const before = snapshot(h.home);
+      assert.throws(() => execFileSync(process.execPath,
+        [join(clone, 'scripts', 'install-always-on.mjs'), '--skip-trust', '--skip-shell'], {
+          env: { ...process.env, COPILOT_HOME: h.copilotDir }, encoding: 'utf8',
+        }), /missing .*native hook|missing .*hook entry/);
+      assert.deepStrictEqual(snapshot(h.home), before);
     } finally { h.cleanup(); }
   },
   'dry-run with either install or skip writes nothing'() {

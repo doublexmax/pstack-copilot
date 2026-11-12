@@ -1447,6 +1447,7 @@ print(json.dumps(observations))
 function extensionHarness(t, { sessionId = 'worker-ext', marker = true, workerRunning = 0, doubleRunning = 0 } = {}) {
   const base = mkdtempSync(join(tmpdir(), 'double-ext-test-'));
   t.after(() => rmSync(base, { recursive: true, force: true }));
+  const extCopy = join(base, 'extension.mjs');
   const sdkDir = join(base, 'node_modules', '@github', 'copilot-sdk');
   mkdirSync(sdkDir, { recursive: true });
   writeFileSync(join(sdkDir, 'package.json'), JSON.stringify({
@@ -1455,8 +1456,11 @@ function extensionHarness(t, { sessionId = 'worker-ext', marker = true, workerRu
     exports: { './extension': './extension.mjs' },
   }));
   writeFileSync(join(sdkDir, 'extension.mjs'), `
-export let registeredHooks;
+import { execFileSync } from 'node:child_process';
+export let joinConfig;
 export const deliveries = [];
+export const guardDecisions = [];
+export const registrations = { listeners: 0, intervals: [] };
 const listeners = new Set();
 let deliveryError;
 let deliveryResult;
@@ -1473,9 +1477,12 @@ async function deliver(value) {
 export const session = {
   sessionId: process.env.DOUBLE_TEST_SESSION_ID,
   rpc: { tools: { execute: async (request) => {
-    const decision = await registeredHooks?.onPreToolUse?.({
-      toolName: request.name, toolArgs: request.arguments,
-    }, { sessionId: session.sessionId });
+    const decision = JSON.parse(execFileSync(process.execPath,
+      [${JSON.stringify(extCopy)}, '--pstack-double-hook', 'preToolUse'], {
+        input: JSON.stringify({ sessionId: session.sessionId, toolName: request.name, toolArgs: request.arguments }),
+        encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 5000,
+      }));
+    guardDecisions.push(decision);
     if (decision?.permissionDecision === 'deny') {
       return {
         resultType: 'denied',
@@ -1491,10 +1498,10 @@ export const session = {
     return deliver({ transport: 'rpc', ...request });
   } } },
   send: async (request) => deliver({ transport: 'send', ...request }),
-  on: (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
+  on: (listener) => { registrations.listeners += 1; listeners.add(listener); return () => listeners.delete(listener); },
 };
 export async function emit(event) { await Promise.all([...listeners].map((listener) => listener(event))); }
-export async function joinSession(cfg) { registeredHooks = cfg.hooks; return session; }
+export async function joinSession(cfg) { joinConfig = cfg; return session; }
 `);
 
   const customHome = join(base, 'copilot-home');
@@ -1514,7 +1521,6 @@ export async function joinSession(cfg) { registeredHooks = cfg.hooks; return ses
   db.prepare('INSERT INTO chat_parent_links VALUES (?, ?)').run('double-child-99', 'worker-ext');
   db.close();
 
-  const extCopy = join(base, 'extension.mjs');
   const extSrc = readFileSync(join(root, 'extensions', 'double', 'extension.mjs'), 'utf8')
     .replace('const pstackRoot = join(homedir(), ".copilot", "pstack");', `const pstackRoot = ${JSON.stringify(root)};`);
   writeFileSync(extCopy, extSrc);
@@ -1522,18 +1528,25 @@ export async function joinSession(cfg) { registeredHooks = cfg.hooks; return ses
   const statePath = join(outDir, 'double-lifecycle.json');
   return {
     base, customHome, outDir, statePath, workerDir,
+    hook(event, phase = 'preToolUse') {
+      return spawnSync(process.execPath, [extCopy, '--pstack-double-hook', phase], {
+        cwd: base,
+        env: { ...process.env, COPILOT_HOME: customHome, DOUBLE_TEST_SESSION_ID: sessionId },
+        input: JSON.stringify(event), encoding: 'utf8', timeout: 5000,
+      });
+    },
     run(code) {
       const runner = join(base, 'run.mjs');
       writeFileSync(runner, `
-import './extension.mjs';
-import { registeredHooks, session, deliveries, emit, failNextDelivery, denyNextDeliveryResult } from '@github/copilot-sdk/extension';
+import { joinConfig, session, deliveries, guardDecisions, registrations, emit, failNextDelivery, denyNextDeliveryResult } from '@github/copilot-sdk/extension';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { setTimeout as sleep } from 'node:timers/promises';
-const inv = { sessionId: ${JSON.stringify(sessionId)} };
 const statePath = ${JSON.stringify(statePath)};
+const grantPath = ${JSON.stringify(join(outDir, 'double-wake-grant.json'))};
 const readState = () => existsSync(statePath) ? JSON.parse(readFileSync(statePath, 'utf8')) : null;
 const writeState = (state) => writeFileSync(statePath, JSON.stringify(state));
+const attachWorker = () => writeFileSync(${JSON.stringify(join(workerDir, 'double-supervised'))}, 'double-child-99\\n');
 const setRunning = (id, value) => {
   const db = new DatabaseSync(${JSON.stringify(join(customHome, 'data.db'))});
   db.prepare('UPDATE sessions SET is_running = ? WHERE id = ?').run(value, id);
@@ -1544,6 +1557,15 @@ const waitUntil = async (condition) => {
   while (!condition() && Date.now() < deadline) await sleep(20);
   if (!condition()) throw new Error('Expected runtime wake or lifecycle transition was not observed.');
 };
+const originalSetInterval = globalThis.setInterval;
+globalThis.setInterval = (callback, milliseconds) => {
+  registrations.intervals.push(milliseconds);
+  return originalSetInterval(callback, milliseconds);
+};
+const { guardPreToolUse } = await import('./extension.mjs');
+const guard = (toolArgs, options = {}) => guardPreToolUse({
+  sessionId: session.sessionId, toolName: 'send_session_message', toolArgs,
+}, { home: ${JSON.stringify(customHome)}, ...options });
 ${code}
 `);
       return JSON.parse(execFileSync(process.execPath, [runner], {
@@ -1576,21 +1598,27 @@ function wakePrompt(harness) {
   return `Parent session active; run python "${watchScript}" worker-ext --wait --out-dir "${harness.outDir}" and append audit rows to double-audit.tsv in "${harness.outDir}".`;
 }
 
-test('worker hooks dispatch one runtime wake through pre-tool hooks and deny identical model wake prompts', (t) => {
+test('extension startup requests no SDK hooks or permission capabilities', (t) => {
+  const harness = extensionHarness(t, { marker: false });
+  const result = harness.run(`
+console.log(JSON.stringify({ joinConfig, registrations }));
+`);
+  assert.deepEqual(result, { joinConfig: {}, registrations: { listeners: 1, intervals: [] } });
+});
+
+test('hook-free startup joins with an empty config and worker events dispatch one authorized native wake', (t) => {
   const harness = extensionHarness(t);
   const result = harness.run(`
-const results = [];
-for (const name of ['onSessionStart', 'onUserPromptSubmitted', 'onPreToolUse', 'onPostToolUse', 'onPostToolUseFailure', 'onSessionEnd']) {
-  results.push(await registeredHooks[name]?.({ toolName: 'view' }, inv));
+for (const type of ['user.message', 'tool.execution_start', 'tool.execution_complete', 'session.shutdown']) {
+  await emit({ type, data: { toolCallId: 'ordinary', toolName: 'view' } });
 }
-await Promise.all(Array.from({ length: 10 }, () => registeredHooks.onPostToolUse({ toolName: 'view' }, inv)));
-const denied = await registeredHooks.onPreToolUse({
-  toolName: 'send_session_message',
-  toolArgs: { session_id: 'double-child-99', message: ${JSON.stringify(wakePrompt(harness))} },
-}, inv);
-console.log(JSON.stringify({ results, deliveries, denied, state: readState() }));
+await Promise.all(Array.from({ length: 10 }, () => emit({ type: 'tool.execution_complete' })));
+const denied = guard({ session_id: 'double-child-99', message: ${JSON.stringify(wakePrompt(harness))} });
+console.log(JSON.stringify({ joinConfig, registrations, deliveries, guardDecisions, denied, state: readState() }));
 `);
-  assert.deepEqual(result.results, [null, null, null, null, null, null]);
+  assert.deepEqual(result.joinConfig, {});
+  assert.deepEqual(result.registrations, { listeners: 1, intervals: [] });
+  assert.deepEqual(result.guardDecisions, [{}]);
   assert.deepEqual(result.deliveries, [{
     transport: 'rpc',
     name: 'send_session_message',
@@ -1609,24 +1637,244 @@ console.log(JSON.stringify({ results, deliveries, denied, state: readState() }))
   });
 });
 
+test('a worker turn never masks its idle Double and unsupervised events start no timer', (t) => {
+  const harness = extensionHarness(t, { marker: false });
+  const result = harness.run(`
+await emit({ type: 'assistant.turn_start' });
+await emit({ type: 'user.message' });
+const before = { state: readState(), registrations: { ...registrations, intervals: [...registrations.intervals] } };
+attachWorker();
+await emit({ type: 'assistant.turn_start' });
+console.log(JSON.stringify({ before, registrations, deliveries, state: readState() }));
+`);
+  assert.deepEqual(result.before, { state: null, registrations: { listeners: 1, intervals: [] } });
+  assert.deepEqual(result.registrations, { listeners: 1, intervals: [] });
+  assert.deepEqual(result.deliveries, [{
+    transport: 'rpc', name: 'send_session_message',
+    arguments: { session_id: 'double-child-99', delivery_mode: 'immediate', message: wakePrompt(harness) },
+  }]);
+  assert.equal(result.state.phase, 'wake_pending');
+  assert.equal(result.state.wake_count, 1);
+});
+
+test('ordinary guard calls and ignored streaming events do no filesystem work', (t) => {
+  const harness = extensionHarness(t, { marker: false });
+  const result = harness.run(`
+const fs = (await import('node:fs')).default;
+const { syncBuiltinESMExports } = await import('node:module');
+const originals = {};
+const accesses = [];
+for (const name of ['existsSync', 'readFileSync', 'statSync', 'mkdirSync', 'renameSync', 'rmSync', 'writeFileSync']) {
+  originals[name] = fs[name];
+  fs[name] = (...args) => { accesses.push(name); throw new Error('Unexpected filesystem work: ' + name); };
+}
+syncBuiltinESMExports();
+let decisions;
+try {
+  decisions = [
+    guardPreToolUse({ toolName: 'view' }, { home: ${JSON.stringify(harness.customHome)} }),
+    guard({ session_id: 'double-child-99', message: 'The artifact is ready.' }),
+  ];
+  for (const type of ['assistant.message_delta', 'tool.execution_partial_result', 'hook.start', 'hook.end']) {
+    await emit({ type, data: { hookType: 'preToolUse' } });
+  }
+} finally {
+  for (const [name, original] of Object.entries(originals)) fs[name] = original;
+  syncBuiltinESMExports();
+}
+console.log(JSON.stringify({ decisions, accesses, registrations, joinConfig }));
+`);
+  assert.deepEqual(result, {
+    decisions: [{}, {}], accesses: [], registrations: { listeners: 1, intervals: [] }, joinConfig: {},
+  });
+});
+
+for (const startShape of ['arguments', 'toolArgs', 'top-level']) {
+  test(`failed RPC wake echoes with ${startShape} track toolCallId through nameless completion`, (t) => {
+    const harness = extensionHarness(t, { marker: false });
+    const result = harness.run(`
+attachWorker();
+const originalExecute = session.rpc.tools.execute;
+session.rpc.tools.execute = async (request) => {
+  const data = { toolCallId: 'wake-call', toolName: request.name, [${JSON.stringify(startShape === 'toolArgs' ? 'toolArgs' : 'arguments')}]: request.arguments };
+  await emit(${JSON.stringify(startShape)} === 'top-level'
+    ? { type: 'tool.execution_start', toolCallId: data.toolCallId, toolName: data.toolName, toolArgs: request.arguments }
+    : { type: 'tool.execution_start', data });
+  return originalExecute(request);
+};
+denyNextDeliveryResult({ resultType: 'failure', error: { message: 'Wake rejected.' } });
+await emit({ type: 'user.message' });
+const failed = readState();
+await emit({ type: 'tool.execution_complete', data: { toolCallId: 'wake-call', success: false } });
+const afterEcho = readState();
+await emit({ type: 'tool.execution_complete', data: { toolCallId: 'wake-call', success: true } });
+console.log(JSON.stringify({ failed, afterEcho, retried: readState(), deliveries }));
+`);
+    assert.deepEqual({
+      phase: result.failed.phase, wake_count: result.failed.wake_count, wake_accepted: result.failed.wake_accepted,
+    }, { phase: 'idle', wake_count: 1, wake_accepted: false });
+    assert.deepEqual(result.afterEcho, result.failed);
+    assert.deepEqual({
+      phase: result.retried.phase, wake_count: result.retried.wake_count, wake_accepted: result.retried.wake_accepted,
+    }, { phase: 'wake_pending', wake_count: 2, wake_accepted: true });
+    assert.deepEqual(result.deliveries, [{
+      transport: 'rpc', name: 'send_session_message',
+      arguments: { session_id: 'double-child-99', delivery_mode: 'immediate', message: wakePrompt(harness) },
+    }]);
+  });
+}
+
+test('a wrong model wake leaves an in-flight grant for the exact native runtime wake and replay is denied', (t) => {
+  const harness = extensionHarness(t, { marker: false });
+  const result = harness.run(`
+attachWorker();
+const originalExecute = session.rpc.tools.execute;
+let grant;
+let afterWrong;
+let wrongDecision;
+let replay;
+session.rpc.tools.execute = async (request) => {
+  grant = JSON.parse(readFileSync(grantPath, 'utf8'));
+  wrongDecision = guard({ ...request.arguments, message: 'Run double_watch.py worker-ext --wait with a different prompt.' });
+  afterWrong = JSON.parse(readFileSync(grantPath, 'utf8'));
+  const result = await originalExecute(request);
+  replay = guard(request.arguments);
+  return result;
+};
+await emit({ type: 'user.message' });
+console.log(JSON.stringify({
+  grant, afterWrong, wrongDecision, replay, deliveries, guardDecisions,
+  issuerPid: process.pid, grantRemains: existsSync(grantPath), state: readState(),
+}));
+`);
+  assert.deepEqual(result.wrongDecision, {
+    permissionDecision: 'deny', permissionDecisionReason: 'Double supervisor activation is runtime-owned.',
+  });
+  assert.deepEqual(result.afterWrong, result.grant);
+  assert.match(result.grant.grant_id, /^[0-9a-f]{8}-[0-9a-f-]{27}$/);
+  assert.deepEqual({
+    protocol: result.grant.protocol, issuer_pid: result.grant.issuer_pid,
+    worker_session_id: result.grant.worker_session_id, double_session_id: result.grant.double_session_id,
+    wake_count: result.grant.wake_count, message: result.grant.message,
+  }, {
+    protocol: 'pstack-double-wake-grant-v1', issuer_pid: result.issuerPid,
+    worker_session_id: 'worker-ext', double_session_id: 'double-child-99', wake_count: 1, message: wakePrompt(harness),
+  });
+  assert.equal(Number.isSafeInteger(result.grant.expires_at), true);
+  assert.deepEqual(result.guardDecisions, [{}]);
+  assert.deepEqual(result.replay, result.wrongDecision);
+  assert.equal(result.grantRemains, false);
+  assert.equal(result.state.wake_accepted, true);
+  assert.deepEqual(result.deliveries, [{
+    transport: 'rpc', name: 'send_session_message',
+    arguments: { session_id: 'double-child-99', delivery_mode: 'immediate', message: wakePrompt(harness) },
+  }]);
+});
+
+test('native guard denies dead, expired, malformed, and mismatched grants without consuming them', (t) => {
+  const harness = extensionHarness(t, { marker: false });
+  const result = harness.run(`
+attachWorker();
+const now = Date.now();
+const valid = {
+  protocol: 'pstack-double-wake-grant-v1', grant_id: 'fixture-grant', issuer_pid: process.pid,
+  worker_session_id: 'worker-ext', double_session_id: 'double-child-99', wake_count: 1,
+  message: ${JSON.stringify(wakePrompt(harness))}, expires_at: now + 15000,
+};
+const input = { session_id: 'double-child-99', message: valid.message };
+const invalid = [
+  { issuer_pid: 2147483647 }, { expires_at: now - 1 }, { protocol: 'foreign' },
+  { worker_session_id: 'other-worker' }, { double_session_id: 'other-double' },
+  { wake_count: 0 }, { wake_count: 1.5 }, { message: 'different --wait prompt' }, { expires_at: 'later' },
+];
+const denied = invalid.map((patch) => {
+  const bytes = JSON.stringify({ ...valid, ...patch });
+  writeFileSync(grantPath, bytes);
+  const decision = guard(JSON.stringify(input), { now });
+  return { decision, intact: readFileSync(grantPath, 'utf8') === bytes };
+});
+writeFileSync(grantPath, '{invalid');
+const malformed = guard(input, { now });
+writeFileSync(grantPath, JSON.stringify(valid));
+const permitted = guard(JSON.stringify(input), { now: valid.expires_at });
+const replay = guard(input, { now });
+console.log(JSON.stringify({ denied, malformed, permitted, replay, grantRemains: existsSync(grantPath) }));
+`);
+  const deny = { permissionDecision: 'deny', permissionDecisionReason: 'Double supervisor activation is runtime-owned.' };
+  assert.deepEqual(result.denied, Array.from({ length: 9 }, () => ({ decision: deny, intact: true })));
+  assert.deepEqual(result.malformed, deny);
+  assert.deepEqual(result.permitted, {});
+  assert.deepEqual(result.replay, deny);
+  assert.equal(result.grantRemains, false);
+});
+
+test('failed RPC dispatch revokes an unconsumed grant and leaves the lifecycle idle', (t) => {
+  const harness = extensionHarness(t, { marker: false });
+  const result = harness.run(`
+attachWorker();
+let grant;
+session.rpc.tools.execute = async () => {
+  grant = JSON.parse(readFileSync(grantPath, 'utf8'));
+  throw new Error('Transport unavailable before native hooks.');
+};
+await emit({ type: 'user.message' });
+console.log(JSON.stringify({ grant, grantRemains: existsSync(grantPath), state: readState() }));
+`);
+  assert.equal(result.grant.message, wakePrompt(harness));
+  assert.equal(result.grant.wake_count, 1);
+  assert.equal(result.grantRemains, false);
+  assert.equal(result.state.phase, 'idle');
+  assert.equal(result.state.wake_accepted, false);
+});
+
+test('native stdio hook needs no SDK and ordinary messages do not load SQLite', (t) => {
+  const harness = extensionHarness(t);
+  rmSync(join(harness.base, 'node_modules'), { recursive: true, force: true });
+  for (const event of [
+    { sessionId: 'worker-ext', toolName: 'view', toolArgs: {} },
+    { sessionId: 'worker-ext', toolName: 'send_session_message', toolArgs: { session_id: 'double-child-99', message: 'Ready.' } },
+    { sessionId: '../unsafe', toolName: 'send_session_message', toolArgs: { session_id: 'double-child-99', message: '--wait' } },
+  ]) {
+    const hook = harness.hook(event);
+    assert.equal(hook.status, 0, hook.stderr);
+    assert.equal(hook.stdout, '{}\n');
+    assert.equal(hook.stderr, '');
+  }
+  const wake = harness.hook({
+    sessionId: 'worker-ext', toolName: 'send_session_message',
+    toolArgs: JSON.stringify({ session_id: 'double-child-99', message: wakePrompt(harness) }),
+  });
+  assert.equal(wake.status, 0, wake.stderr);
+  assert.deepEqual(JSON.parse(wake.stdout), {
+    permissionDecision: 'deny', permissionDecisionReason: 'Double supervisor activation is runtime-owned.',
+  });
+  const unrelated = harness.hook({
+    sessionId: 'unattached', toolName: 'send_session_message',
+    toolArgs: { session_id: 'double-child-99', message: '--wait' },
+  });
+  assert.equal(unrelated.status, 0, unrelated.stderr);
+  assert.equal(unrelated.stdout, '{}\n');
+  assert.equal(harness.hook({}, 'postToolUse').stdout, '{}\n');
+});
+
 for (const sessionId of ['worker-ext', 'double-child-99']) {
   test(`accepted wakes coalesce at 16 seconds and retry after five minutes through ${sessionId}`, (t) => {
     const harness = extensionHarness(t, { sessionId, workerRunning: 1 });
     writeFileSync(harness.statePath, JSON.stringify(lifecycleState('idle')));
     const result = harness.run(`
-await registeredHooks.onUserPromptSubmitted({}, inv);
+await emit({ type: 'user.message' });
 const accepted = readState();
 for (let retry = 0; retry < 3; retry += 1) {
   writeState({ ...readState(), updated_at: Date.now() - 16000 });
-  await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
+  await emit({ type: 'tool.execution_complete' });
 }
 const delayed = readState();
 const delayedDeliveries = deliveries.length;
 writeState({ ...readState(), double_ext_pid: process.pid, updated_at: Date.now() - 301000 });
-await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
+await emit({ type: 'tool.execution_complete' });
 const expired = readState();
 setRunning('double-child-99', 1);
-await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
+await emit({ type: 'tool.execution_complete' });
 console.log(JSON.stringify({ accepted, delayed, delayedDeliveries, expired, started: readState(), deliveries }));
 `);
     const delivery = sessionId === 'worker-ext'
@@ -1658,12 +1906,13 @@ for (const [name, deliveryResult] of [
   ['denied string result', 'Denied by preToolUse hook: Runtime-owned activation.'],
 ]) {
   test(`non-throwing ${name} resets runtime wake acceptance and permits retry`, (t) => {
-    const harness = extensionHarness(t);
+    const harness = extensionHarness(t, { marker: false });
     const result = harness.run(`
+attachWorker();
 denyNextDeliveryResult(${JSON.stringify(deliveryResult)});
-await registeredHooks.onUserPromptSubmitted({}, inv);
+await emit({ type: 'user.message' });
 const failed = readState();
-await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
+await emit({ type: 'tool.execution_complete' });
 console.log(JSON.stringify({ failed, retried: readState(), deliveries }));
 `);
     assert.deepEqual({
@@ -1684,15 +1933,15 @@ console.log(JSON.stringify({ failed, retried: readState(), deliveries }));
 test('an accepted wake retries after an interrupted supervisor and resets acceptance on failure', (t) => {
   const harness = extensionHarness(t);
   const result = harness.run(`
-await registeredHooks.onUserPromptSubmitted({}, inv);
+await emit({ type: 'user.message' });
 writeState({ ...readState(), updated_at: Date.now() - 16000 });
 const db = new DatabaseSync(${JSON.stringify(join(harness.customHome, 'data.db'))});
 db.exec("UPDATE sessions SET was_interrupted = 1 WHERE id = 'double-child-99'");
 db.close();
 failNextDelivery('interrupted transport');
-await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
+await emit({ type: 'tool.execution_complete' });
 const failed = readState();
-await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
+await emit({ type: 'tool.execution_complete' });
 console.log(JSON.stringify({ failed, retried: readState(), deliveries }));
 `);
   assert.deepEqual({
@@ -1704,22 +1953,16 @@ console.log(JSON.stringify({ failed, retried: readState(), deliveries }));
   assert.equal(result.retried.wake_count, 3);
 });
 
-test('legacy Double wake calls are denied while unrelated session messages still activate Double', (t) => {
+test('native guard denies legacy Double wakes and permits ordinary or unrelated session messages', (t) => {
   const harness = extensionHarness(t);
   const result = harness.run(`
-const unrelated = await registeredHooks.onPreToolUse({
-  toolName: 'send_session_message', toolArgs: { session_id: 'other-session', message: 'Please --wait for my next update.' },
-}, inv);
-const denied = await registeredHooks.onPreToolUse({
-  toolName: 'send_session_message', toolArgs: { session_id: 'double-child-99', message: 'Parent session active; run double_watch.py worker-ext --wait.' },
-}, inv);
-const ordinary = await registeredHooks.onPreToolUse({
-  toolName: 'send_session_message', toolArgs: { session_id: 'double-child-99', message: 'The requested artifact is ready.' },
-}, inv);
-console.log(JSON.stringify({ unrelated: unrelated ?? null, denied: denied ?? null, ordinary: ordinary ?? null, deliveries }));
+const unrelated = guard({ session_id: 'other-session', message: 'Please --wait for my next update.' });
+const denied = guard({ session_id: 'double-child-99', message: 'Parent session active; run double_watch.py worker-ext --wait.' });
+const ordinary = guard({ session_id: 'double-child-99', message: 'The requested artifact is ready.' });
+console.log(JSON.stringify({ unrelated, denied, ordinary, deliveries }));
 `);
-  assert.equal(result.unrelated, null);
-  assert.equal(result.ordinary, null);
+  assert.deepEqual(result.unrelated, {});
+  assert.deepEqual(result.ordinary, {});
   assert.deepEqual(result.denied, {
     permissionDecision: 'deny',
     permissionDecisionReason: 'Double supervisor activation is runtime-owned.',
@@ -1732,25 +1975,26 @@ console.log(JSON.stringify({ unrelated: unrelated ?? null, denied: denied ?? nul
 });
 
 test('lifecycle coalesces watching and pending activation, then retries stale connections', (t) => {
-  const harness = extensionHarness(t);
+  const harness = extensionHarness(t, { marker: false });
   const result = harness.run(`
+attachWorker();
 const observations = [];
 writeState({ ...${JSON.stringify(lifecycleState('watching'))}, monitor_pid: process.pid });
-await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
+await emit({ type: 'tool.execution_complete' });
 observations.push({ phase: readState().phase, queued: readState().queued, monitors: readState().monitors, worker_active: readState().worker_active });
 setRunning('double-child-99', 1);
 writeState(${JSON.stringify(lifecycleState('wake_pending', { queued: 1 }))});
-await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
+await emit({ type: 'tool.execution_complete' });
 observations.push({ phase: readState().phase, queued: readState().queued, monitors: readState().monitors, worker_active: readState().worker_active });
 setRunning('double-child-99', 0);
 for (const phase of ['watching', 'wake_pending']) {
   writeState({ ...${JSON.stringify(lifecycleState('idle'))}, phase, updated_at: Date.now() - 16000, monitor_pid: 2147483647 });
-  await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
+  await emit({ type: 'tool.execution_complete' });
   observations.push({ phase: readState().phase, queued: readState().queued, monitors: readState().monitors, wake_count: readState().wake_count });
 }
 for (const phase of ['watching', 'wake_pending']) {
   writeState({ ...${JSON.stringify(lifecycleState('idle'))}, phase, updated_at: Date.now() - 16000, monitor_pid: 2147483647 });
-  await registeredHooks.onSessionEnd({}, inv);
+  await emit({ type: 'session.shutdown' });
   observations.push({ phase: readState().phase, queued: readState().queued, monitors: readState().monitors, wake_count: readState().wake_count });
 }
 console.log(JSON.stringify({ observations, deliveries }));
@@ -1770,19 +2014,18 @@ console.log(JSON.stringify({ observations, deliveries }));
 });
 
 for (const sessionId of ['worker-ext', 'double-child-99']) {
-  test(`failed runtime transport through ${sessionId} leaves idle state and a later hook retries`, (t) => {
-    const harness = extensionHarness(t, { sessionId });
+  test(`failed runtime transport through ${sessionId} leaves idle state and a later event retries`, (t) => {
+    const harness = extensionHarness(t, { sessionId, marker: false });
     writeFileSync(harness.statePath, JSON.stringify(lifecycleState('idle')));
     const result = harness.run(`
+attachWorker();
 setRunning('worker-ext', 1);
 failNextDelivery('transport rejected');
-const first = await registeredHooks.onUserPromptSubmitted({}, inv);
+await emit({ type: 'user.message' });
 const failed = readState();
-const second = await registeredHooks.onPostToolUseFailure({ toolName: 'powershell' }, inv);
-console.log(JSON.stringify({ first: first ?? null, second: second ?? null, failed, retried: readState(), deliveries }));
+await emit({ type: 'tool.execution_complete', data: { toolCallId: 'failed-command', success: false } });
+console.log(JSON.stringify({ failed, retried: readState(), deliveries }));
 `);
-    assert.equal(result.first, null);
-    assert.equal(result.second, null);
     assert.deepEqual({
       phase: result.failed.phase,
       queued: result.failed.queued,
@@ -1799,20 +2042,20 @@ console.log(JSON.stringify({ first: first ?? null, second: second ?? null, faile
 test('unmarked and archived workers do not dispatch supervisor wakes', (t) => {
   const unmarked = extensionHarness(t, { marker: false });
   assert.deepEqual(unmarked.run(`
-const response = await registeredHooks.onUserPromptSubmitted({}, inv);
-console.log(JSON.stringify({ response: response ?? null, deliveries }));
-`), { response: null, deliveries: [] });
+await emit({ type: 'user.message' });
+console.log(JSON.stringify({ joinConfig, registrations, deliveries }));
+`), { joinConfig: {}, registrations: { listeners: 1, intervals: [] }, deliveries: [] });
   const archived = extensionHarness(t);
+  const db = new DatabaseSync(join(archived.customHome, 'data.db'));
+  db.exec("UPDATE sessions SET archived_at = '2026-11-02' WHERE agent = 'double'");
+  db.close();
   assert.deepEqual(archived.run(`
-const db = new DatabaseSync(${JSON.stringify(join(archived.customHome, 'data.db'))});
-db.exec("UPDATE sessions SET archived_at = '2026-11-02' WHERE agent = 'double'");
-db.close();
-const response = await registeredHooks.onUserPromptSubmitted({}, inv);
-console.log(JSON.stringify({ response: response ?? null, deliveries }));
-`), { response: null, deliveries: [] });
+await emit({ type: 'user.message' });
+console.log(JSON.stringify({ joinConfig, registrations, deliveries }));
+`), { joinConfig: {}, registrations: { listeners: 1, intervals: [] }, deliveries: [] });
 });
 
-test('Double runtime wakes itself on worker activity and pending wakes without worker hooks', (t) => {
+test('Double runtime wakes itself on worker activity and pending wakes without worker events', (t) => {
   const harness = extensionHarness(t, { sessionId: 'double-child-99', marker: false });
   writeFileSync(harness.statePath, JSON.stringify(lifecycleState('idle')));
   const result = harness.run(`
@@ -1822,7 +2065,7 @@ const first = readState();
 await emit({ type: 'assistant.turn_start' });
 await waitUntil(() => readState()?.phase === 'watching');
 const active = readState();
-await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
+await emit({ type: 'tool.execution_complete' });
 const whileActive = deliveries.length;
 setRunning('worker-ext', 0);
 writeState({ ...readState(), phase: 'idle', worker_active: false, monitors: 0 });
@@ -1861,10 +2104,10 @@ console.log(JSON.stringify({ before, deliveries, state: readState() }));
   assert.equal(result.state.wake_count, 1);
 });
 
-test('concurrent worker hooks share one pending activation', (t) => {
+test('concurrent worker events share one pending activation', (t) => {
   const harness = extensionHarness(t);
   const result = harness.run(`
-await Promise.all(Array.from({ length: 24 }, () => registeredHooks.onUserPromptSubmitted({}, inv)));
+await Promise.all(Array.from({ length: 24 }, () => emit({ type: 'user.message' })));
 console.log(JSON.stringify({ deliveries, state: readState() }));
 `);
   assert.deepEqual(result.deliveries, [{
@@ -1891,7 +2134,7 @@ console.log(JSON.stringify({ deliveries, state: readState() }));
   const delegated = extensionHarness(t, { sessionId: 'worker-ext' });
   writeFileSync(delegated.statePath, JSON.stringify(lifecycleState('idle', { double_ext_pid: process.pid })));
   const workerResult = delegated.run(`
-await registeredHooks.onUserPromptSubmitted({}, inv);
+await emit({ type: 'user.message' });
 console.log(JSON.stringify({ deliveries, state: readState() }));
 `);
   assert.deepEqual(workerResult.deliveries, []);
@@ -1928,9 +2171,9 @@ test('extension resolves supervisor pair even when sessions table omits was_inte
   `);
   db.close();
   const result = harness.run(`
-await registeredHooks.onUserPromptSubmitted({}, inv);
+await emit({ type: 'user.message' });
 writeState({ ...readState(), updated_at: Date.now() - 16050 });
-await registeredHooks.onPostToolUse({ toolName: 'view' }, inv);
+await emit({ type: 'tool.execution_complete' });
 console.log(JSON.stringify({ deliveries: deliveries.length, state: readState() }));
 `);
   assert.equal(result.deliveries, 1);
@@ -1949,27 +2192,17 @@ test('Double registers its runtime when the parent link appears after startup', 
   db.close();
   const result = harness.run(`
 const startup = readState();
-const registrations = { listeners: 0, intervals: [] };
-const originalOn = session.on;
-session.on = (listener) => {
-  registrations.listeners += 1;
-  return originalOn(listener);
-};
-const originalSetInterval = globalThis.setInterval;
-globalThis.setInterval = (callback, milliseconds) => {
-  registrations.intervals.push(milliseconds);
-  return originalSetInterval(callback, milliseconds);
-};
+const atStartup = { ...registrations, intervals: [...registrations.intervals] };
 const db = new DatabaseSync(${JSON.stringify(join(harness.customHome, 'data.db'))});
 db.prepare('INSERT INTO chat_parent_links VALUES (?, ?)').run('double-child-99', 'worker-ext');
 db.prepare('UPDATE sessions SET agent = ? WHERE id = ?').run('double', 'double-child-99');
 db.close();
 for (let retry = 0; retry < 3; retry += 1) {
-  for (const name of ['onSessionStart', 'onUserPromptSubmitted', 'onPostToolUse']) {
-    await registeredHooks[name]({ toolName: 'view' }, inv);
+  for (const type of ['user.message', 'tool.execution_start', 'tool.execution_complete']) {
+    await emit({ type, data: { toolName: 'view' } });
   }
 }
-const afterHooks = readState();
+const afterEvents = readState();
 await emit({ type: 'assistant.turn_start' });
 setRunning('double-child-99', 0);
 await emit({ type: 'hook.start', data: { hookType: 'agentStop' } });
@@ -1979,13 +2212,14 @@ const beforeActivity = [...deliveries];
 setRunning('worker-ext', 1);
 writeFileSync(${JSON.stringify(join(harness.workerDir, 'events.jsonl'))}, '{"type":"user.message","data":{"content":"Continue"}}\\n', { flag: 'a' });
 await sleep(2200);
-console.log(JSON.stringify({ startup, registrations, afterHooks, idle, beforeActivity, deliveries, state: readState() }));
+console.log(JSON.stringify({ startup, atStartup, registrations, afterEvents, idle, beforeActivity, deliveries, state: readState() }));
 `);
   assert.deepEqual(result.deliveries, [{ transport: 'send', prompt: wakePrompt(harness) }]);
   assert.equal(result.startup, null);
+  assert.deepEqual(result.atStartup, { listeners: 1, intervals: [] });
   assert.deepEqual(result.registrations, { listeners: 1, intervals: [1000] });
-  assert.equal(result.afterHooks.phase, 'watching');
-  assert.equal(result.afterHooks.wake_count, 0);
+  assert.equal(result.afterEvents.phase, 'watching');
+  assert.equal(result.afterEvents.wake_count, 0);
   assert.equal(result.idle.phase, 'idle');
   assert.equal(result.idle.monitors, 0);
   assert.deepEqual(result.beforeActivity, []);
@@ -2116,8 +2350,9 @@ print(json.dumps(dw.poll_once(pathlib.Path(${JSON.stringify(sessionDir)}), pathl
 });
 
 test('late failed RPC wake does not overwrite an active watching lifecycle', (t) => {
-  const harness = extensionHarness(t);
+  const harness = extensionHarness(t, { marker: false });
   const result = harness.run(`
+attachWorker();
 const originalExecute = session.rpc.tools.execute;
 session.rpc.tools.execute = async (request) => {
   writeState({
@@ -2135,7 +2370,7 @@ session.rpc.tools.execute = async (request) => {
   });
   return { resultType: 'failure', error: { message: 'Late transport timeout' } };
 };
-await registeredHooks.onUserPromptSubmitted({}, inv);
+await emit({ type: 'user.message' });
 session.rpc.tools.execute = originalExecute;
 console.log(JSON.stringify(readState()));
 `);
