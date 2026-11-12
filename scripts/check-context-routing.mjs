@@ -7,7 +7,7 @@ export const REQUIRED_BINDINGS = [
   'agents/poteto.agent.md', 'agents/poteto-worker.agent.md', 'agents/double.agent.md',
   'always-on/copilot-instructions.md',
   ...['poteto-mode', 'double', 'how', 'why', 'architect', 'arena', 'swarm', 'interrogate', 'reflect',
-    'no-comments', 'show-me-your-work', 'recall', 'figure-it-out', 'setup-pstack',
+    'no-comments', 'show-me-your-work', 'recall', 'figure-it-out', 'setup-pstack', 'automate-me',
     'principle-guard-the-context-window'].map((skill) => `skills/${skill}/SKILL.md`),
 ];
 

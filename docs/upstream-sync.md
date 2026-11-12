@@ -153,6 +153,9 @@ it is a source-coverage gate, not a tree inventory.
 - `always-on/copilot-instructions.md`, the managed block the installer writes.
 - `agents/poteto-worker.agent.md` and `agents/double.agent.md`. The other two agents map to upstream sources in the manifest.
 - `skills/create-skill/SKILL.md`, `skills/context-routing/SKILL.md`, and `skills/double/` (`SKILL.md` and `scripts/double_watch.py`).
+- `skills/automate-me/scripts/history.mjs` and `scripts/automate-me-history.test.mjs` implement and test consented history planning, slice reads, and draft audits.
+  `skills/automate-me/references/history-mining.md` defines the source recipes and tool-only fallback.
+  The census emits only grouped cloud metadata queries. Draft auditing does not require a history plan.
 - `extensions/double/extension.mjs`.
 - `skills/poteto-mode/references/ado.md`.
 - `models.default.md`, `context.default.json`, `CONTRIBUTING.md`, `.github/`, and this page.
