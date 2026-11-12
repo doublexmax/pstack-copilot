@@ -17,8 +17,11 @@ const hookScript = join(root, 'scripts', 'context-hook.mjs');
 const hookEntry = join(copilotDir, 'hooks', 'context-hook.mjs');
 const extensionSource = join(root, 'extensions', 'double', 'extension.mjs');
 const extensionFile = join(copilotDir, 'extensions', 'double', 'extension.mjs');
+const doubleHookFile = join(copilotDir, 'hooks', 'pstack-double.json');
+const doubleHookFlag = '--pstack-double-hook';
 const extensionMarker = 'export const ENTRY_VERSION = "pstack-double-extension-v1";';
 const extensionRootLine = 'const pstackRoot = join(homedir(), ".copilot", "pstack");';
+const extensionHookLine = `export const NATIVE_HOOK_FLAG = "${doubleHookFlag}";`;
 
 const instructionsBegin = '<!-- pstack:begin poteto-mode -->';
 const instructionsEnd = '<!-- pstack:end poteto-mode -->';
@@ -28,11 +31,11 @@ const shellEnd = '# END pstack path trust';
 const USAGE = `usage: node install-always-on.mjs [--dry-run] [--uninstall] [--skip-shell] [--skip-trust] [--hooks <install|skip|remove>]
 
 Installs poteto-mode instructions, native pstack context hooks, and the double runtime
-extension, adds ~/.copilot to config.json trustedFolders, and installs a pstack wrapper
+extension and wake guard, adds ~/.copilot to config.json trustedFolders, and installs a pstack wrapper
 that runs copilot with --add-dir ~/.copilot so playbooks and pstack-models.md are readable.
 --skip-trust leaves config.json untouched, including JSONC files.
---hooks install is the default; skip leaves existing hooks unchanged, including the double extension.
---hooks remove changes only owned hook files and the double extension, not instructions, trust, or wrappers.
+--hooks install is the default; skip leaves existing hooks unchanged, including the double runtime.
+--hooks remove changes only owned hook files and the double runtime, not instructions, trust, or wrappers.
 --uninstall removes all managed integration and cannot be combined with --hooks.
 --hooks remove accepts --dry-run but cannot be combined with --skip-shell or --skip-trust.`;
 
@@ -179,33 +182,75 @@ function planDoubleExtension(removing) {
   if (current !== null && !current.includes(extensionMarker)) {
     throw new Error(`refusing to replace a foreign extension ${extensionFile}`);
   }
-  if (removing) return { current, next: null };
+  const hookCurrent = existsSync(doubleHookFile) ? readFileSync(doubleHookFile, 'utf8') : null;
+  if (hookCurrent !== null) {
+    let previous;
+    try {
+      previous = JSON.parse(hookCurrent);
+    } catch {
+      throw new Error(`refusing to replace invalid hook file ${doubleHookFile}`);
+    }
+    const hooks = previous?.hooks;
+    const entries = hooks?.preToolUse;
+    const entry = entries?.[0];
+    const owned = previous && typeof previous === 'object' && !Array.isArray(previous)
+      && previous.version === 1 && Object.keys(previous).sort().join(',') === 'hooks,version'
+      && hooks && typeof hooks === 'object' && !Array.isArray(hooks)
+      && Object.keys(hooks).join(',') === 'preToolUse'
+      && Array.isArray(entries) && entries.length === 1 && entry && typeof entry === 'object' && !Array.isArray(entry)
+      && entry.type === 'command' && typeof entry.exec === 'string'
+      && entry.env?.PSTACK_DOUBLE_MANAGED === '1' && Object.keys(entry.env).length === 1
+      && entry.matcher === 'send_session_message'
+      && Array.isArray(entry.args) && entry.args.length === 3 && typeof entry.args[0] === 'string'
+      && basename(entry.args[0]) === 'extension.mjs' && entry.args[1] === doubleHookFlag && entry.args[2] === 'preToolUse'
+      && Object.keys(entry).every((key) => ['type', 'exec', 'args', 'env', 'matcher', 'timeoutSec'].includes(key));
+    if (!owned) throw new Error(`refusing to replace a foreign hook file ${doubleHookFile}`);
+  }
+  if (removing) return { current, next: null, hookCurrent, hookNext: null };
   requireFile(extensionSource);
   const source = readFileSync(extensionSource, 'utf8');
-  if (!source.includes(extensionMarker) || !source.includes(extensionRootLine)) {
-    throw new Error(`${extensionSource}: missing ownership marker or pstack root binding`);
+  if (!source.includes(extensionMarker) || !source.includes(extensionRootLine) || !source.includes(extensionHookLine)) {
+    throw new Error(`${extensionSource}: missing ownership marker, pstack root binding, or native hook entry`);
   }
-  return { current, next: source.replace(extensionRootLine, `const pstackRoot = ${JSON.stringify(root)};`) };
+  const hookNext = `${JSON.stringify({
+    version: 1,
+    hooks: {
+      preToolUse: [{
+        type: 'command',
+        exec: process.execPath,
+        args: [extensionFile, doubleHookFlag, 'preToolUse'],
+        env: { PSTACK_DOUBLE_MANAGED: '1' },
+        matcher: 'send_session_message',
+        timeoutSec: 10,
+      }],
+    },
+  }, null, 2)}\n`;
+  return { current, next: source.replace(extensionRootLine, `const pstackRoot = ${JSON.stringify(root)};`), hookCurrent, hookNext };
 }
 
 function installDoubleExtension(plan, dryRun) {
-  if (plan.current === plan.next) {
-    console.log(`no changes needed at ${extensionFile}`);
+  if (plan.current === plan.next && plan.hookCurrent === plan.hookNext) {
+    console.log('no changes needed for double runtime');
     return;
   }
   if (dryRun) {
-    console.log(`would ${plan.next === null ? 'remove' : 'install'} double extension at ${extensionFile}`);
+    console.log(`would ${plan.next === null ? 'remove' : 'install'} double runtime at ${extensionFile} and ${doubleHookFile}`);
     return;
   }
   const dir = dirname(extensionFile);
   if (plan.next === null) {
-    unlinkSync(extensionFile);
-    if (readdirSync(dir).length === 0) rmdirSync(dir);
+    if (plan.hookCurrent !== null) unlinkSync(doubleHookFile);
+    if (plan.current !== null) {
+      unlinkSync(extensionFile);
+      if (readdirSync(dir).length === 0) rmdirSync(dir);
+    }
   } else {
     mkdirSync(dir, { recursive: true });
-    writeFileSync(extensionFile, plan.next);
+    if (plan.current !== plan.next) writeFileSync(extensionFile, plan.next);
+    mkdirSync(dirname(doubleHookFile), { recursive: true });
+    if (plan.hookCurrent !== plan.hookNext) writeFileSync(doubleHookFile, plan.hookNext);
   }
-  console.log(`${plan.next === null ? 'removed' : 'installed'} double extension at ${extensionFile}`);
+  console.log(`${plan.next === null ? 'removed' : 'installed'} double runtime at ${extensionFile} and ${doubleHookFile}`);
 }
 
 function installInstructions(removing, dryRun) {
@@ -477,7 +522,7 @@ try {
     if (nativeHooks) {
       installNativeHooks(nativeHooks, dryRun);
       installDoubleExtension(extension, dryRun);
-    } else console.log('skipping native context hooks and double extension (--hooks skip)');
+    } else console.log('skipping native context hooks and double runtime (--hooks skip)');
     if (skipTrust) console.log('skipping trustedFolders (--skip-trust)');
     else installTrustedFolder(removing, dryRun);
     installShell(removing, dryRun, skipShell, psProfile);

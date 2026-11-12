@@ -1,18 +1,26 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
-import { joinSession } from "@github/copilot-sdk/extension";
 
 export const ENTRY_VERSION = "pstack-double-extension-v1";
+export const NATIVE_HOOK_FLAG = "--pstack-double-hook";
 const pstackRoot = join(homedir(), ".copilot", "pstack");
 const watchScript = join(pstackRoot, "skills", "double", "scripts", "double_watch.py");
 const wakeTimeoutMs = 15_000;
 const wakeAcceptedTimeoutMs = 300_000;
+const wakeGrantFile = "double-wake-grant.json";
+const wakeGrantProtocol = "pstack-double-wake-grant-v1";
+const sessionIdPattern = /^[A-Za-z0-9_-]+$/;
+const denyWake = Object.freeze({
+    permissionDecision: "deny",
+    permissionDecisionReason: "Double supervisor activation is runtime-owned.",
+});
+const ignoredWakeToolCalls = new Set();
 let session;
-let doubleTurnActive = false;
+let ownTurnActive = false;
 let doubleRuntimeReady = false;
-let runtimeWakeDispatches = 0;
 
 function copilotHome() {
     return process.env.COPILOT_HOME || join(process.env.USERPROFILE || process.env.HOME || homedir(), ".copilot");
@@ -23,18 +31,19 @@ function buildWakePrompt(workerSessionId, outDir) {
 }
 
 export function hasSupervisorMarker(sessionId, home = copilotHome()) {
-    if (typeof sessionId !== "string" || !sessionId) return false;
+    if (typeof sessionId !== "string" || !sessionIdPattern.test(sessionId)) return false;
     const sessionDir = join(home, "session-state", sessionId);
     return existsSync(join(sessionDir, "double-supervised"))
         || existsSync(join(sessionDir, "files", "double-supervised"));
 }
 
-function findPair(column, sessionId) {
-    if (typeof sessionId !== "string" || !sessionId) return null;
-    const path = join(copilotHome(), "data.db");
+function findPair(column, sessionId, home = copilotHome()) {
+    if (typeof sessionId !== "string" || !sessionIdPattern.test(sessionId)) return null;
+    const path = join(home, "data.db");
     if (!existsSync(path)) return null;
     let db;
     try {
+        const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite");
         db = new DatabaseSync(path, { readOnly: true });
         return db.prepare(`
             SELECT s.*, c.parent_session_id AS worker_session_id, c.session_id AS double_session_id,
@@ -52,9 +61,101 @@ function findPair(column, sessionId) {
     }
 }
 
-function supervisorFor(sessionId) {
-    return (hasSupervisorMarker(sessionId) ? findPair("c.parent_session_id", sessionId) : null)
-        || findPair("c.session_id", sessionId);
+function supervisorFor(sessionId, home = copilotHome()) {
+    return (hasSupervisorMarker(sessionId, home) ? findPair("c.parent_session_id", sessionId, home) : null)
+        || findPair("c.session_id", sessionId, home);
+}
+
+function isWakeLike(message) {
+    return typeof message === "string" && (message.includes("double_watch.py") || message.includes("--wait"));
+}
+
+function toolArguments(value) {
+    if (typeof value === "string") {
+        try {
+            value = JSON.parse(value);
+        } catch {
+            return null;
+        }
+    }
+    return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+
+function issueWakeGrant(outDir, info, wakeCount, message, now) {
+    const grant = {
+        protocol: wakeGrantProtocol,
+        grant_id: randomUUID(),
+        issuer_pid: process.pid,
+        worker_session_id: info.worker_session_id,
+        double_session_id: info.double_session_id,
+        wake_count: wakeCount,
+        message,
+        expires_at: now + wakeTimeoutMs,
+    };
+    const path = join(outDir, wakeGrantFile);
+    const temporary = `${path}.${process.pid}.tmp`;
+    writeFileSync(temporary, JSON.stringify(grant));
+    renameSync(temporary, path);
+    return grant;
+}
+
+function readGrant(path) {
+    const grant = readJson(path);
+    return grant?.protocol === wakeGrantProtocol && typeof grant.grant_id === "string" && grant.grant_id
+        ? grant : null;
+}
+
+function revokeWakeGrant(outDir, grant) {
+    const path = join(outDir, wakeGrantFile);
+    try {
+        if (readGrant(path)?.grant_id === grant.grant_id) rmSync(path, { force: true });
+    } catch {}
+}
+
+function grantAuthorizes(grant, request, info, now) {
+    return Boolean(grant)
+        && grant.worker_session_id === info.worker_session_id
+        && grant.double_session_id === info.double_session_id
+        && grant.double_session_id === request.targetSessionId
+        && grant.message === request.message
+        && Number.isSafeInteger(grant.wake_count) && grant.wake_count >= 1
+        && Number.isSafeInteger(grant.expires_at) && now <= grant.expires_at
+        && pidAlive(grant.issuer_pid);
+}
+
+function claimWakeGrant(outDir, request, info, now) {
+    const path = join(outDir, wakeGrantFile);
+    if (!grantAuthorizes(readGrant(path), request, info, now)) return false;
+    const claimed = `${path}.${process.pid}.${randomUUID()}.claim`;
+    for (let retry = 0; ; retry += 1) {
+        try {
+            renameSync(path, claimed);
+            break;
+        } catch (error) {
+            if (!["EPERM", "EBUSY"].includes(error.code) || retry >= 3) return false;
+            Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+        }
+    }
+    try {
+        return grantAuthorizes(readGrant(claimed), request, info, now);
+    } finally {
+        rmSync(claimed, { force: true });
+    }
+}
+
+export function guardPreToolUse(event, { home = copilotHome(), now = Date.now() } = {}) {
+    if (event?.toolName !== "send_session_message") return {};
+    const args = toolArguments(event.toolArgs);
+    if (!isWakeLike(args?.message) || typeof event.sessionId !== "string" || !sessionIdPattern.test(event.sessionId)) return {};
+    const info = supervisorFor(event.sessionId, home);
+    if (!info || args.session_id !== info.double_session_id) return {};
+    const request = { targetSessionId: args.session_id, message: args.message };
+    try {
+        const outDir = join(home, "session-state", info.double_session_id, "files");
+        return claimWakeGrant(outDir, request, info, now) ? {} : denyWake;
+    } catch {
+        return denyWake;
+    }
 }
 
 function readJson(path) {
@@ -117,6 +218,7 @@ function pidAlive(pid) {
 
 function lifecycleLock(outDir) {
     mkdirSync(outDir, { recursive: true });
+    const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite");
     const db = new DatabaseSync(join(outDir, "double-lifecycle.lock"));
     try {
         db.exec("PRAGMA busy_timeout = 5000; BEGIN IMMEDIATE");
@@ -127,11 +229,16 @@ function lifecycleLock(outDir) {
     return () => db.close();
 }
 
+function selfTurnActive(info) {
+    return session?.sessionId === info.double_session_id && ownTurnActive;
+}
+
 async function reconcileSupervisorLifecycle(sessionId, workerActivity = false, info = supervisorFor(sessionId)) {
     if (!info) return;
     const outDir = join(copilotHome(), "session-state", info.double_session_id, "files");
     let wakePrompt;
     let wakeCount = 0;
+    let wakeGrant;
     const release = lifecycleLock(outDir);
     try {
         const now = Date.now();
@@ -149,7 +256,7 @@ async function reconcileSupervisorLifecycle(sessionId, workerActivity = false, i
         }
         state.worker_active ||= Boolean(info.worker_is_running) || (workerActivity && sessionId === info.worker_session_id);
         if (state.phase === "watching") {
-            if (info.is_running || doubleTurnActive || pidAlive(state.monitor_pid)) {
+            if (info.is_running || selfTurnActive(info) || pidAlive(state.monitor_pid)) {
                 state.queued = 0;
                 state.monitors = 1;
                 saveLifecycle(outDir, state);
@@ -158,7 +265,7 @@ async function reconcileSupervisorLifecycle(sessionId, workerActivity = false, i
             transition(outDir, state, "idle", now);
         }
         if (state.phase === "wake_pending") {
-            if (info.is_running || doubleTurnActive) {
+            if (info.is_running || selfTurnActive(info)) {
                 transition(outDir, state, "watching", now);
                 return;
             }
@@ -173,15 +280,15 @@ async function reconcileSupervisorLifecycle(sessionId, workerActivity = false, i
             transition(outDir, state, "idle", now);
         }
         if (state.phase !== "idle") return;
-        if (state.phase === "idle" && !info.is_running) {
-            doubleTurnActive = false;
+        if (!info.is_running && session?.sessionId === info.double_session_id) {
+            ownTurnActive = false;
         }
         const eventsPath = join(copilotHome(), "session-state", info.worker_session_id, "events.jsonl");
         const eventSize = existsSync(eventsPath) ? statSync(eventsPath).size : 0;
         const cursor = readJson(join(outDir, "double-cursor.json"));
         const hasPending = cursor?.worker_session_id === info.worker_session_id && cursor?.pending_wakes?.length > 0;
         const needsAttention = state.worker_active || Boolean(info.worker_is_running) || hasPending || eventSize > state.last_event_size;
-        if (!needsAttention || info.is_running || doubleTurnActive) {
+        if (!needsAttention || info.is_running || selfTurnActive(info)) {
             saveLifecycle(outDir, state);
             return;
         }
@@ -189,20 +296,23 @@ async function reconcileSupervisorLifecycle(sessionId, workerActivity = false, i
             saveLifecycle(outDir, state);
             return;
         }
-        state.wake_count += 1;
-        wakeCount = state.wake_count;
+        wakeCount = state.wake_count + 1;
+        wakePrompt = buildWakePrompt(info.worker_session_id, outDir);
+        if (session?.sessionId !== info.double_session_id) {
+            wakeGrant = issueWakeGrant(outDir, info, wakeCount, wakePrompt, now);
+        }
+        state.wake_count = wakeCount;
         state.wake_accepted = false;
         transition(outDir, state, "wake_pending", now);
-        wakePrompt = buildWakePrompt(info.worker_session_id, outDir);
     } finally {
         release();
     }
     try {
-        if (session?.sessionId === info.double_session_id && typeof session.send === "function") {
-            await session.send({ prompt: wakePrompt });
-        } else if (typeof session?.rpc?.tools?.execute === "function") {
-            runtimeWakeDispatches += 1;
-            try {
+        try {
+            if (wakeGrant) {
+                if (typeof session?.rpc?.tools?.execute !== "function") {
+                    throw new Error("Double supervisor runtime transport is missing.");
+                }
                 const result = await session.rpc.tools.execute({
                     name: "send_session_message",
                     arguments: { session_id: info.double_session_id, delivery_mode: "immediate", message: wakePrompt },
@@ -214,11 +324,14 @@ async function reconcileSupervisorLifecycle(sessionId, workerActivity = false, i
                     || (typeof result === "string" && result.startsWith("Denied by preToolUse hook:"))) {
                     throw new Error("Double supervisor runtime wake was denied or failed.");
                 }
-            } finally {
-                runtimeWakeDispatches -= 1;
+            } else {
+                if (typeof session?.send !== "function") {
+                    throw new Error("Double supervisor runtime transport is missing.");
+                }
+                await session.send({ prompt: wakePrompt });
             }
-        } else {
-            throw new Error("Double supervisor runtime transport is missing.");
+        } finally {
+            if (wakeGrant) revokeWakeGrant(outDir, wakeGrant);
         }
         const release = lifecycleLock(outDir);
         try {
@@ -243,55 +356,58 @@ async function reconcileSupervisorLifecycle(sessionId, workerActivity = false, i
     }
 }
 
-const onWorkerActivity = (_input, invocation) => reconcileSupervisorLifecycle(invocation.sessionId, true);
+const activityEvents = new Set(["user.message", "tool.execution_start", "tool.execution_complete"]);
+const settleEvents = new Set(["session.idle", "session.usage_checkpoint", "session.task_complete", "session.shutdown"]);
 
-session = await joinSession({
-    hooks: {
-        onSessionStart: onWorkerActivity,
-        onUserPromptSubmitted: onWorkerActivity,
-        onPreToolUse: async (input, invocation) => {
-            const info = supervisorFor(invocation.sessionId);
-            const message = input.toolArgs?.message;
-            if (input.toolName === "send_session_message" && info
-                && input.toolArgs?.session_id === info.double_session_id && typeof message === "string"
-                && (message.includes("double_watch.py") || message.includes("--wait"))) {
-                const outDir = join(copilotHome(), "session-state", info.double_session_id, "files");
-                if (runtimeWakeDispatches > 0 && message === buildWakePrompt(info.worker_session_id, outDir)) {
-                    return undefined;
-                }
-                return {
-                    permissionDecision: "deny",
-                    permissionDecisionReason: "Double supervisor activation is runtime-owned.",
-                };
+async function onSessionEvent(event) {
+    const type = event?.type;
+    const settle = settleEvents.has(type)
+        || ((type === "hook.start" || type === "hook.end") && event.data?.hookType === "agentStop");
+    if (type !== "assistant.turn_start" && !activityEvents.has(type) && !settle) return;
+    const toolCallId = event.data?.toolCallId ?? event.toolCallId;
+    if (type === "tool.execution_complete" && ignoredWakeToolCalls.delete(toolCallId)) return;
+    if (type === "assistant.turn_start") ownTurnActive = true;
+    if (settle) ownTurnActive = false;
+    if (type === "session.shutdown") ignoredWakeToolCalls.clear();
+    try {
+        const info = supervisorFor(session.sessionId);
+        if (type === "tool.execution_start" && (event.data?.toolName ?? event.toolName) === "send_session_message") {
+            const args = toolArguments(event.data?.arguments ?? event.data?.toolArgs ?? event.toolArgs);
+            if (info && args?.session_id === info.double_session_id && isWakeLike(args.message)) {
+                if (typeof toolCallId === "string") ignoredWakeToolCalls.add(toolCallId);
+                return;
             }
-            await reconcileSupervisorLifecycle(invocation.sessionId, true, info);
-        },
-        onPostToolUse: onWorkerActivity,
-        onPostToolUseFailure: onWorkerActivity,
-        onSessionEnd: async (_input, invocation) => {
-            await reconcileSupervisorLifecycle(invocation.sessionId);
-        },
-    },
-});
+        }
+        await reconcileSupervisorLifecycle(session.sessionId, !settle, info);
+    } catch (error) {
+        console.error("Double lifecycle reconciliation failed", error);
+    }
+}
 
 function ensureDoubleRuntime() {
     if (doubleRuntimeReady) return;
     doubleRuntimeReady = true;
-    session.on((event) => {
-        if (event.type === "assistant.turn_start") doubleTurnActive = true;
-        if (
-            event.type === "session.idle"
-            || event.type === "session.usage_checkpoint"
-            || event.type === "session.task_complete"
-            || ((event.type === "hook.start" || event.type === "hook.end") && event.data?.hookType === "agentStop")
-        ) {
-            doubleTurnActive = false;
-            return reconcileSupervisorLifecycle(session.sessionId);
-        }
-    });
     setInterval(() => {
         reconcileSupervisorLifecycle(session.sessionId).catch((error) => console.error("Double lifecycle reconciliation failed", error));
     }, 1000).unref();
 }
 
-await reconcileSupervisorLifecycle(session.sessionId);
+async function runNativeHook(phase) {
+    let decision = {};
+    try {
+        if (phase === "preToolUse") decision = guardPreToolUse(JSON.parse(readFileSync(0, "utf8")));
+    } catch (error) {
+        console.error(JSON.stringify({ scope: "pstack-double-guard", error: error.message }));
+    }
+    process.stdout.write(`${JSON.stringify(decision)}\n`);
+}
+
+if (process.argv[2] === NATIVE_HOOK_FLAG) {
+    await runNativeHook(process.argv[3]);
+} else {
+    const { joinSession } = await import("@github/copilot-sdk/extension");
+    session = await joinSession({});
+    session.on(onSessionEvent);
+    await reconcileSupervisorLifecycle(session.sessionId, true)
+        .catch((error) => console.error("Double lifecycle reconciliation failed", error));
+}
