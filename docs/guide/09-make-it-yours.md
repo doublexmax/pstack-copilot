@@ -8,7 +8,33 @@ poteto-mode is one person's style. The machinery underneath, playbooks, routing,
 /automate-me
 ```
 
-You don't describe your style, because [`automate-me`](../../skills/automate-me/SKILL.md) reads it out of your history. It mines your recent sessions in the active repository for repeated preferences, in how you like replies, delegation, verification, code, prose, and process, then asks you which patterns are really you. It drafts `~/.copilot/agents/<your-name>.agent.md` through the [`create-skill`](../../skills/create-skill/SKILL.md) flow, runs the draft through [`unslop`](../../skills/unslop/SKILL.md), and opens a PR from a worktree so you review it like any other change.
+[`automate-me`](../../skills/automate-me/SKILL.md) asks what history this run may read unless your request already says.
+Choose the active repository, accessible personal history across repositories, specific repositories, or an interview without history.
+Repository-only is the default inside a repository.
+Cross-repository permission applies only to the current run.
+Global installation, `skillDirectories` registration, and personal output paths never grant that permission.
+
+The skill checks repeated preferences across independent sessions and time slices.
+It asks which patterns match how you work, then drafts `~/.copilot/agents/<your-name>.agent.md` through [create-skill](../../skills/create-skill/SKILL.md) and [unslop](../../skills/unslop/SKILL.md).
+Repository-specific rules stay out of the personal mode.
+Before committing or opening a PR, a mechanical audit checks the mode and PR text for private repository keys, home paths, and session IDs.
+The personal mode allows no repository names, including the active repository.
+Only the PR body can allow its active repository key.
+Interview-only and tool-only runs can audit a draft without a history plan or further history access.
+
+Coverage depends on the running `gh copilot` host.
+A bundled helper combines the current profile's raw logs and local index, with available personal synced history from the host's cloud tool.
+The index can lag newer logs, while pruned logs can leave older sessions available only in the index.
+If Node or local profile files are absent, the skill uses available history tools or the interview.
+It reports the sources, dates, session counts, skipped records, and any sampling limit before mining.
+Repository-only reports do not publish counts of unrelated repositories.
+For clustered activity, the helper splits the date window at session timestamps so independent sessions can occupy separate slices.
+If fewer than two slices contain sessions, the skill asks you to confirm preferences rather than claiming mined corroboration.
+
+Deleted, purged, expired, and unsynced other-machine sessions are absent.
+Sessions in another `COPILOT_HOME` profile or account are absent unless they synced into the current account's accessible history.
+Offline hosts and some Enterprise accounts may have no cloud history.
+Missing history does not prove that you have no preference.
 
 Run it again whenever your habits drift:
 
@@ -16,7 +42,10 @@ Run it again whenever your habits drift:
 /automate-me update my mode skill with everything since its last edit
 ```
 
-Update mode mines only the history since the skill last changed. It keeps rules you haven't contradicted, revises the ones with new evidence, and adds sections only for genuinely new patterns.
+Update mode resolves scope again on every run.
+By default, it mines since the mode file's last git commit.
+For an untracked file or a file outside git, it uses the modification time and discloses that estimate.
+It keeps rules you have not contradicted, revises rules with new evidence, and adds sections only for new patterns.
 
 ## Capture a session's lessons with `/reflect`
 
