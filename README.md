@@ -9,11 +9,13 @@ features with explicit verification rather than just generating more code.
 
 a port of [pstack](https://github.com/cursor/plugins/tree/main/pstack) by
 [poteto](https://x.com/poteto), rewritten to run on the github copilot
-app. 53 skills, 23 playbooks, 24 principles, and 4 agents. MIT, same as upstream.
+app. 53 skills, 23 playbooks, 24 principles, and 4 agents. MIT, same license as upstream.
 
 this is not a mirror. the cursor plugin manifest, the `/add-plugin` install path,
 the event-triggered automations, and the graphite stacking layer are all gone.
-copilot and azure devops equivalents took their place. see
+copilot and azure devops equivalents took their place. this port also adds
+[double](#double-supervisor), created by [@doublexmax](https://github.com/doublexmax)
+for `pstack-copilot`. double is not in upstream `cursor/plugins` `pstack`. see
 [what changed](#what-changed-from-upstream).
 
 there's a growing sense that ai writes too much slop code. i agree. i don't want to ship like a team of twenty slop artists. throughput without quality is not a goal i aspire to. if you want to go fast, go deep first.
@@ -23,6 +25,8 @@ there's a growing sense that ai writes too much slop code. i agree. i don't want
 **pstack gives you fearless parallelism.** when you can go deep on one agent and trust it to write good, verifiable code, you can truly parallelize with confidence. start multiple agents up with `poteto-mode` and trust that they'll apply rigorous engineering principles to their work.
 
 **copilot gives you the best of all worlds.** every frontier model has its strengths and weaknesses. use any model with pstack. in fact, many of my skills use multi-model workflows to take advantage of each model's unique strengths.
+
+**double checks claims against real artifacts.** run [`/double`](./skills/double/SKILL.md) inside the worker session to attach an independent, read-only supervisor. it checks factual claims and test edits against repository state and session artifacts. it messages the worker only when evidence refutes a claim. it does not write code or prescribe fixes.
 
 fork it. improve it. make it yours. PRs are welcome! 
 
@@ -183,7 +187,7 @@ the full rules and playbooks live in [`skills/poteto-mode/SKILL.md`](./skills/po
 | [`/typescript-best-practices`](./skills/typescript-best-practices/SKILL.md) | you're reading or editing typescript. grounds the type-system-discipline principle in syntax. |
 | [`/figure-it-out`](./skills/figure-it-out/SKILL.md) | no bundled playbook fits. designs a rigorous, auditable playbook for the task. |
 | [`/show-me-your-work`](./skills/show-me-your-work/SKILL.md) | you want a reviewable decision trail. logs decisions to a tsv you can commit. |
-| [`/double`](./skills/double/SKILL.md) | you want an independent supervisor session on another model family to check factual claims and test edits against real session artifacts. |
+| [`/double`](./skills/double/SKILL.md) | you want an independent supervisor session to check factual claims and test edits against real session artifacts, preferring a different model vendor family from your configured pool. custom to `pstack-copilot` by [@doublexmax](https://github.com/doublexmax), not in upstream pstack. |
 | [`/create-verification-skill`](./skills/create-verification-skill/SKILL.md) | your project has no scripted way to prove app behavior. generates a project-local verify skill with a feature map, for any language or platform. |
 | [`/maintain-verification-skill`](./skills/maintain-verification-skill/SKILL.md) | your verify skill's feature map has drifted from the app. source wave + one live pass, at most one PR of proven corrections. |
 | [`/unslop`](./skills/unslop/SKILL.md) | you're cleaning up writing or a code diff. prose path removes AI tells; code path is the old deslop pass. |
@@ -248,7 +252,39 @@ pstack also ships a subagent that runs my style end to end. spawn it from a pare
 
 pstack also ships [Comment Sicko](./agents/comment-sicko.agent.md), a read-only comment reviewer available as `agent_type: "comment-sicko"`. usually invoke it through [`/no-comments`](./skills/no-comments/SKILL.md), not directly.
 
-pstack also ships [Double](./agents/double.agent.md), an independent session supervisor. type [`/double`](./skills/double/SKILL.md) inside a worker session and it spawns a nested `Double: <name>` child. it prefers a different vendor family from the configured pool, or uses the first entry if none differs. a zero-token watcher wakes it only when the worker makes a load-bearing claim, and it messages the worker only to refute one with counter-evidence. it never writes the worker's code.
+## double supervisor
+
+[double](./agents/double.agent.md) is a custom addition by
+[@doublexmax](https://github.com/doublexmax) for `pstack-copilot`.
+it is not available in upstream
+[`cursor/plugins` `pstack`](https://github.com/cursor/plugins/tree/main/pstack).
+double checks factual claims and test or comparator edits against real repository
+state and session artifacts. it is a read-only supervisor. it never writes the
+worker's code or prescribes fixes.
+
+double messages the worker only when primary evidence refutes a claim.
+it stays silent on verified and unverified claims. silence is not approval.
+
+### attach double
+
+run [`/double`](./skills/double/SKILL.md) inside the worker session, not a separate chat:
+
+```
+/double
+```
+
+look for the nested `Double: <worker name>` verifier session. long unattended tasks
+in [`/poteto-mode`](./skills/poteto-mode/SKILL.md) attach double automatically.
+
+double selects from your configured `double verifier` pool. it prefers a model
+with a different vendor family from the worker. it falls back to the first pool
+entry if none differs.
+
+double needs python, with `python` on your `PATH`. a local python watcher waits
+at zero model tokens. the runtime extension at
+`~/.copilot/extensions/double/extension.mjs` wakes an idle double session when the
+worker resumes. verification turns spend model tokens.
+the [always-on installer](./scripts/install-always-on.mjs) installs the extension.
 
 ## principles
 
@@ -327,7 +363,7 @@ copilot ignores that key, so the port carries the same behaviour a different way
 node scripts/install-always-on.mjs
 ```
 
-the installer manages four user-scoped changes:
+the installer manages five user-scoped changes:
 
 1. a managed block in `~/.copilot/copilot-instructions.md`. copilot loads that
    file into the **system prompt** of every session, in every directory, git or
@@ -349,6 +385,8 @@ the installer manages four user-scoped changes:
    ordinary unmanaged delegates stay unchanged. decisions have machine-readable
    records, and `skip poteto mode` opts the session out of routing too when hooks
    are enabled.
+5. `~/.copilot/extensions/double/extension.mjs` activates an idle double child
+   when a supervised worker resumes. the installer binds the extension to this clone.
 
 three properties worth knowing:
 
@@ -360,11 +398,11 @@ three properties worth knowing:
   `~/.copilot` trust entry. anything else you keep survives.
 
 `--dry-run` shows the change without writing. `--uninstall` removes the managed
-instructions, hooks, trust entry, and wrappers, not your context or model policy.
+instructions, hooks, double runtime extension, trust entry, and wrappers, not your context or model policy.
 `--skip-shell` leaves profiles and shims alone. `--skip-trust` leaves `config.json`
 unchanged, including JSONC comments. `COPILOT_HOME` isolates the target directory.
-`--hooks skip` leaves existing hooks unchanged while refreshing the other integration.
-`--hooks remove` removes only the owned hook config and copied entry.
+`--hooks skip` leaves existing hooks and the double runtime extension unchanged while refreshing the other integration.
+`--hooks remove` removes only the owned hook config, copied hook entry, and double runtime extension.
 the default installer or `--hooks install` enables them again.
 `--uninstall` cannot be combined with `--hooks`.
 On Windows, the installer asks PowerShell for `$PROFILE.CurrentUserCurrentHost`
@@ -404,6 +442,8 @@ there is no CI gate. this org disables hosted runners and the repo has no self-h
 
 ## what changed from upstream
 
+### port adaptations
+
 | upstream (cursor plugin) | here |
 | --- | --- |
 | `.cursor-plugin/plugin.json`, `/add-plugin` | a `skillDirectories` entry in `~/.copilot/settings.json` |
@@ -423,6 +463,14 @@ there is no CI gate. this org disables hosted runners and the repo has no self-h
 
 `control-cli` and `control-ui` are not bundled. verification goes through a
 project verify skill or a generated one, not an operator-drive default.
+
+### custom additions
+
+[@doublexmax](https://github.com/doublexmax) created
+[double](./agents/double.agent.md) and [`/double`](./skills/double/SKILL.md)
+for `pstack-copilot`. they are custom additions, not available in upstream
+[`cursor/plugins` `pstack`](https://github.com/cursor/plugins/tree/main/pstack).
+see the [local-only files](./docs/upstream-sync.md#local-only-files) for this port's additions.
 
 ## license
 

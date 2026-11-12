@@ -50,3 +50,84 @@ test('README links to the public project overview', () => {
   assert.match(readme, /^# pstack for GitHub Copilot\r?\n/);
   assert.ok(readme.includes(`](${canonical})`));
 });
+
+test('each section labels itself with its own heading', () => {
+  const sections = [...html.matchAll(/<section\b[^>]*aria-labelledby="([^"]+)"[^>]*>([\s\S]*?)<\/section>/g)];
+  assert.ok(sections.length > 0);
+  for (const [, id, section] of sections) {
+    assert.match(section, new RegExp(`<h2\\b[^>]*id="${id}"[^>]*>`), `Missing heading: ${id}`);
+  }
+});
+
+test('navigation and introduction lead to Double before installation', () => {
+  const nav = html.match(/<nav\b[^>]*>([\s\S]*?)<\/nav>/)[1];
+  const intro = html.match(/<p class="intro">([\s\S]*?)<\/p>/)[1];
+  assert.match(nav, /href="#double"/);
+  assert.match(intro, /href="#double"/);
+  assert.ok(html.includes('id="double"'));
+  assert.ok(html.indexOf('id="double"') < html.indexOf('id="install"'));
+  const workflows = html.match(/<section aria-labelledby="workflows">([\s\S]*?)<\/section>/)[1];
+  assert.match(workflows, /class="eyebrow">Adapted from upstream/);
+});
+
+test('Double documents its provenance, verifier selection, and supervision limits', () => {
+  const section = html.match(/<section aria-labelledby="double">([\s\S]*?)<\/section>/)?.[1];
+  assert.ok(section, 'Missing Double section');
+  const text = section.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
+  for (const href of [
+    'https://github.com/doublexmax',
+    'https://github.com/doublexmax/pstack-copilot/blob/main/skills/double/SKILL.md',
+    'https://github.com/doublexmax/pstack-copilot/blob/main/agents/double.agent.md',
+    'https://github.com/cursor/plugins/tree/main/pstack',
+    '#try-double',
+  ]) {
+    assert.ok(section.includes(`href="${href}"`), `Missing Double link: ${href}`);
+  }
+  assert.match(text, /@doublexmax/);
+  assert.match(text, /custom addition/i);
+  assert.match(text, /not (?:available )?in upstream/i);
+  assert.match(text, /cursor\/plugins/);
+  assert.match(text, /worker session/i);
+  assert.match(text, /double verifier/);
+  assert.match(text, /vendor family/i);
+  assert.match(text, /model tokens/i);
+  assert.match(text, /refutes/i);
+  assert.match(text, /silence[^.]*not[^.]*approval/i);
+  assert.doesNotMatch(html, /on another model family/i);
+  const example = html.match(/<h3 id="try-double">[\s\S]*?<pre><code>([\s\S]*?)<\/code><\/pre>/);
+  assert.equal(example?.[1], '/double');
+  const install = html.match(/<section aria-labelledby="install">([\s\S]*?)<\/section>/)[1];
+  assert.match(install, /Python/);
+  assert.match(install, /runtime extension/i);
+});
+
+test('README separates Double additions from upstream adaptations', () => {
+  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  assert.match(readme, /\]\(#double-supervisor\)/);
+  const double = readme.match(/(?:^|\n)## double supervisor\r?\n([\s\S]*?)(?:\r?\n## |$)/)?.[1];
+  assert.ok(double, 'Missing Double supervisor section');
+  assert.match(double, /^### attach double\r?$/m);
+  assert.match(double, /\[@doublexmax\]\(https:\/\/github\.com\/doublexmax\)/);
+  assert.match(double, /not (?:available )?in upstream/i);
+  assert.match(double, /cursor\/plugins/);
+  const upstream = readme.match(/(?:^|\n)## what changed from upstream\r?\n([\s\S]*?)(?:\r?\n## |$)/)[1];
+  assert.match(upstream, /^### port adaptations\r?$/m);
+  assert.match(upstream, /^### custom additions\r?$/m);
+  assert.ok(upstream.indexOf('### port adaptations') < upstream.indexOf('### custom additions'));
+  const additions = upstream.split('### custom additions')[1];
+  assert.match(additions, /@doublexmax/);
+  assert.match(additions, /not (?:available )?in upstream/i);
+  assert.match(additions, /cursor\/plugins/);
+  assert.match(additions, /\]\(\.\/docs\/upstream-sync\.md#local-only-files\)/);
+  const alwaysOn = readme.match(/(?:^|\n)## always-on\r?\n([\s\S]*?)(?:\r?\n## |$)/)[1];
+  assert.match(alwaysOn, /five user-scoped changes/);
+  assert.match(alwaysOn, /~\/\.copilot\/extensions\/double\/extension\.mjs/);
+  assert.match(alwaysOn, /`--uninstall`[^.]*double runtime extension/);
+  assert.match(alwaysOn, /`--hooks skip`[^.]*double runtime extension[^.]*unchanged/);
+  assert.match(alwaysOn, /`--hooks remove`[^.]*double runtime extension/);
+  const skill = readme.split(/\r?\n/).find((line) => line.startsWith('| [`/double`]'));
+  assert.match(skill, /prefer[^|]*vendor family/);
+  assert.match(skill, /configured[^|]*pool/);
+  assert.match(skill, /custom[^|]*@doublexmax/);
+  assert.doesNotMatch(readme, /pstack also ships \[Double\]|on another model family/i);
+});
