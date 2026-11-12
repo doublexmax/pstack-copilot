@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>pstack for GitHub Copilot | Multi-agent engineering workflows</title>
-  <meta name="description" content="Bring multi-agent workflows, engineering playbooks, and Azure DevOps integration to GitHub Copilot. Install pstack and start with a verifiable task.">
+  <meta name="description" content="Multi-agent engineering workflows for GitHub Copilot, with Azure DevOps integration and Double supervision that checks claims against real artifacts.">
   <meta name="google-site-verification" content="X00SCREtqxwvSwsGG0A3Md6jXMQNGUW6aII2g-MXhT0" />
   <link rel="canonical" href="https://doublexmax.github.io/pstack-copilot/">
   <link rel="stylesheet" href="style.css">
@@ -14,16 +14,19 @@
     <header>
       <p class="eyebrow">Open-source skills and agents</p>
       <h1>pstack for GitHub Copilot</h1>
-      <p class="intro">Multi-agent engineering workflows for GitHub Copilot:
-        investigate bugs, review code, and build features with evidence that the work is correct.</p>
+      <p class="intro">Bring multi-agent engineering workflows to GitHub Copilot.
+        Investigate bugs, review code, and build features with evidence.
+        This port adds <a href="#double">Double</a> to check your agent's claims against real artifacts.</p>
       <nav aria-label="Project links">
         <a href="https://github.com/doublexmax/pstack-copilot">View the repository</a>
+        <a href="#double">Double supervisor</a>
         <a href="#install">Install pstack</a>
         <a href="https://github.com/doublexmax/pstack-copilot/blob/main/docs/guide/README.md">Read the guide</a>
       </nav>
     </header>
 
     <section aria-labelledby="workflows">
+      <p class="eyebrow">Adapted from upstream pstack</p>
       <h2 id="workflows">Engineering playbooks, not just code generation</h2>
       <p>Start with a goal and a way to verify it. The <code>/poteto-mode</code> skill
         selects a playbook and coordinates the skills and agents needed for the task.
@@ -38,17 +41,44 @@
         It is MIT-licensed and adapted to Copilot, not a mirror of the Cursor plugin.</p>
     </section>
 
+    <section aria-labelledby="double">
+      <p class="eyebrow">Custom addition to this port</p>
+      <h2 id="double">Double checks your agent's claims</h2>
+      <p><a href="https://github.com/doublexmax">@doublexmax</a> created Double for
+        <code>pstack-copilot</code>. It is a custom addition, not available in upstream
+        <a href="https://github.com/cursor/plugins/tree/main/pstack"><code>cursor/plugins</code> <code>pstack</code></a>.
+        Read the <a href="https://github.com/doublexmax/pstack-copilot/blob/main/skills/double/SKILL.md">Double skill</a>
+        and <a href="https://github.com/doublexmax/pstack-copilot/blob/main/agents/double.agent.md">supervisor agent</a>
+        for the full behavior.</p>
+      <p>Run <code>/double</code> inside the worker session, not a separate chat.
+        It attaches a nested <code>Double: &lt;worker name&gt;</code> verifier session.
+        Long unattended tasks in <code>/poteto-mode</code> attach Double automatically.</p>
+      <p>Double selects from your configured <code>double verifier</code> pool.
+        It prefers a model with a different vendor family from the worker.
+        It falls back to the first pool entry if none differs.</p>
+      <p>A local Python watcher waits at zero model tokens.
+        The runtime extension wakes an idle Double session when the worker resumes.
+        Verification turns spend model tokens.</p>
+      <p>Double checks factual claims and test or comparator edits against real repository state and session artifacts.
+        It is a read-only supervisor. It never writes the worker's code or prescribes fixes.</p>
+      <p>Double messages the worker only when primary evidence refutes a claim.
+        It stays silent on verified and unverified claims. Silence is not approval.
+        <a href="#try-double">Try Double in a worker session</a>.</p>
+    </section>
+
     <section aria-labelledby="install">
       <h2 id="install">Install pstack for GitHub Copilot</h2>
       <p>You need Git, Node.js, and the GitHub Copilot CLI with access to the models
-        you select. In a POSIX shell, clone the project, register its skills, and copy its agents:</p>
+        you select. Double also needs Python, with <code>python</code> on your <code>PATH</code>.
+        In a POSIX shell, clone the project, register its skills, and copy its agents:</p>
       <pre><code>git clone https://github.com/doublexmax/pstack-copilot ~/.copilot/pstack
 copilot skill add ~/.copilot/pstack/skills
 mkdir -p ~/.copilot/agents
 cp ~/.copilot/pstack/agents/*.agent.md ~/.copilot/agents/
 copilot skill list</code></pre>
       <p>For always-on mode, run the installer. It updates your Copilot instructions,
-        path trust, shell wrapper, and runtime hooks. Preview the changes first if needed:</p>
+        path trust, shell wrapper, and runtime hooks. It also installs Double's runtime extension.
+        Preview the changes first if needed:</p>
       <pre><code>node ~/.copilot/pstack/scripts/install-always-on.mjs --dry-run
 node ~/.copilot/pstack/scripts/install-always-on.mjs</code></pre>
       <p>Then start Copilot and run <code>/setup-pstack</code> to choose your models.
@@ -57,13 +87,19 @@ node ~/.copilot/pstack/scripts/install-always-on.mjs</code></pre>
     </section>
 
     <section aria-labelledby="examples">
-      <h2 id="examples">Two tasks to try</h2>
+      <h2 id="examples">Three tasks to try</h2>
       <h3>Investigate and fix a bug</h3>
       <pre><code>/poteto-mode the export writes duplicate rows when a retry lands mid-run.
 Reproduce it first, fix the root cause, and verify the result.</code></pre>
       <h3>Review a change before shipping</h3>
       <pre><code>/poteto-mode review this PR for correctness and regressions.
 Explain the evidence for each finding and what still needs verification.</code></pre>
+      <h3 id="try-double">Supervise a worker session</h3>
+      <p>Run this inside the worker session, not a separate chat:</p>
+      <pre><code>/double</code></pre>
+      <p>Look for the nested <code>Double: &lt;worker name&gt;</code> session.
+        It messages the worker only with evidence that refutes a claim.
+        Silence is not approval, even when a claim remains unverified.</p>
       <p>You do not need to name every skill or prescribe the delegation plan.
         Describe the outcome and what would prove it works.</p>
     </section>
