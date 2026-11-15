@@ -176,12 +176,30 @@ for (const file of walk(join(root, 'agents'))) {
   checkManifest(file, basename(file).replace(/\.agent\.md$/, ''));
 }
 
+const allowedDocs = new Set(UPSTREAM_MAPPING_DOCS);
+const syncManifest = join(root, 'scripts', 'upstream-sync.manifest.tsv');
+if (existsSync(syncManifest)) {
+  for (const line of read(syncManifest).split('\n')) {
+    if (!line.trim() || line.startsWith('#')) continue;
+    const [, status, , local = ''] = line.split('\t');
+    if (status !== 'excluded' && local.startsWith('docs/')) allowedDocs.add(local);
+  }
+}
+for (const file of walk(join(root, 'docs'))) {
+  const path = relative(root, file).split('\\').join('/');
+  if (!allowedDocs.has(path)) {
+    fail(file, 'untracked-doc', 'docs/ only allows upstream-synced guide files and docs/upstream-sync.md');
+  }
+}
+
 const markdown = TOKEN_ROOTS.flatMap((dir) => walk(join(root, dir))).filter((f) => f.endsWith('.md'));
 for (const file of markdown) {
   if (!UPSTREAM_MAPPING_DOCS.has(relative(root, file).split('\\').join('/'))) checkForeignTokens(file);
   checkLinks(file);
 }
 checkLinks(join(root, 'README.md'));
+const contributing = join(root, 'CONTRIBUTING.md');
+if (existsSync(contributing)) checkLinks(contributing);
 
 if (existsSync(join(root, 'scripts', 'check-context-routing.mjs'))
   || existsSync(join(root, 'skills', 'context-routing', 'SKILL.md'))) {
