@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -41,6 +41,46 @@ const cases = [
     status: 1,
     output: /broken-link/,
   },
+  {
+    name: 'rejects docs outside the upstream inventory',
+    frontmatter: 'description: A description.',
+    files: { 'docs/search-discovery.md': '# Search discovery\n' },
+    status: 1,
+    output: /untracked-doc[\s\S]*docs\/search-discovery\.md/,
+  },
+  {
+    name: 'allows the upstream mapping doc and manifest-claimed guides',
+    frontmatter: 'description: A description.',
+    files: {
+      'docs/upstream-sync.md': '# Upstream sync\n',
+      'docs/guide/01-setup.md': '# Setup\n',
+      'CONTRIBUTING.md': '[Setup](docs/guide/01-setup.md)\n',
+      'scripts/upstream-sync.manifest.tsv':
+        '# Fixture manifest\n\n'
+        + 'guide/01-setup.md\tadapted\t-\tdocs/guide/01-setup.md\t-\tFixture guide.\n'
+        + 'unused.md\texcluded\t-\t\t\tNo local file.\n',
+    },
+    status: 0,
+    output: /ok: 1 skills, 3 markdown files/,
+  },
+  {
+    name: 'rejects docs excluded by the upstream manifest',
+    frontmatter: 'description: A description.',
+    files: {
+      'docs/search-discovery.md': '# Search discovery\n',
+      'scripts/upstream-sync.manifest.tsv':
+        'search-discovery.md\texcluded\t-\tdocs/search-discovery.md\t-\tExcluded guide.\n',
+    },
+    status: 1,
+    output: /untracked-doc[\s\S]*docs\/search-discovery\.md/,
+  },
+  {
+    name: 'rejects unresolved contributing links',
+    frontmatter: 'description: A description.',
+    files: { 'CONTRIBUTING.md': '[Search discovery](docs/search-discovery.md)\n' },
+    status: 1,
+    output: /broken-link[\s\S]*CONTRIBUTING\.md: docs\/search-discovery\.md does not resolve/,
+  },
 ];
 
 for (const scenario of cases) {
@@ -55,6 +95,11 @@ for (const scenario of cases) {
         join(root, 'skills', 'probe', 'SKILL.md'),
         `---\nname: probe\n${scenario.frontmatter}\n---\n\n# Probe\n${scenario.body ?? ''}\n`,
       );
+      for (const [path, contents] of Object.entries(scenario.files ?? {})) {
+        const file = join(root, path);
+        mkdirSync(dirname(file), { recursive: true });
+        writeFileSync(file, contents);
+      }
       const result = spawnSync(process.execPath, [join(root, 'scripts', 'check-copilot-port.mjs')], { encoding: 'utf8' });
       assert.equal(result.status, scenario.status, result.stdout + result.stderr);
       assert.match(result.stdout + result.stderr, scenario.output);
