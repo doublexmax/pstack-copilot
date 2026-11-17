@@ -5,7 +5,7 @@ description: 'Supervise a coding session with Double, an independent verifier th
 
 # Double
 
-Double separates factual verification from implementation. A zero-token local script (`scripts/double_watch.py`) scans `~/.copilot/session-state/<session_id>/events.jsonl` and wakes the Double verifier agent only on load-bearing triggers (`T1_HUMAN_GATE`, `T2_MIDRUN_CLAIM`, `T3_CHECKPOINT_DRIFT`).
+Double separates factual verification from implementation. A zero-token local script at `scripts/double_watch.py` scans `~/.copilot/session-state/<session_id>/events.jsonl` and wakes the Double verifier agent only on load-bearing triggers `T1_HUMAN_GATE`, `T2_MIDRUN_CLAIM`, and `T3_CHECKPOINT_DRIFT`.
 
 `<skill_dir>` below is this skill's base directory, `skills/double` in the pstack clone.
 
@@ -13,22 +13,22 @@ Choose the path that matches your invocation:
 
 | Situation | Path |
 | --- | --- |
-| Starting an autonomous or unattended run (`autonomous-run`, unattended `hillclimb`, "going to bed", "run until done", "trust it when i'm back"), or user typed `/double`, "attach double", or "supervise session X" | [Attach a Double child session](#attach-a-double-child-session) |
+| Starting an autonomous or unattended run such as `autonomous-run`, unattended `hillclimb`, "going to bed", "run until done", or "trust it when i'm back", or user typed `/double`, "attach double", or "supervise session X" | [Attach a Double child session](#attach-a-double-child-session) |
 | You are the `Double: <Name>` child session waking on kickoff or runtime activation | [Run a verification pass](#run-a-verification-pass) |
 | User asked to audit a past session once without a recurring schedule | Run `python "<skill_dir>\scripts\double_watch.py" <session_id> --replay --out-dir "<double_artifacts_dir>"`, then follow [Step 2 of Run a verification pass](#step-2-audit-each-wake-against-real-artifacts) |
 
 ## Attach a Double child session
 
-`<double_artifacts_dir>` below is the `artifacts_dir` (`~/.copilot/session-state/<double_session_id>/files`) of the session running `double_watch.py`, never the supervised worker's `<worker_session_dir>/files`.
+`<double_artifacts_dir>` below is the `artifacts_dir` at `~/.copilot/session-state/<double_session_id>/files` of the session running `double_watch.py`, never the supervised worker's `<worker_session_dir>/files`.
 
-**Important sidebar rule:** `create_session` always nests the new child under whichever session calls `create_session`.
+**Sidebar nesting.** `create_session` always nests the new child under whichever session calls `create_session`.
 - If the user invokes `/double` **inside the worker session itself**, call `create_session` directly so `Double: <worker_name>` nests right under the worker session.
-- If the user asks from **Quick Chat / General Chat** to attach Double to another session (`<worker_session_id>`), do **not** call `create_session` from General Chat (which would nest `Double` under General Chat and tag its kickoff `Received message General Chat`). Instead, either tell the user to run `/double` inside `<worker_name>`, or send a message to `<worker_session_id>` instructing it to invoke `/double` to spawn its own nested child.
+- If the user asks from **Quick Chat or General Chat** to attach Double to `<worker_session_id>`, do **not** call `create_session` from General Chat. That would nest `Double` under General Chat and tag its kickoff `Received message General Chat`. Instead, either tell the user to run `/double` inside `<worker_name>`, or send a message to `<worker_session_id>` instructing it to invoke `/double` to spawn its own nested child.
 
 When spawning `Double: <worker_name>` from inside the worker session:
 
 1. **Resolve the current worker session.**
-   Call `list_sessions_and_chats` to get the current session's `id` (`<worker_session_id>`) and `name` (`<worker_name>`).
+   Call `list_sessions_and_chats` to get the current session's `id` as `<worker_session_id>` and `name` as `<worker_name>`.
 
 2. **Resolve the verifier model and kickoff context through `context-routing`.**
    Read the first `session.start` line of `~/.copilot/session-state/<worker_session_id>/events.jsonl` to check `selectedModel`. Invoke [context-routing](../context-routing/SKILL.md) and run `show --role "double verifier"` to inspect the configured pool.
@@ -47,10 +47,10 @@ When spawning `Double: <worker_name>` from inside the worker session:
      --support supported --source "Current exact-model create_session schema"
    ```
 
-   Copy `toolArguments.kickoff` (`model`, `reasoning_effort`, and `context_tier`, omitting `model` and `reasoning_effort` when an alias is configured) and prepend the returned `declaration` line (`PSTACK_CONTEXT_V1 ...`) as line 1 of `kickoff.prompt`.
+   Copy `toolArguments.kickoff` with its `model`, `reasoning_effort`, and `context_tier` fields. Omit `model` and `reasoning_effort` when an alias is configured. Prepend the returned `declaration` line, `PSTACK_CONTEXT_V1 ...`, as line 1 of `kickoff.prompt`.
 
-3. **Spawn the nested Double child session (silent `--wait` loop, no noisy timer schedule).**
-   Call `create_session` in `"mode": "interactive"` with `coordinate_with_creator: false` and **no `schedule`** (so the App never fires 2-minute completion chimes or autopilot continuation retry turns when Double ends its turn on `PARENT_INACTIVE`):
+3. **Spawn the nested Double child session with a silent `--wait` loop and no timer schedule.**
+   Call `create_session` in `"mode": "interactive"` with `coordinate_with_creator: false` and **no `schedule`**. This prevents 2-minute completion chimes or autopilot continuation retry turns when Double ends its turn on `PARENT_INACTIVE`.
    ```json
    {
      "session_kind": "chat",
@@ -62,7 +62,7 @@ When spawning `Double: <worker_name>` from inside the worker session:
        "reasoning_effort": "<selected_effort>",
        "context_tier": "<resolved_context_tier>",
        "mode": "interactive",
-       "prompt": "PSTACK_CONTEXT_V1 {...}\nSupervise worker session <worker_session_id> (<worker_name>). Invoke the double skill and enter the silent --wait verification loop. Keep all Double state (double-cursor.json, double-lifecycle.json, double-wake-bundle.json, double-audit.tsv, double-audit.md) in your own session artifacts_dir (<double_session_dir>/files)."
+       "prompt": "PSTACK_CONTEXT_V1 {...}\nSupervise worker session <worker_session_id> named <worker_name>. Invoke the double skill and enter the silent --wait verification loop. Keep double-cursor.json, double-lifecycle.json, double-wake-bundle.json, double-audit.tsv, and double-audit.md in your own session artifacts_dir at <double_session_dir>/files."
      }
    }
    ```
@@ -72,7 +72,7 @@ When spawning `Double: <worker_name>` from inside the worker session:
 
 ## How Double stays alive when the worker is active and idle when the worker is idle
 
-A runtime Copilot extension (`~/.copilot/extensions/double/extension.mjs`, installed by `scripts/install-always-on.mjs` and bound to the installing clone) owns activation. It reads `~/.copilot/data.db` through read-only Node SQLite queries. A worker marker enables child lookup. Inside Double, the extension resolves the worker through `chat_parent_links` without needing a marker in Double's directory.
+A runtime Copilot extension at `~/.copilot/extensions/double/extension.mjs` owns activation. `scripts/install-always-on.mjs` installs it and binds it to the installing clone. It reads `~/.copilot/data.db` through read-only Node SQLite queries. A worker marker enables child lookup. Inside Double, the extension resolves the worker through `chat_parent_links` without needing a marker in Double's directory.
 
 The extension and Python monitor share `<double_artifacts_dir>/double-lifecycle.json`. Atomic writes keep the JSON complete. A SQLite transaction in `double-lifecycle.lock` serializes transitions for the worker and Double pair and releases ownership on process exit. The record contains `phase`, `queued`, `monitors`, `monitor_pid`, `worker_active`, `wake_count`, `wake_accepted`, and `last_event_size`. The only phases are `idle`, `wake_pending`, and `watching`. Do not edit this runtime-owned file.
 
@@ -93,18 +93,18 @@ The extension and Python monitor share `<double_artifacts_dir>/double-lifecycle.
 
 ## Run a verification pass
 
-### Step 1. Run the synchronous monitor (`--wait`)
+### Step 1. Run the synchronous monitor with `--wait`
 
-Run the blocking monitor against `<worker_session_id>`, writing state files to your own `<double_artifacts_dir>` (`<double_session_dir>\files` from `<copilot_artifacts>`, `mode: "sync"`, `initial_wait: 600`):
+Run the blocking monitor against `<worker_session_id>`, writing state files to your own `<double_artifacts_dir>` at `<double_session_dir>\files` from `<copilot_artifacts>`. Use `mode: "sync"` and `initial_wait: 600`.
 
 ```powershell
 python "<skill_dir>\scripts\double_watch.py" <worker_session_id> --wait --out-dir "<double_artifacts_dir>"
 ```
 
 - `double_watch.py --wait` sleeps in Python at **0 LLM tokens** while the worker session is actively running its turn.
-- **If it writes `<double_artifacts_dir>\double-wake-bundle.json`:** Audit the wakes in Step 2 and append rows to `<double_artifacts_dir>\double-audit.tsv` in Step 3. Route any `REFUTED` notice in Step 4. Immediately call `double_watch.py <worker_session_id> --wait --out-dir "<double_artifacts_dir>"` again to catch subsequent wakes in the same turn.
-- **If it prints `{"status": "DUPLICATE_MONITOR_SUPPRESSED"}`:** A live monitor already owns the pair. Do not start a second monitor.
-- **If it prints `{"status": "PARENT_INACTIVE"}`:** The worker session has finished its turn and gone idle. End your turn immediately with a brief status line and no further tool calls so your session goes completely idle (stopping the sidebar spinner). When the worker starts a new turn later, the runtime extension hook will wake you back up.
+- If it writes `<double_artifacts_dir>\double-wake-bundle.json`, audit the wakes in Step 2 and append rows to `<double_artifacts_dir>\double-audit.tsv` in Step 3. Route any `REFUTED` notice in Step 4. Immediately call `double_watch.py <worker_session_id> --wait --out-dir "<double_artifacts_dir>"` again to catch subsequent wakes in the same turn.
+- If it prints `{"status": "DUPLICATE_MONITOR_SUPPRESSED"}`, a live monitor already owns the pair. Do not start a second monitor.
+- If it prints `{"status": "PARENT_INACTIVE"}`, the worker session has finished its turn and gone idle. End your turn immediately with a brief status line and no further tool calls so your session goes completely idle and the sidebar spinner stops. When the worker starts a new turn later, the runtime extension hook will wake you back up.
 
 ### Step 2. Audit each wake against real artifacts
 
@@ -112,21 +112,28 @@ For each wake entry in `<double_artifacts_dir>\double-wake-bundle.json`:
 
 1. **Read the bundled context.**
    - Read `claims`, `claim_count`, `open_refutations`, `recent_user_prompts`, `active_todo_anchor`, and `range_events` from `<double_artifacts_dir>\double-wake-bundle.json`.
-   - The monitor selects the latest `in_progress` todo, or the latest todo when none is active. If `active_todo_anchor` is `null`, query `<worker_session_dir>\session.db` (`SELECT id, title, description, status FROM todos`) and `<worker_session_dir>\files\decisions.tsv` if present.
+   - The monitor selects the latest `in_progress` todo, or the latest todo when none is active. If `active_todo_anchor` is `null`, query `<worker_session_dir>\session.db` with `SELECT id, title, description, status FROM todos` and read `<worker_session_dir>\files\decisions.tsv` if present.
 
 2. **List the falsifiable claims in `event_range`.**
    - Start with the bundled `claims`. Check `range_events`, `todos` updates, and `decisions.tsv` rows for additional factual claims.
-   - Compare `reasoning` (`reasoningText`) against user-facing `content` to catch **thought-vs-reply omissions**, where the worker discovers a discrepancy, side-effect, or unexpected table/file write in its intermediate thoughts but omits or contradicts it in the final reply.
-   - Whenever `touched_files` is non-empty (including PowerShell write redirections captured via `shellToolInfo`), add the implicit invariant: *"Edits in `touched_files` did not weaken verification checks, hide failed runs, or modify files outside the requested scope without disclosure."*
+   - Compare `reasoning` from `reasoningText` against user-facing `content` to catch **thought-vs-reply omissions**, where the worker discovers a discrepancy, side-effect, or unexpected table or file write in its intermediate thoughts but omits or contradicts it in the final reply.
+   - Whenever `touched_files` is non-empty, including PowerShell write redirections captured via `shellToolInfo`, add this implicit invariant. *"Edits in `touched_files` did not weaken verification checks, hide failed runs, or modify files outside the requested scope without disclosure."*
 
-3. **Check the primary evidence directly (read-only).**
-   - Use `view` or `grep` on the files in `worker_cwd` and `<worker_session_dir>\files\` (JSON summaries, XML test results, logs), plus the tool outputs already included in `double-wake-bundle.json`.
-   - **Truncation guard:** If a tool event in `double-wake-bundle.json` has `"output_truncated": true`, never refute an absence claim from `output_preview` alone; read the full event in `<worker_session_dir>\events.jsonl` or query the live source first.
-   - Never write temporary files (`ev.txt`, `double-cursor.json`, `double-audit.tsv`) into `<worker_session_dir>\files\`. Keep all Double files in your own `<double_artifacts_dir>` (`<double_session_dir>\files\`).
+3. **Check the primary evidence directly, read-only.**
+   - Use `view` or `grep` on JSON summaries, XML test results, and logs in `worker_cwd` and `<worker_session_dir>\files\`, plus the tool outputs already included in `double-wake-bundle.json`.
+   - **Truncation guard.** If a tool event in `double-wake-bundle.json` has `"output_truncated": true`, never refute an absence claim from `output_preview` alone. Read the full event in `<worker_session_dir>\events.jsonl` or query the live source first.
+   - Never write temporary files such as `ev.txt`, `double-cursor.json`, or `double-audit.tsv` into `<worker_session_dir>\files\`. Keep all Double files in your own `<double_artifacts_dir>` at `<double_session_dir>\files\`.
 
 ### Step 3. Record verdicts in `<double_artifacts_dir>\double-audit.tsv`
 
-1. Append one row per audited claim to `<double_artifacts_dir>\double-audit.tsv` (`ts`, `event_range`, `trigger`, `verdict`, `claim`, `evidence_pointer`, `observed_fact`). Use the wake's numeric `event_range`, such as `[394, 405]`. Record at least `claim_count` claim verdict rows overlapping each wake before acknowledgment. Use `VERIFIED`, `REFUTED`, `UNVERIFIED`, or `ESCALATE_TRADEOFF` for those rows. Use `UNVERIFIED` for unmeasured hypotheses or predictions that current artifacts neither prove nor falsify. Resume partial audits by appending only missing claims. Never duplicate recorded claim rows.
+1. When `<double_artifacts_dir>\double-audit.tsv` is missing, create it with this exact tab-separated header row.
+
+   ```tsv
+   ts	event_range	trigger	verdict	claim	evidence_pointer	observed_fact
+   ```
+
+   Append one row per audited claim. Never read or search `double_watch.py` or `pstack` source files to inspect parser internals.
+   Use the wake's numeric `event_range`, such as `[394, 405]`. Record at least `claim_count` claim verdict rows overlapping each wake before acknowledgment. Use `VERIFIED`, `REFUTED`, `UNVERIFIED`, or `ESCALATE_TRADEOFF` for those rows. Use `UNVERIFIED` for unmeasured hypotheses or predictions that current artifacts neither prove nor falsify. Resume partial audits by appending only missing claims. Never duplicate recorded claim rows.
 2. When a wake proves the worker fixed an earlier `REFUTED` claim, append a `RESOLVED` row alongside that wake's claim verdicts. Use the current wake's `event_range` and `trigger`. Start `claim` with the `L<line>` IDs of the `REFUTED` rows it closes, such as `L1299 L1300 Fixed comparator check`. Each ID is the row's 1-based line number in `double-audit.tsv`. The `open_refutations` field in `double-wake-bundle.json` and the `Line` column of `double-audit.md` provide each open `REFUTED` row's ID. Put the fix proof in `evidence_pointer` and `observed_fact`. `RESOLVED` rows never acknowledge a wake. Never edit prior `REFUTED` rows.
 3. Never write `double-audit.md` or pass replacement `content` to `open_canvas`. `double_watch.py` renders the markdown when no pending wakes remain. Open or refresh the file in the Editor Canvas, where `scope: "workspace"` resolves relative to `<double_session_dir>\files\`:
    ```json
@@ -145,11 +152,11 @@ For each wake entry in `<double_artifacts_dir>\double-wake-bundle.json`:
 ### Step 4. Route the verdict
 
 - For `VERIFIED` and `UNVERIFIED` claims, stay silent. Send no notice to the worker.
-- **`ESCALATE_TRADEOFF` (worker is at `ask_user` and all factual premises in the question are `VERIFIED`):** Stay silent. Record the verified premise rows in `double-audit.tsv` for the gate's wake. `double_watch.py` renders the pending question and those premises under `## Pending question` until the `ask_user` completes or a later `user.message` arrives.
-- **Any claim `REFUTED`:**
-  1. Call `get_session(project_session_id=session_id)` to check whether the worker is blocked on `ask_user`.
-  2. If `awaiting_input` is present and the question rests on the refuted premise (with `allow_freeform: true`), call `answer_session_input` with the three-field notice below.
-  3. Otherwise, call `send_session_message(session_id=session_id, delivery_mode="immediate", message=...)` with the exact three-field notice below.
+- For `ESCALATE_TRADEOFF`, if the worker is at `ask_user` and all factual premises in the question are `VERIFIED`, stay silent. Record the verified premise rows in `double-audit.tsv` for the gate's wake. `double_watch.py` renders the pending question and those premises under `## Pending question` until the `ask_user` completes or a later `user.message` arrives.
+- For any `REFUTED` claim:
+  1. Call `get_session` with `project_session_id` set to the worker's `session_id` to check whether the worker is blocked on `ask_user`.
+  2. If `awaiting_input` is present, the question rests on the refuted premise, and `allow_freeform` is `true`, call `answer_session_input` with the three-field notice below.
+  3. Otherwise, call `send_session_message` with the worker's `session_id`, `delivery_mode: "immediate"`, and the exact three-field notice below as `message`.
 
 ## The three-field supervisor notice
 

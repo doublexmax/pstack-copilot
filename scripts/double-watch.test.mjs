@@ -14,7 +14,7 @@ const watchScript = join(root, 'skills', 'double', 'scripts', 'double_watch.py')
 function runPy(code, env = {}) {
   return execFileSync('python', ['-c', code], {
     cwd: root,
-    env: { ...process.env, COPILOT_HOME: '', ...env },
+    env: { ...process.env, COPILOT_HOME: '', ...env, PYTHONDONTWRITEBYTECODE: '1' },
     encoding: 'utf8',
   });
 }
@@ -33,10 +33,29 @@ function writeEvents(sessionDir, events) {
   writeFileSync(join(sessionDir, 'events.jsonl'), `${events.map((event) => JSON.stringify(event)).join('\n')}\n`);
 }
 
+function watcherFixture(t) {
+  const home = mkdtempSync(join(tmpdir(), 'double-child-'));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const sessionDir = join(home, 'session-state', 'steward');
+  const outDir = join(sessionDir, 'files', 'double-replay');
+  mkdirSync(sessionDir, { recursive: true });
+  const run = (...args) => execFileSync('python', [watchScript, 'steward', '--out-dir', outDir, ...args], {
+    env: { ...process.env, COPILOT_HOME: home, PYTHONDONTWRITEBYTECODE: '1' },
+    encoding: 'utf8',
+  });
+  const poll = () => {
+    run('--once');
+    const bundle = join(outDir, 'double-wake-bundle.json');
+    return existsSync(bundle) ? JSON.parse(readFileSync(bundle, 'utf8')) : [];
+  };
+  const cursor = () => JSON.parse(readFileSync(join(outDir, 'double-cursor.json'), 'utf8'));
+  return { home, sessionDir, outDir, run, poll, cursor };
+}
+
 const auditHeader = 'ts\tevent_range\ttrigger\tverdict\tclaim\tevidence_pointer\tobserved_fact\n';
 const auditRow = (range, verdict = 'VERIFIED', claim = 'claim', evidence = 'artifact', observed = 'observed') => `2026-11-02T00:00:00Z\t${range}\tT1_HUMAN_GATE\t${verdict}\t${claim}\t${evidence}\t${observed}\n`;
 
-test('extract_files parses apply_patch headers and preserves edit/create path when content contains File:', () => {
+test('extract_file_writes parses apply_patch headers and preserves edit/create path when content contains File:', () => {
   const out = runPy(`
 import importlib.util, json
 spec = importlib.util.spec_from_file_location("dw", ${JSON.stringify(watchScript)})
@@ -48,9 +67,9 @@ edit_arg = {"path": "skills/double/scripts/double_watch.py", "old_str": "a\\nFil
 create_arg = {"path": "docs/note.md", "file_text": "Header\\nFile: another_fake.md\\nBody"}
 
 print(json.dumps({
-  "patch": dw.extract_files(patch_arg),
-  "edit": dw.extract_files(edit_arg),
-  "create": dw.extract_files(create_arg),
+  "patch": [write.path for write in dw.extract_file_writes(patch_arg)],
+  "edit": [write.path for write in dw.extract_file_writes(edit_arg)],
+  "create": [write.path for write in dw.extract_file_writes(create_arg)],
 }))
 `);
   assert.deepEqual(JSON.parse(out), {
@@ -161,6 +180,514 @@ print((pathlib.Path(${JSON.stringify(outDir)}) / "double-wake-bundle.json").read
   assert.deepEqual(bundle[0].touched_files, ['test_out.txt']);
   assert.equal(bundle[0].range_events.length, 2);
   assert.equal(bundle[0].range_events[1].output_preview, '12 passed in 0.4s');
+});
+
+for (const [writer, requests] of [
+  ['edit', [
+    { name: 'edit', toolCallId: 'source', arguments: { path: 'src/engine.js', old_str: '1', new_str: '2' } },
+    { name: 'edit', toolCallId: 'tests', arguments: { path: 'test/engine.test.mjs', old_str: '1', new_str: '2' } },
+  ]],
+  ['create', [
+    { name: 'create', toolCallId: 'source', arguments: JSON.stringify({ path: 'src/engine.js', file_text: 'export const engine = 2;' }) },
+    { name: 'create', toolCallId: 'tests', arguments: { path: 'test/engine.test.mjs', file_text: 'assert.equal(engine, 2);' } },
+  ]],
+  ['apply_patch', [{
+    name: 'apply_patch', toolCallId: 'patch',
+    arguments: '*** Begin Patch\n*** Update File: src/engine.js\n@@\n+export const engine = 2;\n*** Add File: test/engine.test.mjs\n+assert.equal(engine, 2);\n*** End Patch\n',
+  }]],
+  ['shell', [{
+    name: 'powershell', toolCallId: 'child-shell',
+    arguments: { command: "'export const engine = 2;' > src/engine.js; 'assert.equal(engine, 2);' > test/engine.test.mjs" },
+  }]],
+]) {
+  test(`inline ${writer} writes and outputs reach the root wake without child prose`, (t) => {
+    const { sessionDir, poll, cursor } = watcherFixture(t);
+    const events = [
+      { type: 'session.start', data: { sessionId: 'steward' } },
+      { type: 'assistant.message', data: {
+        parentToolCallId: 'inline-task', content: 'Verified the child implementation.',
+        reasoningText: 'Confirmed private child reasoning.',
+        toolRequests: [...requests, { name: 'view', toolCallId: 'read', arguments: { path: 'README.md' } }],
+      } },
+      ...requests.map((request) => ({ type: 'tool.execution_start', data: {
+        ...request, toolName: request.name, parentToolCallId: 'inline-task',
+        ...(writer === 'shell' ? { shellToolInfo: {
+          hasWriteFileRedirection: true, possiblePaths: ['src/engine.js', 'test/engine.test.mjs', 'src/engine.js'],
+        } } : {}),
+      } })),
+      ...requests.map((request) => ({ type: 'tool.execution_complete', data: {
+        toolCallId: request.toolCallId, parentToolCallId: 'inline-task',
+        success: true, result: { content: `Saved ${request.toolCallId}.` },
+      } })),
+      { type: 'tool.execution_complete', data: {
+        parentToolCallId: 'inline-task', toolCallId: 'read', toolName: 'view',
+        success: true, result: { content: 'Read-only content.' },
+      } },
+      { type: 'assistant.turn_end', data: { parentToolCallId: 'inline-task' } },
+    ];
+    writeEvents(sessionDir, events);
+    assert.deepEqual(poll(), []);
+    assert.deepEqual(cursor().touched, ['src/engine.js', 'test/engine.test.mjs']);
+    events.push({ type: 'assistant.message', data: { content: 'Verified the engine passes its tests.' } });
+    writeEvents(sessionDir, events);
+    const [wake] = poll();
+    assert.equal(wake.trigger, 'T1_HUMAN_GATE');
+    assert.deepEqual(wake.touched_files, ['src/engine.js', 'test/engine.test.mjs']);
+    assert.deepEqual(wake.claims, ['Verified the engine passes its tests.']);
+    const children = wake.range_events.filter((event) => event.child);
+    assert.deepEqual(children.map((event) => event.parent_tool_call_id), Array(writer === 'shell' ? 1 : requests.length + 1).fill('inline-task'));
+    assert.deepEqual(children.flatMap((event) => event.tools || []).map((tool) => tool.name),
+      writer === 'shell' ? [] : requests.map((request) => request.name));
+    assert.deepEqual(children.filter((event) => event.type === 'tool.execution_complete').map((event) => event.output_preview),
+      requests.map((request) => `Saved ${request.toolCallId}.`));
+    assert.equal(children.some((event) => 'content' in event || 'reasoning' in event), false);
+  });
+}
+
+for (const parentToolCallId of [undefined, 'inline-task']) {
+  test(`${parentToolCallId ? 'child' : 'root'} shell metadata cannot turn read-only commands or fd duplication into writes`, (t) => {
+    const { sessionDir, poll, cursor } = watcherFixture(t);
+    const events = [];
+    for (const command of [
+      'node --test scripts/double-watch.test.mjs 2>&1',
+      'node -e "const f = x => y;"',
+      'python -c "def f() -> int: return 1"',
+      'pytest bar.py',
+      'node check.mjs 1>&2',
+      'node check.mjs >&1',
+      'node check.mjs >&2',
+      'node check.mjs > nul',
+      'node check.mjs >> "/dev/null" 2>&1',
+      'node check.mjs > $null',
+      'node check.mjs 2>$null',
+      'node check.mjs 2>$NULL',
+    ]) {
+      events.push(
+        { type: 'tool.execution_start', data: {
+          parentToolCallId, toolCallId: 'command', toolName: 'powershell',
+          arguments: { command },
+          shellToolInfo: { hasWriteFileRedirection: true, possiblePaths: ['scripts/double-watch.test.mjs', 'bar.py'] },
+        } },
+        { type: 'tool.execution_complete', data: { parentToolCallId, toolCallId: 'command', success: true } },
+        { type: 'assistant.message', data: { toolRequests: [{
+          name: 'sql', toolCallId: 'checkpoint', arguments: { query: "UPDATE todos SET status='done'" },
+        }] } },
+        { type: 'tool.execution_complete', data: { toolCallId: 'checkpoint', success: true } },
+      );
+      writeEvents(sessionDir, events);
+      assert.deepEqual(poll(), [], command);
+      assert.deepEqual(cursor().touched, [], command);
+      assert.equal(cursor().verify_touched, false, command);
+    }
+    events.push(
+      { type: 'tool.execution_start', data: {
+        parentToolCallId, toolCallId: 'command', toolName: 'powershell',
+        arguments: { command: 'node check.mjs >> results.xml 2>&1' },
+        shellToolInfo: { hasWriteFileRedirection: true, possiblePaths: ['results.xml', '$null', 'nul', '/dev/null'] },
+      } },
+      { type: 'assistant.message', data: { content: 'Output is ready.' } },
+    );
+    writeEvents(sessionDir, events);
+    assert.deepEqual(poll().map((wake) => wake.touched_files), [['results.xml']]);
+  });
+}
+
+test('child shell file-write operators retain their file paths and command outputs', (t) => {
+  const { sessionDir, poll } = watcherFixture(t);
+  const commands = [
+    ['Out-File -FilePath test/out.log', 'test/out.log'],
+    ['Set-Content test/set.txt -Value result', 'test/set.txt'],
+    ['Add-Content test/add.txt -Value result', 'test/add.txt'],
+    ['Tee-Object -FilePath test/tee.log', 'test/tee.log'],
+    ['New-Item test/new.txt -ItemType File', 'test/new.txt'],
+    ['Copy-Item src/in.txt test/copied.txt', 'test/copied.txt'],
+    ['Move-Item src/in.txt test/moved.txt', 'test/moved.txt'],
+    ['printf result | tee test/unix.log', 'test/unix.log'],
+  ];
+  writeEvents(sessionDir, [
+    ...commands.flatMap(([command, path], index) => [
+      { type: 'tool.execution_start', data: {
+        parentToolCallId: 'inline-task', toolCallId: `command-${index}`, toolName: 'powershell',
+        arguments: JSON.stringify({ command }),
+        shellToolInfo: { hasWriteFileRedirection: true, possiblePaths: [path, '/dev/null'] },
+      } },
+      { type: 'tool.execution_complete', data: {
+        parentToolCallId: 'inline-task', toolCallId: `command-${index}`, success: true,
+        result: { content: `Saved ${path}.` },
+      } },
+    ]),
+    { type: 'assistant.message', data: { toolRequests: [{
+      name: 'sql', toolCallId: 'checkpoint', arguments: { query: "UPDATE todos SET status='done'" },
+    }] } },
+    { type: 'tool.execution_complete', data: { toolCallId: 'checkpoint', success: true } },
+  ]);
+  const [wake] = poll();
+  assert.equal(wake.trigger, 'T3_CHECKPOINT_DRIFT');
+  assert.deepEqual(wake.touched_files, [
+    'test/out.log', 'test/set.txt', 'test/add.txt', 'test/tee.log',
+    'test/new.txt', 'test/copied.txt', 'test/moved.txt', 'test/unix.log',
+  ]);
+  assert.deepEqual(wake.range_events.filter((event) => event.child).map((event) => event.output_preview), [
+    'Saved test/out.log.', 'Saved test/set.txt.', 'Saved test/add.txt.', 'Saved test/tee.log.',
+    'Saved test/new.txt.', 'Saved test/copied.txt.', 'Saved test/moved.txt.', 'Saved test/unix.log.',
+  ]);
+  assert.deepEqual(wake.range_events.filter((event) => event.child).map((event) => event.command), [
+    'Out-File -FilePath test/out.log',
+    'Set-Content test/set.txt -Value result',
+    'Add-Content test/add.txt -Value result',
+    'Tee-Object -FilePath test/tee.log',
+    'New-Item test/new.txt -ItemType File',
+    'Copy-Item src/in.txt test/copied.txt',
+    'Move-Item src/in.txt test/moved.txt',
+    'printf result | tee test/unix.log',
+  ]);
+});
+
+for (const requests of [
+  [{ name: 'write_agent', toolCallId: 'steer' }],
+  [{ name: 'read_agent', toolCallId: 'compare' }, { name: 'write_agent', toolCallId: 'steer' }],
+]) {
+  test(`read_agent-only claims defer audits but ${requests.map((request) => request.name).join(' and ')} claims trigger them`, (t) => {
+    const { sessionDir, poll, cursor } = watcherFixture(t);
+    const events = [
+      { type: 'assistant.message', data: { parentToolCallId: 'inline-task', toolRequests: [{
+        name: 'edit', arguments: { path: 'test/engine.test.mjs', new_str: 'assert.equal(engine, 2);' },
+      }] } },
+      { type: 'assistant.message', data: {
+        content: 'Confirmed the worker passed the expected step.',
+        toolRequests: [{ name: 'read_agent', toolCallId: 'read-agent' }],
+      } },
+      { type: 'tool.execution_complete', data: { toolCallId: 'read-agent', success: true } },
+    ];
+    writeEvents(sessionDir, events);
+    assert.deepEqual(poll(), []);
+    assert.deepEqual(cursor().touched, ['test/engine.test.mjs']);
+    assert.equal(cursor().verify_touched, true);
+    events.push(
+      { type: 'assistant.message', data: { content: 'Confirmed the worker passed the expected step.', toolRequests: requests } },
+      ...requests.map((request) => ({ type: 'tool.execution_complete', data: { toolCallId: request.toolCallId, success: true } })),
+    );
+    writeEvents(sessionDir, events);
+    assert.deepEqual(poll().map((wake) => ({ trigger: wake.trigger, touched: wake.touched_files })), [
+      { trigger: 'T2_MIDRUN_CLAIM', touched: ['test/engine.test.mjs'] },
+    ]);
+  });
+}
+
+test('session storage prose never arms verification drift but repository decisions fixtures do', (t) => {
+  const { sessionDir, poll, cursor } = watcherFixture(t);
+  const events = [];
+  const touched = [];
+  for (const path of [
+    join(sessionDir, 'files', 'overview.md').replaceAll('\\', '/'),
+    join(sessionDir, 'files', 'synthesis.md').replaceAll('/', '\\'),
+    join(sessionDir, 'files', 'decisions.tsv'),
+    `${sessionDir}/files/../files/charter.md`,
+    ...(process.platform === 'win32' ? [join(sessionDir, 'files', 'notes.md').toUpperCase()] : []),
+  ]) {
+    events.push(
+      { type: 'assistant.message', data: { toolRequests: [{
+        name: 'create', toolCallId: 'plan', arguments: { path, file_text: 'verify test spec' },
+      }] } },
+      { type: 'tool.execution_complete', data: { toolCallId: 'plan', success: true } },
+      { type: 'assistant.message', data: { toolRequests: [{
+        name: 'sql', toolCallId: 'checkpoint', arguments: { query: "UPDATE todos SET status='done'" },
+      }] } },
+      { type: 'tool.execution_complete', data: { toolCallId: 'checkpoint', success: true } },
+    );
+    touched.push(path);
+    writeEvents(sessionDir, events);
+    assert.deepEqual(poll(), []);
+    assert.deepEqual(cursor().touched, touched);
+    assert.equal(cursor().verify_touched, false);
+  }
+  events.push(
+    { type: 'assistant.message', data: { toolRequests: [{
+      name: 'edit', toolCallId: 'fixture', arguments: { path: 'test/fixtures/decisions.tsv', old_str: '1', new_str: '2' },
+    }] } },
+    { type: 'tool.execution_complete', data: { toolCallId: 'fixture', success: true } },
+  );
+  writeEvents(sessionDir, events);
+  assert.deepEqual(poll(), []);
+  assert.deepEqual(cursor().touched, [...touched, 'test/fixtures/decisions.tsv']);
+  assert.equal(cursor().verify_touched, true);
+  events.push(
+    { type: 'assistant.message', data: { toolRequests: [{
+      name: 'sql', toolCallId: 'checkpoint', arguments: { query: "UPDATE todos SET status='done'" },
+    }] } },
+    { type: 'tool.execution_complete', data: { toolCallId: 'checkpoint', success: true } },
+  );
+  writeEvents(sessionDir, events);
+  assert.deepEqual(poll().map((wake) => ({ trigger: wake.trigger, touched: wake.touched_files })), [
+    { trigger: 'T3_CHECKPOINT_DRIFT', touched: [...touched, 'test/fixtures/decisions.tsv'] },
+  ]);
+});
+
+for (const name of ['edit', 'create', 'apply_patch']) {
+  test(`a root ${name} decisions checkpoint audits accumulated child test edits`, (t) => {
+    const { sessionDir, poll } = watcherFixture(t);
+    const path = join(sessionDir, 'files', 'decisions.tsv');
+    const args = {
+      edit: { path, old_str: 'pending', new_str: 'done' },
+      create: JSON.stringify({ path, file_text: 'done' }),
+      apply_patch: `*** Begin Patch\n*** Update File: ${path}\n@@\n-pending\n+done\n*** End Patch\n`,
+    };
+    writeEvents(sessionDir, [
+      { type: 'assistant.message', data: { parentToolCallId: 'inline-task', toolRequests: [{
+        name: 'edit', arguments: { path: 'test/engine.test.mjs', new_str: 'assert.equal(engine, 2);' },
+      }] } },
+      { type: 'assistant.message', data: { toolRequests: [{ name, arguments: args[name], toolCallId: 'checkpoint' }] } },
+      { type: 'tool.execution_complete', data: { toolCallId: 'checkpoint', success: true } },
+    ]);
+    assert.deepEqual(poll().map((wake) => ({ trigger: wake.trigger, touched: wake.touched_files })), [
+      { trigger: 'T3_CHECKPOINT_DRIFT', touched: ['test/engine.test.mjs', path] },
+    ]);
+  });
+}
+
+test('patch targets isolate session storage prose from repository changes', (t) => {
+  const { sessionDir, poll, cursor } = watcherFixture(t);
+  const charter = join(sessionDir, 'files', 'charter.md');
+  const events = [
+    { type: 'assistant.message', data: { toolRequests: [{
+      name: 'apply_patch',
+      arguments: `*** Begin Patch\n*** Update File: ${charter}\n@@\n+verify test spec\n*** Update File: src/engine.js\n@@\n+export const engine = 2;\n*** End Patch\n`,
+    }] } },
+    { type: 'assistant.message', data: { toolRequests: [{
+      name: 'sql', toolCallId: 'plan-done', arguments: { query: "UPDATE todos SET status='done'" },
+    }] } },
+    { type: 'tool.execution_complete', data: { toolCallId: 'plan-done', success: true } },
+  ];
+  writeEvents(sessionDir, events);
+  assert.deepEqual(poll(), []);
+  assert.deepEqual(cursor().touched, [charter, 'src/engine.js']);
+  assert.equal(cursor().verify_touched, false);
+  events.push(
+    { type: 'assistant.message', data: { parentToolCallId: 'inline-task', toolRequests: [{
+      name: 'edit', arguments: { path: 'test/engine.test.mjs', new_str: 'assert.equal(engine, 2);' },
+    }] } },
+  );
+  writeEvents(sessionDir, events);
+  assert.deepEqual(poll(), []);
+  assert.equal(cursor().verify_touched, true);
+  events.push(
+    { type: 'assistant.message', data: { toolRequests: [{
+      name: 'sql', toolCallId: 'checkpoint', arguments: { query: "UPDATE todos SET status='done'" },
+    }] } },
+    { type: 'tool.execution_complete', data: { toolCallId: 'checkpoint', success: true } },
+  );
+  writeEvents(sessionDir, events);
+  assert.deepEqual(poll().map((wake) => ({ trigger: wake.trigger, touched: wake.touched_files })), [{
+    trigger: 'T3_CHECKPOINT_DRIFT',
+    touched: [charter, 'src/engine.js', 'test/engine.test.mjs'],
+  }]);
+});
+
+test('25 child bookkeeping and read completions do not consume the write and shell evidence budget', (t) => {
+  const { sessionDir, outDir, run } = watcherFixture(t);
+  const names = ['skill', 'update_todo', 'view', 'sql'];
+  writeEvents(sessionDir, [
+    { type: 'session.start', data: { sessionId: 'steward' } },
+    ...Array.from({ length: 25 }, (_, index) => [
+      { type: 'assistant.message', data: { parentToolCallId: 'inline-task', toolRequests: [{
+        name: names[index % names.length], toolCallId: `noise-${index}`, arguments: {},
+      }] } },
+      { type: 'tool.execution_complete', data: {
+        parentToolCallId: 'inline-task', toolCallId: `noise-${index}`,
+        toolName: names[index % names.length], success: true, result: { content: 'Bookkeeping output.' },
+      } },
+    ]).flat(),
+    { type: 'assistant.message', data: { parentToolCallId: 'inline-task', toolRequests: [
+      { name: 'edit', toolCallId: 'write', arguments: { path: 'src/engine.js', new_str: 'export const engine = 2;' } },
+      { name: 'powershell', toolCallId: 'check', arguments: { command: 'node check.mjs' } },
+    ] } },
+    { type: 'tool.execution_complete', data: {
+      parentToolCallId: 'inline-task', toolCallId: 'write', success: true, result: { content: 'Saved src/engine.js.' },
+    } },
+    { type: 'tool.execution_complete', data: {
+      parentToolCallId: 'inline-task', toolCallId: 'check', success: true, result: { content: 'Engine matches.' },
+    } },
+    { type: 'assistant.message', data: { content: 'Verified scoped edits.' } },
+  ]);
+  run('--replay');
+  const [wake] = JSON.parse(readFileSync(join(outDir, 'double-wake-bundle.json'), 'utf8'));
+  const children = wake.range_events.filter((event) => event.child);
+  assert.equal(children.length, 3);
+  assert.deepEqual(children.flatMap((event) => event.tools || []).map((tool) => tool.name), ['edit']);
+  assert.deepEqual(children.filter((event) => event.type === 'tool.execution_complete').map((event) => ({
+    name: event.name, output: event.output_preview, ...(event.name === 'powershell' ? { command: event.command } : {}),
+  })), [
+    { name: 'edit', output: 'Saved src/engine.js.' },
+    { name: 'powershell', output: 'Engine matches.', command: 'node check.mjs' },
+  ]);
+  assert.equal('child_events_truncated' in wake, false);
+  assert.deepEqual(wake.touched_files, ['src/engine.js']);
+  assert.deepEqual(wake.claims, ['Verified scoped edits.']);
+});
+
+test('child context caps entries at twenty and includes nameless command completions from earlier requests', (t) => {
+  const { sessionDir, outDir, run, poll } = watcherFixture(t);
+  const events = [
+    { type: 'assistant.message', data: { parentToolCallId: 'inline-task', toolRequests: [{
+      name: 'bash', toolCallId: 'old-command', arguments: { command: 'node check.mjs' },
+    }] } },
+    { type: 'assistant.message', data: { content: 'First checkpoint.' } },
+    { type: 'tool.execution_complete', data: {
+      parentToolCallId: 'inline-task', toolCallId: 'old-command', success: true, result: { content: 'Command finished.' },
+    } },
+  ];
+  for (let index = 0; index < 19; index += 1) {
+    events.push({ type: 'assistant.message', data: { parentToolCallId: 'inline-task', toolRequests: [{
+      name: 'edit', toolCallId: `edit-${index}`, arguments: { path: 'src/engine.js', new_str: `${index}` },
+    }] } });
+  }
+  events.push({ type: 'assistant.message', data: { content: 'Second checkpoint.' } });
+  writeEvents(sessionDir, events);
+  let wake = poll()[1];
+  assert.equal(wake.range_events.filter((event) => event.child).length, 20);
+  assert.equal(wake.child_events_truncated ?? false, false);
+  assert.deepEqual(wake.range_events[0], {
+    event: 2, type: 'tool.execution_complete', success: true,
+    output_truncated: false, output_total_chars: 17, output_preview: 'Command finished.',
+    child: true, parent_tool_call_id: 'inline-task', toolCallId: 'old-command', name: 'bash',
+    command: 'node check.mjs',
+  });
+  events.splice(-1, 0, { type: 'assistant.message', data: { parentToolCallId: 'inline-task', toolRequests: [{
+    name: 'edit', arguments: { path: 'src/engine.js', new_str: '20' },
+  }] } });
+  writeEvents(sessionDir, events);
+  run('--replay');
+  wake = JSON.parse(readFileSync(join(outDir, 'double-wake-bundle.json'), 'utf8'))[1];
+  assert.equal(wake.range_events.filter((event) => event.child).length, 20);
+  assert.equal(wake.child_events_truncated, true);
+  assert.deepEqual(wake.range_events.filter((event) => event.child).map((event) => event.event),
+    Array.from({ length: 20 }, (_, index) => index + 3));
+  assert.deepEqual(wake.claims, []);
+});
+
+test('the newest twenty of twenty-five child commands retain final verification and chronological root entries', (t) => {
+  const { sessionDir, poll } = watcherFixture(t);
+  const events = [
+    { type: 'session.start', data: { sessionId: 'steward' } },
+    { type: 'assistant.message', data: {
+      content: 'Starting the checks.', toolRequests: [{ name: 'read_agent', toolCallId: 'before' }],
+    } },
+  ];
+  for (let index = 1; index <= 25; index += 1) {
+    const command = index === 25 ? '  node  --test\nfinal-verification.test.mjs  '
+      : index === 24 ? `node ${'x'.repeat(300)}` : `node check-${index}.mjs`;
+    events.push(
+      { type: 'tool.execution_start', data: {
+        parentToolCallId: 'inline-task', toolCallId: `check-${index}`, toolName: 'powershell',
+        arguments: { command },
+      } },
+      { type: 'tool.execution_complete', data: {
+        parentToolCallId: 'inline-task', toolCallId: `check-${index}`,
+        success: true, result: { content: `Check ${index} passed.` },
+      } },
+    );
+    if (index === 10) events.push({ type: 'assistant.message', data: {
+      content: 'Waiting for the remaining checks.', toolRequests: [{ name: 'read_agent', toolCallId: 'during' }],
+    } });
+  }
+  events.push({ type: 'assistant.message', data: { content: 'Verified the final run.' } });
+  writeEvents(sessionDir, events);
+  const [wake] = poll();
+  const children = wake.range_events.filter((event) => event.child);
+  assert.equal(wake.child_events_truncated, true);
+  assert.deepEqual(children.map((event) => event.toolCallId), Array.from({ length: 20 }, (_, index) => `check-${index + 6}`));
+  assert.deepEqual(children.map((event) => event.output_preview), Array.from({ length: 20 }, (_, index) => `Check ${index + 6} passed.`));
+  assert.deepEqual(children.map((event) => event.command), [
+    ...Array.from({ length: 18 }, (_, index) => `node check-${index + 6}.mjs`),
+    `node ${'x'.repeat(235)}`, 'node --test final-verification.test.mjs',
+  ]);
+  assert.deepEqual(wake.range_events.filter((event) => !event.child).map((event) => event.content), [
+    'Starting the checks.', 'Waiting for the remaining checks.', 'Verified the final run.',
+  ]);
+  assert.deepEqual(wake.range_events.map((event) => event.event),
+    wake.range_events.map((event) => event.event).sort((a, b) => a - b));
+});
+
+for (const checkpoint of ['sql', 'decisions.tsv']) {
+  test(`inline test edits trigger checkpoint drift when the root marks ${checkpoint} done`, (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'double-child-drift-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const sessionDir = join(dir, 'steward');
+    const outDir = join(dir, 'out');
+    mkdirSync(sessionDir);
+    mkdirSync(outDir);
+    const events = [
+      { type: 'session.start', data: { sessionId: 'steward' } },
+      { type: 'assistant.message', data: { parentToolCallId: 'inline-task', toolRequests: [{
+        name: 'edit', arguments: { path: 'test/engine.test.mjs', old_str: '1', new_str: '2' },
+      }] } },
+      { type: 'assistant.turn_end', data: { parentToolCallId: 'inline-task' } },
+    ];
+    const poll = () => JSON.parse(runWatcher(`
+print(json.dumps(dw.poll_once(pathlib.Path(${JSON.stringify(sessionDir)}), pathlib.Path(${JSON.stringify(outDir)}))))
+`));
+    writeEvents(sessionDir, events);
+    assert.deepEqual(poll(), []);
+    events.push(
+      { type: 'assistant.message', data: { toolRequests: [{
+        toolCallId: 'checkpoint',
+        name: checkpoint === 'sql' ? 'sql' : 'edit',
+        arguments: checkpoint === 'sql'
+          ? { query: "UPDATE todos SET status='done' WHERE id='engine'" }
+          : { path: 'decisions.tsv', old_str: 'pending', new_str: 'done' },
+      }] } },
+      { type: 'tool.execution_complete', data: {
+        toolCallId: 'checkpoint', success: true, result: { content: 'ok' },
+      } },
+    );
+    writeEvents(sessionDir, events);
+    assert.deepEqual(poll(), [{
+      worker_session_id: 'steward',
+      event_range: [0, 4],
+      trigger: 'T3_CHECKPOINT_DRIFT',
+      touched_files: checkpoint === 'sql' ? ['test/engine.test.mjs'] : ['test/engine.test.mjs', 'decisions.tsv'],
+      trigger_detail: '',
+      delivered_audit_rows: 0,
+    }]);
+  });
+}
+
+test('a pending root claim retains child writes without flushing on the child turn end', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'double-child-pending-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const sessionDir = join(dir, 'steward');
+  const outDir = join(dir, 'out');
+  mkdirSync(sessionDir);
+  mkdirSync(outDir);
+  const events = [
+    { type: 'session.start', data: { sessionId: 'steward' } },
+    { type: 'assistant.message', data: {
+      content: 'Confirmed the engine needs an update.',
+      toolRequests: [{ name: 'task', toolCallId: 'inline-task', arguments: { prompt: 'Update the engine.' } }],
+    } },
+    { type: 'tool.execution_start', data: { toolName: 'task', toolCallId: 'inline-task' } },
+    { type: 'assistant.message', data: { parentToolCallId: 'inline-task', toolRequests: [{
+      name: 'edit', arguments: { path: 'test/engine.test.mjs', old_str: '1', new_str: '2' },
+    }] } },
+    { type: 'assistant.turn_end', data: { parentToolCallId: 'inline-task' } },
+  ];
+  const poll = () => JSON.parse(runWatcher(`
+print(json.dumps(dw.poll_once(pathlib.Path(${JSON.stringify(sessionDir)}), pathlib.Path(${JSON.stringify(outDir)}))))
+`));
+  writeEvents(sessionDir, events);
+  assert.deepEqual(poll(), []);
+  events.push({ type: 'tool.execution_complete', data: {
+    toolCallId: 'inline-task', success: true, result: { content: 'Agent finished.' },
+  } });
+  writeEvents(sessionDir, events);
+  assert.deepEqual(poll(), [{
+    worker_session_id: 'steward',
+    event_range: [0, 5],
+    trigger: 'T2_MIDRUN_CLAIM',
+    touched_files: ['test/engine.test.mjs'],
+    trigger_detail: 'Confirmed the engine needs an update.',
+    delivered_audit_rows: 0,
+  }]);
 });
 
 test('scan_events holds in-flight tool turns until completion, fires ask_user at tool.execution_start, and ignores Double wake send_session_message in is_gate', (t) => {
@@ -1263,7 +1790,11 @@ for phrase in phrases:
     counts.append(len(dw.scan_events(session_dir, lines=[json.dumps(e) for e in events])[0]))
 events = [
     {"type": "assistant.message", "data": {"content": "Verified output.", "toolRequests": [{"name": "powershell", "toolCallId": "c1"}]}},
-    {"type": "tool.execution_start", "data": {"shellToolInfo": {"hasWriteFileRedirection": True, "possiblePaths": ${JSON.stringify(['status', 'push', 'throw', '$env:GH_TOKEN', 'Directory', 'no doublexmax token', 'test_out.txt', 'src/app.py', 'skills\\double\\SKILL.md', 'logs/output', '$env:TEMP/out.txt', 'not a path.txt'])}}}},
+    {"type": "tool.execution_start", "data": {
+        "toolCallId": "c1", "toolName": "powershell",
+        "arguments": {"command": "emit > test_out.txt; emit > src/app.py; emit > skills/double/SKILL.md; emit > logs/output"},
+        "shellToolInfo": {"hasWriteFileRedirection": True, "possiblePaths": ${JSON.stringify(['status', 'push', 'throw', '$env:GH_TOKEN', 'Directory', 'no doublexmax token', 'test_out.txt', 'src/app.py', 'skills\\double\\SKILL.md', 'logs/output', '$env:TEMP/out.txt', 'not a path.txt'])}},
+    }},
     {"type": "tool.execution_complete", "data": {"toolCallId": "c1", "success": True}},
 ]
 wakes = dw.scan_events(session_dir, lines=[json.dumps(e) for e in events])[0]
@@ -1284,13 +1815,14 @@ test('redirected paths preserve spaces while rejecting shell syntax and URLs', (
     '$env:TEMP/result.xml', 'logs/*.xml', 'logs/"result.xml"', "logs/'result.xml'", 'logs/<result.xml',
     'logs/>result.xml', 'logs/|result.xml', 'logs/\rresult.xml', 'logs/\nresult.xml', 'logs/\tresult.xml',
   ];
+  const command = paths.slice(0, 4).map((path) => `emit > "${path}"`).join('; ');
   writeEvents(base, [
     { type: 'assistant.message', data: {
       content: 'Verified the test output.',
-      toolRequests: [{ name: 'powershell', toolCallId: 'write' }],
+      toolRequests: [{ name: 'powershell', toolCallId: 'write', arguments: { command } }],
     } },
     { type: 'tool.execution_start', data: {
-      toolCallId: 'write',
+      toolCallId: 'write', toolName: 'powershell', arguments: { command },
       shellToolInfo: { hasWriteFileRedirection: true, possiblePaths: paths },
     } },
     { type: 'tool.execution_complete', data: { toolCallId: 'write', success: true } },
@@ -1306,10 +1838,10 @@ test('redirected verification paths trigger checkpoint drift without verificatio
   t.after(() => rmSync(base, { recursive: true, force: true }));
   writeEvents(base, [
     { type: 'assistant.message', data: {
-      toolRequests: [{ name: 'powershell', toolCallId: 'write', arguments: { command: 'emit' } }],
+      toolRequests: [{ name: 'powershell', toolCallId: 'write', arguments: { command: 'emit > "$env:OUTPUT_FILE"' } }],
     } },
     { type: 'tool.execution_start', data: {
-      toolCallId: 'write', arguments: { command: 'emit' },
+      toolCallId: 'write', toolName: 'powershell', arguments: { command: 'emit > "$env:OUTPUT_FILE"' },
       shellToolInfo: { hasWriteFileRedirection: true, possiblePaths: ['test results/assertions.xml'] },
     } },
     { type: 'tool.execution_complete', data: { toolCallId: 'write', success: true } },
