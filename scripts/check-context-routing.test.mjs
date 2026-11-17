@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { checkBindings, REQUIRED_BINDINGS } from './check-context-routing.mjs';
@@ -33,6 +33,20 @@ test('a complete package binds every required workflow and a missing binding fai
   assert.deepEqual(checkBindings(dir), ['skills/how/SKILL.md: delegation must bind the canonical context-routing skill']);
 });
 
+test('steward requires its root agent and canonical skill binding', (t) => {
+  const dir = fixture(t);
+  assert.deepEqual(checkBindings(dir), []);
+  const agent = join(dir, 'agents', 'steward.agent.md');
+  rmSync(agent);
+  assert.deepEqual(checkBindings(dir), ['agents/steward.agent.md: missing required context binding']);
+  writeFileSync(agent, 'Before each delegate invoke the `context-routing` skill with the `skill` tool.\n');
+  const skill = join(dir, 'skills', 'steward', 'SKILL.md');
+  writeFileSync(skill, 'Before delegation invoke the `context-routing` skill with the `skill` tool.\n');
+  assert.deepEqual(checkBindings(dir), ['skills/steward/SKILL.md: delegation must bind the canonical context-routing skill']);
+  writeFileSync(skill, 'Before delegation invoke [context-routing](../context-routing/SKILL.md).\n');
+  assert.deepEqual(checkBindings(dir), []);
+});
+
 test('a new standalone delegating skill cannot bypass the contract registry', (t) => {
   const dir = fixture(t);
   const file = join(dir, 'skills', 'new-workflow', 'SKILL.md');
@@ -60,16 +74,20 @@ test('copied agents invoke the registered skill in the documented separate insta
   copyFileSync(join(root, 'skills', 'context-routing', 'SKILL.md'), canonical);
   writeFileSync(join(home, 'settings.json'), JSON.stringify({ skillDirectories: [skills] }));
   mkdirSync(join(home, 'agents'));
-  for (const name of ['poteto', 'poteto-worker', 'double']) {
-    const file = join(home, 'agents', `${name}.agent.md`);
-    copyFileSync(join(root, 'agents', `${name}.agent.md`), file);
+  for (const agent of readdirSync(join(root, 'agents')).filter((name) => name.endsWith('.agent.md'))) {
+    const file = join(home, 'agents', agent);
+    copyFileSync(join(root, 'agents', agent), file);
     const body = readFileSync(file, 'utf8');
-    for (const match of body.matchAll(/\[context-routing\]\(([^)]+)\)/g)) {
-      const target = resolve(dirname(file), match[1]);
-      assert.equal(existsSync(target), true, `${name}: copied agent points at missing ${target}`);
+    for (const [, href] of body.matchAll(/\]\(([^)\s]+)\)/g)) {
+      if (/^(https?:\/\/|mailto:|#)/i.test(href)) continue;
+      const target = resolve(dirname(file), decodeURIComponent(href.split('#')[0]));
+      assert.equal(target.startsWith(`${home}${sep}`), true, `${agent} points outside the installed home at ${target}`);
+      assert.equal(existsSync(target), true, `${agent} points at missing ${target}`);
     }
-    assert.match(body, /invoke the `context-routing` skill with the `skill` tool/i,
-      `${name}: the copied instructions must invoke the registered skill by name`);
+    if (REQUIRED_BINDINGS.includes(`agents/${agent}`)) {
+      assert.match(body, /invoke the `context-routing` skill with the `skill` tool/i,
+        `${agent} must invoke the registered skill by name`);
+    }
   }
   const registered = JSON.parse(readFileSync(join(home, 'settings.json'), 'utf8')).skillDirectories;
   assert.deepEqual(registered, [skills]);

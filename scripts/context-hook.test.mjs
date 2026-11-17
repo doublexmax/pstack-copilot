@@ -114,6 +114,22 @@ test('whole-command opt-out persists on resume, bypasses routing, and explicit r
   });
 });
 
+test('the whole /steward command clears opt-out but quoted prose does not', (t) => {
+  const f = fixture(t);
+  const event = launch(f);
+  const state = join(f.home, 'session-state', 'session-1', 'files', 'pstack-context-opt-out');
+  runHook('userPromptSubmitted', envelope({ prompt: 'skip poteto mode' }), f);
+  assert.equal(existsSync(state), true);
+  assert.deepEqual(runHook('userPromptSubmitted', envelope({ prompt: 'Explain "/steward".' }), f), { output: {} });
+  assert.equal(existsSync(state), true);
+  const entered = runHook('userPromptSubmitted', envelope({ prompt: '/steward' }), f);
+  assert.equal(existsSync(state), false);
+  assert.equal(entered.record.reason, 'explicit-re-entry');
+  assert.deepEqual(runHook('preToolUse', event, f).output, {
+    modifiedArgs: { ...event.toolArgs, context_tier: 'long_context' },
+  });
+});
+
 test('quoted prose, code, and extended commands do not change session opt-out', (t) => {
   const f = fixture(t);
   for (const prompt of [
