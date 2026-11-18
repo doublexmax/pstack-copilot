@@ -50,7 +50,7 @@ The default installer or `--hooks install` enables them again.
 `--uninstall` cannot be combined with `--hooks`.
 Hook removal preserves your instructions, policy, models, trust, wrappers, and session markers.
 Explicit routing still works, but native correction and durable opt-out tracking do not.
-After re-enabling hooks, submit `/poteto-mode` to clear a previous session opt-out.
+After re-enabling hooks, submit `/poteto-mode` or `/steward` to clear a previous session opt-out.
 
 If your `config.json` has JSONC comments, use `--skip-trust` to leave that file untouched.
 The installer validates the trust configuration before it writes anything.
@@ -166,7 +166,7 @@ Managed launches copy the resolver's arguments and declaration.
 Native hooks also check them and record decisions in `pstack-context-decisions\<sessionId>`.
 Post-launch observations compare against the saved dispatch decision, even if policy changes while the delegate runs.
 Missing or ambiguous dispatch evidence produces an unverified observation. The binding checker only lints instruction structure.
-Submit the whole command `skip poteto mode` to opt out, or `/poteto-mode` to re-enter.
+Submit the whole command `skip poteto mode` to opt out, or `/poteto-mode` or `/steward` to re-enter.
 Native hooks preserve that opt-out across same-session resume.
 Disabled hooks and timeouts can bypass native checks, so callers still need explicit routing.
 If the hook executable cannot start, Copilot can deny unrelated tool calls too. Remove the owned hooks with `--hooks remove`.

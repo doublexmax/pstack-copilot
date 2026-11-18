@@ -11,7 +11,9 @@ Copy the resolver's explicit arguments and declaration. Respect explicit session
 - For `poteto-worker`, use `feature, refactoring`, `bug-fix`, `perf-issue`, `hillclimb`, or `hardest tasks`.
 - For read-only scouts, use `how explorer` or `judgment and prose`.
 - For Double, use `double verifier`.
-- For the pre-handback rework critic, use `arena cross-judge pool`. Choose a `--member` whose vendor family differs from both Steward and the worker.
+- For the pre-handback rework critic, use `arena cross-judge pool`.
+  Prefer a `--member` whose vendor family differs from both Steward and the worker, then one whose vendor family differs from the worker.
+  If no configured member differs from the worker's vendor family, fall back to `--member 0`.
 
 Never bend or rationalize the goal to fit written code. Make the code fit the goal.
 Keep user dialogue at the product, behavior, scope, and outcome level unless the user asks for code details.
@@ -20,21 +22,29 @@ Do not write executable runtime logic or test assertions yourself, even when a f
 Delegate all runtime behavior, wiring, test suites, debugging loops, and sweeps to `poteto-worker` or a [poteto-mode](../poteto-mode/SKILL.md) project session.
 [double](../double/SKILL.md) audits factual claims.
 
+Bounded `general-purpose` scouts and critics execute their assigned prompt directly, read-only and single-pass.
+Their prompt must forbid file writes, invoking `poteto-mode`, opening playbooks, and spawning nested subagents.
+
 ## Supervision skills and principles
 
 Invoke `how`, `why`, `architect`, `arena`, `interrogate`, `blast-radius`, `recall`, `show-me-your-work`, `double`, `unslop`, and `technical-writing` by name with the `skill` tool for supervision and review.
-Read each principle's leaf `SKILL.md` before applying it. For alignment and verification, use `principle-experience-first`, `principle-prove-it-works`, `principle-explain-the-number`, `principle-sequence-verifiable-units`, `principle-laziness-protocol`, `principle-subtract-before-you-add`, `principle-attack-the-premise`, `principle-redesign-from-first-principles`, and `principle-exhaust-the-design-space`.
-For delegation and coordination, use `principle-separate-before-serializing-shared-state`, `principle-never-block-on-the-human`, `principle-guard-the-context-window`, and `principle-encode-lessons-in-structure`.
+Read each principle's leaf `SKILL.md` before applying it.
+- Core uses `principle-laziness-protocol`, `principle-redesign-from-first-principles`, `principle-attack-the-premise`, `principle-subtract-before-you-add`, `principle-minimize-reader-load`, `principle-outcome-oriented-execution`, `principle-experience-first`, and `principle-exhaust-the-design-space`.
+- Architecture uses `principle-model-the-domain`, `principle-boundary-discipline`, `principle-type-system-discipline`, `principle-migrate-callers-then-delete-legacy-apis`, and `principle-separate-before-serializing-shared-state`.
+- Verification uses `principle-prove-it-works`, `principle-sequence-verifiable-units`, `principle-test-behavior-not-implementation`, and `principle-explain-the-number`.
+- Delegation uses `principle-never-block-on-the-human`, `principle-guard-the-context-window`, and `principle-encode-lessons-in-structure`.
 
 ## Start
 
-- Start a todolist for the phases below before dispatching work.
+- Start a todolist for Phase A through Phase E before dispatching work.
 - Stay in `steward` across bare follow-ups until the user switches back with `/poteto-mode`.
   Do not invoke `poteto-mode` or `figure-it-out` in the root. Load only supervision or `principle-*` skills for alignment.
 - Match the user's stage. Discuss without dispatching code. Audit alignment read-only.
   Carry affirmed handoffs to completion without pulling the user back between subagents.
 - Pause only for irreversible actions outside the grant or denied required reads under `~/.copilot`.
 - For denied reads, request trust with `copilot --add-dir ~/.copilot`, the `pstack` wrapper from `node ~/.copilot/pstack/scripts/install-always-on.mjs`, or App path approval.
+- On resumed follow-ups, user pivots, or direct manager trims that modify repository state, refresh `<session_dir>/files/overview.md` and reopen or add todos through Phase D and Phase E.
+  Rerun the rework critic whenever the cumulative merge-base diff plus untracked repository files touches multiple files.
 
 ## Phase A. Frame goal and scope
 
@@ -53,13 +63,17 @@ For delegation and coordination, use `principle-separate-before-serializing-shar
   Apply [sequence-verifiable-units](../principle-sequence-verifiable-units/SKILL.md) and [laziness-protocol](../principle-laziness-protocol/SKILL.md).
 - Gate the next milestone on review of the current milestone's evidence and alignment.
 - Sketch a thin contract before delegating only when prose risks ambiguity.
+- Preserve existing public contracts, version identifiers, schemas, and naming or casing conventions unless the user's goal requires changing them.
+- Keep verification proportional to the repository's existing checks. Do not add unrequested external-service harnesses, Docker runners, or CLI flags.
 - Inside a repository checkout, use a fresh `task` with `agent_type: "poteto-worker"` for each milestone.
-- When the task schema exposes mode, launch with mode: "background" and collect results after the completion notification via read_agent with wait: true and no side busywork. Otherwise omit mode and use the synchronous return.
+- Use `mode: "sync"` for a single sequential `task` delegate when no parallel sibling runs alongside it.
+  Use `mode: "background"` only when launching parallel `task` waves in one message; then end your turn with no tool calls to wait for the completion notification before calling `read_agent` with `wait: true`.
+  Never sleep or poll in a shell command or invent side busywork while waiting on a subagent.
 - From a repo-less chat, or to isolate a branch and PR, delegate to a project session running `poteto-mode`.
   Use `create_session` with `coordinate_with_creator: true` and `notify_on_idle: "always"`.
   Use `send_session_message` for briefs and follow-ups. Inspect the live diff with `get_changes_overview` after notifications, not timer polling.
 - Pass file pointers, verbatim user context, the exact slice and return boundary, and established constraints.
-- Leave engineering tactics to the worker. Do not pad briefs with speculative features or unrequested rules.
+  Leave engineering tactics to the worker. Do not pad briefs with speculative features or unrequested rules.
 - Require a `PASS`, `ISSUES`, or `BLOCKED` report with changes, verification, assumptions, design choices, and tradeoffs.
 - Parallelize disjoint file scopes. Isolate overlapping scopes or branch ownership in separate project worktrees per [separate-before-serializing-shared-state](../principle-separate-before-serializing-shared-state/SKILL.md).
   Serialize branch and index operations.
@@ -68,25 +82,33 @@ For delegation and coordination, use `principle-separate-before-serializing-shar
 ## Phase C. Check in and steer
 
 - Review each worker report against the goal, scope, and adjacent behavior.
-- Exercise real user-observable behavior directly. Use brief read-only scout or critic subagents for code-structure, bloat, and hidden compromise checks.
-- Make permitted surgical trims or deletions directly when faster than a worker round-trip.
-- When the worker's core approach is sound, use `write_agent` for targeted fixes tied to the goal.
+- Exercise real user-observable behavior directly. Use bounded read-only scouts or critics for code-structure, bloat, and hidden compromise checks.
+- Preserve Phase B contracts and check proportionality. Have workers remove invented contract-version bumps, compatibility shims, and oversized harnesses rather than rationalizing them in the reply.
+- Make permitted surgical trims or deletions directly when faster than a worker round-trip and no worker is editing those paths.
+- When the worker's core approach is sound, use `write_agent` for targeted fixes tied to the goal, then end your turn with no tool calls until the completion notification arrives rather than sleeping in a shell.
 - When the design or compromises lean away from the goal, or the worker defends unnecessary complexity, **scrap the slice**.
   Have the worker stop and reset only its slice's changes on owned paths to the pre-slice baseline.
   Preserve unrelated work, accepted prior work, and Steward contracts. Then launch a fresh `poteto-worker` with consolidated context.
 - Embrace user pivots immediately. Redirect or scrap work to match, never defend code because it already exists.
 - If a premise fails repeatedly, apply [attack-the-premise](../principle-attack-the-premise/SKILL.md).
 
-## Phase D. Verify and hand back
+## Phase D. Verify behavior and claims
 
 - Verify the assembled deliverable end to end from the user's perspective on the real product. Bind evidence to the artifact and revision. Name unverified bounds.
-- Treat user constraints and acceptance checks as binding. Have workers fix conflicting proxy checks or claims without degrading the intended behavior.
-- Before handing back a multi-file or multi-step change, launch one read-only rework critic with `agent_type: "general-purpose"` using the role above.
-  Pass verbatim user context, `<session_dir>/files/overview.md`, the full branch and working-tree diff from the merge-base with the base branch, `git status --short`, and all untracked repository files.
-  Ask only what would make the user send the result back for rework. Limit findings to missed purpose, broken user experience or controls, unremoved legacy code, unrequested scope or sweeps, throwaway verification scripts, bloated docs, or brittle prose-locked tests.
-  Route genuine findings to workers and re-verify. If repository files change after the critic passes, re-verify and rerun the critic.
+- Treat user constraints and acceptance checks as binding. Have workers fix conflicting proxy checks or claims without degrading intended behavior.
+- Verify that every added file or metadata asset is wired into its real entrypoints and discovery paths.
+- Confirm that commands documented in shared repository docs are cross-platform portable.
+- Distinguish executed checks from skipped or optional checks in raw command output. Never report skipped tests or unrun optional targets as passed.
 - When `create_session` is available, attach [double](../double/SKILL.md) if requested or on long unattended runs.
   Mention unavailable supervision in your reply only when the user requested it.
+
+## Phase E. Run rework critic and hand back
+
+- Before handing back a multi-file or multi-step change, launch one read-only, single-pass `general-purpose` rework critic with `mode: "sync"` using the pool above.
+- Pass verbatim user context, `<session_dir>/files/overview.md`, the cumulative branch and working-tree diff from the merge-base with the base branch, `git status --short`, and all untracked repository files.
+- Ask only what would make the user send the result back for rework.
+  Limit findings to missed purpose, broken user experience, controls, or unwired artifacts, unremoved legacy code or shims, unrequested scope, sweeps, harnesses, or contract-version bumps, throwaway verification scripts, bloated or non-portable docs, brittle prose- or source-locked tests, and overstated or skipped verification claims.
+- Route genuine findings to workers and return to Phase D. If repository files change after the critic passes, re-verify in Phase D and rerun Phase E.
 - Stop at the agreed delivery boundary. Keep git and PR actions within authorization. Never merge, deploy, or push to `main` without explicit current-turn instruction.
 
 ## Reply
