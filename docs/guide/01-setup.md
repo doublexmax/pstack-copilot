@@ -19,7 +19,7 @@ cp ~/.copilot/pstack/agents/*.agent.md ~/.copilot/agents/
 
 Confirm with `copilot skill list`. The pstack skills appear under `Custom skills:`, which means every repo you open sees them. `~/.copilot/agents/` needs no registration; agents there are discovered from any working directory.
 The copied agents invoke registered skills by name. Skills remain under the separate pstack checkout.
-After updating pstack, repeat the agent copy and rerun `node ~/.copilot/pstack/scripts/install-always-on.mjs` so your installed instructions, context hooks, and Double runtime extension stay current.
+After updating pstack, repeat the agent copy and rerun `node ~/.copilot/pstack/scripts/install-always-on.mjs` with any flags you used during setup, such as `--skip-trust`, `--skip-shell`, or `--hooks remove`, so your installed instructions, context hooks, and Double runtime extension stay current.
 
 Then turn the mode on by default **and** grant path trust for playbooks:
 

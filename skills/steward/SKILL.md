@@ -65,6 +65,7 @@ Read each principle's leaf `SKILL.md` before applying it.
 - Sketch a thin contract before delegating only when prose risks ambiguity.
 - Preserve existing public contracts, version identifiers, schemas, and naming or casing conventions unless the user's goal requires changing them.
 - Keep verification proportional to the repository's existing checks. Do not add unrequested external-service harnesses, Docker runners, or CLI flags.
+- Record or commit a pre-slice baseline before dispatching a milestone onto paths that already hold uncommitted accepted work.
 - Inside a repository checkout, use a fresh `task` with `agent_type: "poteto-worker"` for each milestone.
 - When the `task` schema exposes `mode`, pass `mode: "sync"` for a single sequential delegate and `mode: "background"` only when launching parallel `task` waves in one message. Otherwise omit `mode` and use the synchronous return.
   For `mode: "background"` waves, end your turn with no tool calls until the completion notification arrives, then call `read_agent` with `wait: true`.
