@@ -157,12 +157,31 @@ test('Steward skill references resolve table columns, links, and principles whil
         `${agent}: referenced skill missing-table-skill has no skills/missing-table-skill/SKILL.md`,
         `${skill}: missing Steward skill missing-table-skill exposed by ${agent}`,
       ]],
+    ['resolves unknown skills from explicit Invoke by name clauses', skill,
+      'Invoke `how` and `unslop` by name with the `skill` tool.',
+      'Invoke `how`, `unslop`, and `missing-supervision-skill` by name with the `skill` tool.', [
+        `${skill}: referenced skill missing-supervision-skill has no skills/missing-supervision-skill/SKILL.md`,
+        `${agent}: missing Steward skill missing-supervision-skill referenced by ${skill}`,
+      ]],
     ['resolves relative skill links and principle names', skill, 'Invoke `how` and `unslop` by name with the `skill` tool.',
       'Invoke `how` and `unslop` by name with the `skill` tool.\nRead [missing-review](../missing-review/SKILL.md) and `principle-missing`.', [
         `${skill}: referenced skill missing-review has no skills/missing-review/SKILL.md`,
         `${skill}: referenced skill principle-missing has no skills/principle-missing/SKILL.md`,
         `${agent}: missing Steward skill missing-review referenced by ${skill}`,
         `${agent}: missing Steward skill principle-missing referenced by ${skill}`,
+      ]],
+    ['resolves normalized relative skill links with fragments', skill, '## Supervision skills and principles',
+      'Read [missing-review](../missing-review/../missing-review/SKILL.md#review).\n\n## Supervision skills and principles', [
+        `${skill}: referenced skill missing-review has no skills/missing-review/SKILL.md`,
+        `${agent}: missing Steward skill missing-review referenced by ${skill}`,
+      ]],
+    ['rejects a skill link relative to the wrong agent directory', agent, '## Principles',
+      'Read [how](../how/SKILL.md).\n\n## Principles', [
+        `${agent}: non-canonical or broken skill link ../how/SKILL.md`,
+      ]],
+    ['rejects a skill link relative to the wrong skill directory', skill, '## Supervision skills and principles',
+      'Read [how](../skills/how/SKILL.md).\n\n## Supervision skills and principles', [
+        `${skill}: non-canonical or broken skill link ../skills/how/SKILL.md`,
       ]],
     ['requires agent parity with the skill index', agent,
       '| `unslop` | Clean prose outside the `merge-base` diff without `poteto-worker`. |\n', '', [
@@ -189,6 +208,31 @@ test('Steward skill references resolve table columns, links, and principles whil
       `${agent}: referenced skill unslop has no skills/unslop/SKILL.md`,
     ]);
   });
+  await t.test('keeps named references when the whole skill directory is deleted', (t) => {
+    const dir = stewardFixture(t);
+    rmSync(join(dir, 'skills', 'how'), { recursive: true });
+    assert.deepEqual(checkStewardContract(dir), [
+      `${skill}: referenced skill how has no skills/how/SKILL.md`,
+      `${agent}: referenced skill how has no skills/how/SKILL.md`,
+    ]);
+  });
+  for (const [site, reference] of [
+    ['table column one', (slug) => `| \`${slug}\` | Check diffs. |`],
+    ['Invoke by name clauses', (slug) => `Invoke \`${slug}\` by name with the \`skill\` tool.`],
+  ]) {
+    await t.test(`rejects non-supervision modes in ${site}`, (t) => {
+      for (const [name, heading] of [[skill, '## Supervision skills and principles'], [agent, '## Supervision and review skills']]) {
+        for (const slug of ['steward', 'context-routing', 'poteto-mode', 'figure-it-out']) {
+          const dir = stewardFixture(t);
+          const file = join(dir, name);
+          const body = readFileSync(file, 'utf8');
+          assert.ok(body.includes(heading));
+          writeFileSync(file, body.replace(heading, `${heading}\n${reference(slug)}`));
+          assert.deepEqual(checkStewardContract(dir), [`${name}: Supervision index must not expose ${slug}`]);
+        }
+      }
+    });
+  }
   for (const slug of REQUIRED_STEWARD_PRINCIPLES) {
     await t.test(`requires ${slug} in the exposure index`, (t) => {
       const dir = stewardFixture(t);
@@ -225,6 +269,52 @@ test('Steward skill references resolve table columns, links, and principles whil
     const skillFile = join(dir, skill);
     writeFileSync(skillFile, `${readFileSync(skillFile, 'utf8')}\n\n## Worker notes\nWorkers run \`tdd\` separately.\n`);
     assert.deepEqual(checkStewardContract(dir), []);
+  });
+  await t.test('ignores known skills in non-index supervision prose without consulting their directories', (t) => {
+    const dir = stewardFixture(t);
+    const leaf = join(dir, 'skills', 'tdd', 'SKILL.md');
+    mkdirSync(dirname(leaf), { recursive: true });
+    writeFileSync(leaf, '# TDD\n');
+    const file = join(dir, skill);
+    const body = readFileSync(file, 'utf8');
+    const heading = '## Supervision skills and principles';
+    assert.ok(body.includes(heading));
+    writeFileSync(file, body.replace(heading, `${heading}\nWorkers run \`tdd\` separately.`));
+    assert.deepEqual(checkStewardContract(dir), []);
+    rmSync(dirname(leaf), { recursive: true });
+    assert.deepEqual(checkStewardContract(dir), []);
+  });
+  await t.test('ignores references in backtick and tilde fenced examples', (t) => {
+    for (const fence of ['```', '~~~']) {
+      for (const name of [skill, agent]) {
+        const dir = stewardFixture(t);
+        const file = join(dir, name);
+        const example = [
+          `${fence}markdown`,
+          '## Supervision examples',
+          '| `steward` | Check diffs. |',
+          'Invoke `missing-fenced-skill` by name with the `skill` tool.',
+          'Read [missing-review](../missing-review/SKILL.md) and `principle-fenced-example`.',
+          fence,
+        ].join('\r\n');
+        writeFileSync(file, `${readFileSync(file, 'utf8')}\n\n${example}\n`);
+        assert.deepEqual(checkStewardContract(dir), []);
+      }
+    }
+  });
+  await t.test('requires code fences to occupy full opening and closing lines', (t) => {
+    for (const [example, expected] of [
+      [['```inline```', 'Read `principle-after-inline`.', '```text', 'An example.', '```'], [
+        `${skill}: referenced skill principle-after-inline has no skills/principle-after-inline/SKILL.md`,
+        `${agent}: missing Steward skill principle-after-inline referenced by ${skill}`,
+      ]],
+      [['```markdown', 'An example.', '```inline```', 'Read `principle-fenced-example`.', '```'], []],
+    ]) {
+      const dir = stewardFixture(t);
+      const file = join(dir, skill);
+      writeFileSync(file, `${readFileSync(file, 'utf8')}\n\n${example.join('\n')}\n`);
+      assert.deepEqual(checkStewardContract(dir), expected);
+    }
   });
 });
 
