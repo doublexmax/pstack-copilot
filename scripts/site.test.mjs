@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import test from 'node:test';
 
 const site = new URL('../site/', import.meta.url);
@@ -49,6 +49,46 @@ test('README links to the public project overview', () => {
   const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
   assert.match(readme, /^# pstack for GitHub Copilot\r?\n/);
   assert.ok(readme.includes(`](${canonical})`));
+});
+
+test('README inventory matches the skill, playbook, principle, and agent files', () => {
+  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const skills = readdirSync(new URL('../skills/', import.meta.url), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory());
+  const playbooks = readdirSync(new URL('../skills/poteto-mode/playbooks/', import.meta.url), { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.md'));
+  const agents = readdirSync(new URL('../agents/', import.meta.url), { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.agent.md'));
+  const summary = readme.match(/(\d+) skills, (\d+) playbooks, (\d+) principles, and (\d+) agents\b/);
+  assert.ok(summary, 'Missing package inventory summary');
+  assert.deepEqual(summary.slice(1).map(Number), [
+    skills.length, playbooks.length, skills.filter((entry) => entry.name.startsWith('principle-')).length, agents.length,
+  ]);
+  const installSection = readme.match(/(?:^|\n)## install\r?\n([\s\S]*?)(?:\r?\n## |$)/)?.[1] ?? '';
+  for (const entry of agents) {
+    const slug = entry.name.replace(/\.agent\.md$/, '');
+    assert.ok(installSection.includes(`\`${slug}\``), `Install section must list agent ${slug}`);
+  }
+});
+
+test('README all-skills table exposes the Steward skill', () => {
+  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const table = readme.match(/<summary>all skills<\/summary>([\s\S]*?)<\/details>/)?.[1];
+  assert.ok(table, 'Missing all-skills table');
+  assert.match(table, /^\| \[`\/steward`\]\(\.\/skills\/steward\/SKILL\.md\) \|/m);
+});
+
+test('README custom additions include Steward alongside Double', () => {
+  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const additions = readme.match(/(?:^|\n)### custom additions\r?\n([\s\S]*?)(?:\r?\n#{1,3} |$)/)?.[1];
+  assert.ok(additions, 'Missing custom additions section');
+  for (const slug of ['double', 'steward']) {
+    assert.match(additions, new RegExp(`\\[\`?${slug}\`?\\]\\(\\./agents/${slug}\\.agent\\.md\\)`));
+    assert.ok(additions.includes(`[\`/${slug}\`](./skills/${slug}/SKILL.md)`), `Missing /${slug} custom addition`);
+  }
+  assert.match(additions, /\[@doublexmax\]\(https:\/\/github\.com\/doublexmax\)/);
+  assert.match(additions, /not (?:available )?in upstream/i);
+  assert.match(additions, /\[`cursor\/plugins` `pstack`\]\(https:\/\/github\.com\/cursor\/plugins\/tree\/main\/pstack\)/);
 });
 
 test('each section labels itself with its own heading', () => {

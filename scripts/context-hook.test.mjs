@@ -5,8 +5,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { runHook } from './context-hook.mjs';
+import * as contextHook from './context-hook.mjs';
 import { configurePolicy, loadContextPolicy, resolveRole, routeToolCall } from './context-routing.mjs';
+
+const { runHook } = contextHook;
 
 const script = fileURLToPath(new URL('./context-hook.mjs', import.meta.url));
 
@@ -128,6 +130,25 @@ test('the whole /steward command clears opt-out but quoted prose does not', (t) 
   assert.deepEqual(runHook('preToolUse', event, f).output, {
     modifiedArgs: { ...event.toolArgs, context_tier: 'long_context' },
   });
+  runHook('userPromptSubmitted', envelope({ prompt: 'skip poteto mode' }), f);
+  assert.equal(existsSync(state), true);
+  const resumed = runHook('sessionStart', envelope({ initialPrompt: '/steward', source: 'resume' }), f);
+  assert.equal(existsSync(state), false);
+  assert.equal(resumed.record.reason, 'context-routing-ready');
+});
+
+test('resumed opted-out sessions advertise and accept every registered re-entry command', (t) => {
+  const f = fixture(t);
+  assert.deepEqual(contextHook.REENTRY_COMMANDS, ['/poteto-mode', '/steward']);
+  runHook('userPromptSubmitted', envelope({ prompt: 'skip poteto mode' }), f);
+  const resumed = runHook('sessionStart', envelope({ source: 'resume' }), f);
+  assert.equal(resumed.record.scope, 'opt-out');
+  for (const command of contextHook.REENTRY_COMMANDS) {
+    assert.ok(resumed.output.additionalContext.includes(command), `Missing ${command} in resume notice`);
+    runHook('userPromptSubmitted', envelope({ prompt: 'skip poteto mode' }), f);
+    const cleared = runHook('sessionStart', envelope({ initialPrompt: command, source: 'resume' }), f);
+    assert.equal(cleared.record.reason, 'context-routing-ready');
+  }
 });
 
 test('quoted prose, code, and extended commands do not change session opt-out', (t) => {
