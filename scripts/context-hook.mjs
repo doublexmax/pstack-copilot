@@ -27,7 +27,7 @@ function wholeCommand(prompt) {
   if (typeof prompt !== 'string') return null;
   const command = prompt.trim().toLowerCase();
   if (command === 'skip poteto mode') return 'off';
-  if (command === '/poteto-mode') return 'on';
+  if (command === '/poteto-mode' || command === '/steward') return 'on';
   return null;
 }
 

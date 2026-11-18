@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from collections import Counter
+from collections import Counter, deque
 from contextlib import contextmanager
 import csv
 import json
@@ -25,7 +25,7 @@ def copilot_home() -> pathlib.Path:
     return (base / ".copilot").resolve()
 
 
-PATCH_FILE_RE = re.compile(r"^\*\*\*\s+(?:Add File|Update File|Delete File|Move to):\s*(.+)$")
+PATCH_FILE_RE = re.compile(r"^\*\*\*[ \t]+(?:Add File|Update File|Delete File|Move to):[ \t]*(.+)$", re.M)
 FACTUAL_CLAIM_RE = re.compile(
     r"\b(succeeded|passed|failed|reduced|matched|differed|reproduced|verified|confirmed|identical|no unrelated|remains additive|completed|is now the|routed correctly|fixed|root cause|because|caused by|(?<!\bi\s)(?<!\bwe\s)must be(?!\s+(?:mindful|careful|cautious|sure\b|able\b))|assumes)\b",
     re.I,
@@ -34,6 +34,10 @@ VERIFY_OR_SCOPE_RE = re.compile(
     r"(test|spec|bench|verify|assert|\.pop\(|skip|xfail|equivalen|\.build[/\\]|Tables[/\\])",
     re.I,
 )
+WRITE_TOOLS = {"edit", "create", "apply_patch"}
+SHELL_TOOLS = {"powershell", "bash"}
+FILE_WRITE_COMMAND_RE = re.compile(r"\b(?:Out-File|Set-Content|Add-Content|Tee-Object|New-Item|Copy-Item|Move-Item|tee)\b", re.I)
+FILE_REDIRECT_RE = re.compile(r"""(?<![<>=\\-])>{1,2}(?![>&])\s*(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))""")
 LEDGER_HEADER = ["ts", "event_range"]
 NEW_LEDGER_ROW_RE = re.compile(r'^\s*"?\d{4}-\d{2}-\d{2}[T\s][^\t]*\t')
 RESOLVED_REFS_RE = re.compile(r"\s*((?:L\d+\b[\s,;]*)+)")
@@ -79,26 +83,45 @@ class AskGate(NamedTuple):
     choices: tuple[str, ...]
 
 
-def extract_files(args_obj) -> list[str]:
+class FileWrite(NamedTuple):
+    path: str
+    body: str
+
+
+def parse_tool_arguments(args_obj):
     if isinstance(args_obj, str) and args_obj.lstrip().startswith("{"):
         try:
-            args_obj = json.loads(args_obj)
+            return json.loads(args_obj)
         except json.JSONDecodeError:
             pass
+    return args_obj
+
+
+def extract_file_writes(args_obj) -> list[FileWrite]:
+    args_obj = parse_tool_arguments(args_obj)
     if isinstance(args_obj, dict):
         path = args_obj.get("path")
         if isinstance(path, str) and path.strip():
-            return [path.strip()]
+            return [FileWrite(path.strip(), str(args_obj))]
         args_obj = "\n".join(value for value in args_obj.values() if isinstance(value, str))
-    found = []
     if isinstance(args_obj, str):
-        for line in args_obj.splitlines():
-            match = PATCH_FILE_RE.match(line)
-            if match:
-                path = match.group(1).strip()
-                if path and path not in found:
-                    found.append(path)
-    return found
+        parts = PATCH_FILE_RE.split(args_obj)
+        return [FileWrite(path.strip(), body) for path, body in zip(parts[1::2], parts[2::2]) if path.strip()]
+    return []
+
+
+def shell_command(args_obj) -> str:
+    args_obj = parse_tool_arguments(args_obj)
+    return str(args_obj.get("command") or "") if isinstance(args_obj, dict) else str(args_obj or "")
+
+
+def shell_writes_file(command: str) -> bool:
+    if FILE_WRITE_COMMAND_RE.search(command):
+        return True
+    return any(
+        next(target for target in match.groups() if target).lower() not in ("nul", "nul:", "/dev/null", "$null")
+        for match in FILE_REDIRECT_RE.finditer(command)
+    )
 
 
 def is_double_wake_call(tr: dict) -> bool:
@@ -155,26 +178,36 @@ def extract_wake_claims(lines: list[str], start_idx: int, end_idx: int) -> list[
 def extract_range_context(session_dir: pathlib.Path, lines: list[str], own_start: int, start_idx: int, end_idx: int) -> dict:
     end_idx = min(end_idx, len(lines) - 1)
     user_prompts = []
-    for idx in range(own_start, end_idx + 1):
-        if '"user.message"' in lines[idx]:
-            try:
-                ev = json.loads(lines[idx])
-                if ev.get("type") == "user.message":
-                    content = ev["data"].get("content") or ""
-                    if "[Double Supervisor Notice]" not in content:
-                        user_prompts.append({"event": idx, "content": content[:600]})
-            except Exception:
-                pass
-
+    child_tool_names = {}
+    child_commands = {}
     range_events = []
-    for idx in range(start_idx, end_idx + 1):
+    child_events = deque(maxlen=20)
+    child_event_count = 0
+    for idx in range(own_start, end_idx + 1):
         try:
             ev = json.loads(lines[idx])
-        except Exception:
+        except json.JSONDecodeError:
             continue
         t = ev.get("type")
         d = ev.get("data", {})
-        if d.get("parentToolCallId"):
+        parent_id = d.get("parentToolCallId")
+        if t == "user.message":
+            content = d.get("content") or ""
+            if "[Double Supervisor Notice]" not in content:
+                user_prompts.append({"event": idx, "content": content[:600]})
+        if parent_id:
+            requests = (d.get("toolRequests") or []) if t == "assistant.message" else []
+            if t == "tool.execution_start":
+                requests = [{
+                    "toolCallId": d.get("toolCallId"), "arguments": d.get("arguments"),
+                    "name": d.get("toolName") or child_tool_names.get(d.get("toolCallId")),
+                }]
+            for tr in requests:
+                if tr.get("toolCallId") and tr.get("name"):
+                    child_tool_names[tr["toolCallId"]] = tr["name"]
+                    if tr["name"] in SHELL_TOOLS and tr.get("arguments") is not None:
+                        child_commands[tr["toolCallId"]] = re.sub(r"\s+", " ", shell_command(tr["arguments"])).strip()[:240]
+        if idx < start_idx:
             continue
         if t == "assistant.message":
             treqs = [
@@ -184,32 +217,41 @@ def extract_range_context(session_dir: pathlib.Path, lines: list[str], own_start
                     "args": str(tr.get("arguments"))[:400],
                 }
                 for tr in (d.get("toolRequests") or [])
+                if not parent_id or tr.get("name") in WRITE_TOOLS
             ]
-            range_events.append({
-                "event": idx,
-                "type": t,
-                "reasoning": d.get("reasoningText") or "",
-                "content": d.get("content") or "",
-                "tools": treqs,
-            })
+            if parent_id and not treqs:
+                continue
+            entry = {"event": idx, "type": t, "tools": treqs}
+            if not parent_id:
+                entry.update(reasoning=d.get("reasoningText") or "", content=d.get("content") or "")
         elif t == "tool.execution_complete":
+            name = d.get("toolName") or d.get("name") or child_tool_names.get(d.get("toolCallId"))
+            if parent_id and name not in WRITE_TOOLS | SHELL_TOOLS:
+                continue
             res_obj = d.get("result")
             err_obj = d.get("error")
             res = str(
                 res_obj.get("content") if isinstance(res_obj, dict) and res_obj.get("content") is not None
-                else (
-                    err_obj.get("message") if isinstance(err_obj, dict) and err_obj.get("message") is not None
-                    else (err_obj if isinstance(err_obj, str) else "")
-                )
+                else err_obj.get("message") if isinstance(err_obj, dict) and err_obj.get("message") is not None
+                else err_obj if isinstance(err_obj, str) else ""
             )
-            range_events.append({
-                "event": idx,
-                "type": t,
-                "success": d.get("success"),
-                "output_truncated": len(res) > 4000,
-                "output_total_chars": len(res),
+            entry = {
+                "event": idx, "type": t, "success": d.get("success"),
+                "output_truncated": len(res) > 4000, "output_total_chars": len(res),
                 "output_preview": res[:4000],
-            })
+            }
+            if parent_id:
+                entry.update(toolCallId=d.get("toolCallId"), name=name)
+                if name in SHELL_TOOLS:
+                    entry["command"] = child_commands.get(d.get("toolCallId"), "")
+        else:
+            continue
+        if parent_id:
+            child_event_count += 1
+            entry.update(child=True, parent_tool_call_id=parent_id)
+            child_events.append(entry)
+        else:
+            range_events.append(entry)
 
     cwd = ""
     ws = session_dir / "workspace.yaml"
@@ -238,10 +280,11 @@ def extract_range_context(session_dir: pathlib.Path, lines: list[str], own_start
     return {
         "worker_cwd": cwd,
         "recent_user_prompts": user_prompts[-5:],
-        "range_events": range_events,
+        "range_events": sorted([*range_events, *child_events], key=lambda entry: entry["event"]),
         "active_todo_anchor": active_todo_anchor,
         "claims": claims,
         "claim_count": max(1, len(claims)),
+        **({"child_events_truncated": True} if child_event_count > 20 else {}),
     }
 
 
@@ -257,20 +300,44 @@ def scan_events(
         ev_file = session_dir / "events.jsonl"
         lines = ev_file.read_text(encoding="utf-8", errors="replace").splitlines() if ev_file.exists() else []
     own_start = find_own_session_start(lines, session_dir.name)
+    session_root = session_dir.resolve()
     start_idx = max(start_idx, own_start)
     touched = list(touched or [])
     wakes = []
     last_wake_idx = start_idx
     pending_wake = None
 
+    def record_writes(ev_type: str, data: dict) -> None:
+        nonlocal verify_touched
+        writes = []
+        if ev_type == "tool.execution_start":
+            shell_info = data.get("shellToolInfo") or {}
+            command = shell_command(data.get("arguments"))
+            if not shell_info.get("hasWriteFileRedirection") or not shell_writes_file(command):
+                return
+            writes = [
+                FileWrite(path, command) for path in shell_info.get("possiblePaths") or []
+                if is_likely_shell_path(path) and path.lower() not in ("nul", "nul:", "/dev/null", "$null")
+            ]
+        elif ev_type == "assistant.message":
+            writes = [
+                write for tr in data.get("toolRequests") or [] if tr.get("name") in WRITE_TOOLS
+                for write in extract_file_writes(tr.get("arguments"))
+            ]
+        for path, body in writes:
+            if path not in touched:
+                touched.append(path)
+            if not pathlib.Path(path.replace("\\", "/")).resolve().is_relative_to(session_root) and (
+                VERIFY_OR_SCOPE_RE.search(path) or VERIFY_OR_SCOPE_RE.search(body)
+            ):
+                verify_touched = True
+
     def emit_pending_wake(end_idx: int) -> None:
         nonlocal pending_wake, last_wake_idx, verify_touched
         wakes.append({
-            "worker_session_id": session_dir.name,
-            "event_range": [last_wake_idx, end_idx],
-            "trigger": pending_wake["trigger"],
+            "worker_session_id": session_dir.name, "event_range": [last_wake_idx, end_idx],
+            "trigger": pending_wake["trigger"], "trigger_detail": pending_wake["trigger_detail"],
             "touched_files": list(touched),
-            "trigger_detail": pending_wake["trigger_detail"],
         })
         touched.clear()
         verify_touched = False
@@ -284,7 +351,9 @@ def scan_events(
             continue
         ev_type = ev.get("type")
         data = ev.get("data", {})
-        if data.get("parentToolCallId"):
+        is_child = bool(data.get("parentToolCallId"))
+        if is_child:
+            record_writes(ev_type, data)
             continue
         if pending_wake and (
             ev_type in ("user.message", "assistant.turn_start", "assistant.message")
@@ -292,16 +361,26 @@ def scan_events(
         ):
             emit_pending_wake(max(last_wake_idx, idx - 1))
         if ev_type == "tool.execution_start":
-            shell_info = data.get("shellToolInfo") or {}
-            if shell_info.get("hasWriteFileRedirection"):
-                for p in shell_info.get("possiblePaths") or []:
-                    if is_likely_shell_path(p):
-                        if p not in touched:
-                            touched.append(p)
-                        if VERIFY_OR_SCOPE_RE.search(p):
-                            verify_touched = True
-                if VERIFY_OR_SCOPE_RE.search(str(data.get("arguments", ""))):
-                    verify_touched = True
+            record_writes(ev_type, data)
+        elif ev_type == "assistant.message":
+            touched_before_msg = list(touched)
+            verify_touched_before_msg = verify_touched
+            treqs = data.get("toolRequests") or []
+            checkpoint_done = False
+            record_writes(ev_type, data)
+            for tr in treqs:
+                name = tr.get("name", "")
+                args = tr.get("arguments") or {}
+                args_str = str(args)
+                if name in WRITE_TOOLS:
+                    for path, _ in extract_file_writes(args):
+                        resolved_path = pathlib.Path(path.replace("\\", "/")).resolve()
+                        if resolved_path.name.lower() == "decisions.tsv" and (
+                            resolved_path.is_relative_to(session_root) or resolved_path == pathlib.Path("decisions.tsv").resolve()
+                        ):
+                            checkpoint_done = True
+                elif name == "sql" and "status='done'" in args_str.replace(" ", ""):
+                    checkpoint_done = True
         if pending_wake:
             if ev_type == "tool.execution_start":
                 pending_wake["wait_start_ids"].discard(data.get("toolCallId"))
@@ -315,33 +394,16 @@ def scan_events(
                 emit_pending_wake(idx)
         if ev_type != "assistant.message":
             continue
-        touched_before_msg = list(touched)
-        verify_touched_before_msg = verify_touched
         content = (data.get("content") or "").strip()
         reasoning = (data.get("reasoningText") or "").strip()
         claim_text = f"{content}\n{reasoning}".strip()
-        treqs = data.get("toolRequests") or []
         non_wake_treqs = [tr for tr in treqs if not is_double_wake_call(tr)]
         tnames = [tr.get("name", "") for tr in treqs]
 
-        checkpoint_done = False
-        for tr in treqs:
-            name = tr.get("name", "")
-            args = tr.get("arguments") or {}
-            args_str = str(args)
-            if name in ("apply_patch", "edit", "create"):
-                for f in extract_files(args):
-                    if f not in touched:
-                        touched.append(f)
-                if VERIFY_OR_SCOPE_RE.search(args_str):
-                    verify_touched = True
-                if "decisions.tsv" in args_str:
-                    checkpoint_done = True
-            elif name == "sql" and "status='done'" in args_str.replace(" ", ""):
-                checkpoint_done = True
-
         is_gate = any(n in ("ask_user", "task_complete") for n in tnames) or (bool(content) and not non_wake_treqs)
         is_claim = bool(claim_text and FACTUAL_CLAIM_RE.search(claim_text))
+        if treqs and all(tr.get("name") == "read_agent" for tr in treqs):
+            is_claim = False
         is_drift = bool(checkpoint_done and verify_touched and not is_gate and not is_claim)
 
         if is_gate or is_claim or is_drift:
@@ -359,13 +421,11 @@ def scan_events(
                     for tr in non_wake_treqs if tr.get("name")
                 )
             pending_wake = {
-                "msg_idx": idx,
-                "trigger": trigger,
+                "msg_idx": idx, "trigger": trigger,
                 "trigger_detail": detail_source[:240].replace("\n", " "),
                 "wait_start_ids": wait_start_ids,
                 "wait_complete_ids": wait_complete_ids,
-                "pre_touched": touched_before_msg,
-                "pre_verify_touched": verify_touched_before_msg,
+                "pre_touched": touched_before_msg, "pre_verify_touched": verify_touched_before_msg,
             }
             if not wait_start_ids and not wait_complete_ids:
                 emit_pending_wake(idx)

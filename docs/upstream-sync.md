@@ -38,7 +38,7 @@ normalisation, so it carries no second hash and no reason. An `adapted` row clai
 difference, so it carries both hashes and a concrete reason. An `excluded` row claims no local
 file at all.
 
-At the current pin: 161 source files, 39 identical, 107 adapted, 15 excluded.
+The current pin contains 161 source files, with 39 identical, 107 adapted, and 15 excluded.
 
 ## Running the checks
 
@@ -118,7 +118,7 @@ future import cannot quietly reintroduce a Cursor-only name.
 
 ### The model panel
 
-Upstream ships a three-vendor panel (Anthropic, OpenAI, xAI). This port keeps a fourth seat on
+Upstream ships a three-vendor panel with Anthropic, OpenAI, and xAI models. This port keeps a fourth seat on
 a Gemini model so the review panels in `arena`, `architect`, and `interrogate` read four
 lineages rather than three. The second-opinion rule is "the same prompt against a different
 model, and agreement is high-signal", and a seat that repeats a family already on the panel
@@ -142,7 +142,7 @@ examples. Windows probes use PowerShell or the runtime's profiler.
 | `.cursor-plugin/plugin.json` | Cursor plugin manifest. Copilot has no equivalent to port. |
 | `.gitignore` | Subtree-level ignore file. The port root ships its own. |
 | `assets/logo.png` | Cursor plugin listing art. The port has no listing. |
-| `skills/poteto-mode/scripts/watch-pr/` (12 files) | GitHub-only PR watcher in TypeScript. The port reads PR state through host tools and `skills/poteto-mode/references/ado.md`, and ships no bun toolchain for it. |
+| The 12 files under `skills/poteto-mode/scripts/watch-pr/` | GitHub-only PR watcher in TypeScript. The port reads PR state through host tools and `skills/poteto-mode/references/ado.md`, and ships no bun toolchain for it. |
 
 ## Local-only files
 
@@ -151,8 +151,8 @@ it is a source-coverage gate, not a tree inventory.
 
 - `scripts/check-copilot-port.mjs`, `scripts/check-upstream-sync.mjs`, `scripts/check-context-routing.mjs`, `scripts/context-routing.mjs`, `scripts/context-hook.mjs`, `scripts/install-always-on.mjs`, and their tests.
 - `always-on/copilot-instructions.md`, the managed block the installer writes.
-- `agents/poteto-worker.agent.md` and `agents/double.agent.md`. The other two agents map to upstream sources in the manifest.
-- `skills/create-skill/SKILL.md`, `skills/context-routing/SKILL.md`, and `skills/double/` (`SKILL.md` and `scripts/double_watch.py`).
+- `agents/poteto-worker.agent.md`, `agents/double.agent.md`, and `agents/steward.agent.md`. The other two agents map to upstream sources in the manifest.
+- `skills/create-skill/SKILL.md`, `skills/context-routing/SKILL.md`, `skills/double/SKILL.md`, `skills/double/scripts/double_watch.py`, and `skills/steward/SKILL.md`.
 - `skills/automate-me/scripts/history.mjs` and `scripts/automate-me-history.test.mjs` implement and test consented history planning, slice reads, and draft audits.
   `skills/automate-me/references/history-mining.md` defines the source recipes and tool-only fallback.
   The census emits only grouped cloud metadata queries. Draft auditing does not require a history plan.
