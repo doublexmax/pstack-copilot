@@ -31,36 +31,35 @@ function stewardFixture(t) {
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const files = {
     'always-on/copilot-instructions.md': [
-      'Poteto mode is on by default for engineering sessions and project workers.',
+      'Poteto mode is on by default for engineering sessions, project workers, and code-writing subagents.',
+      'Use `poteto-mode` for code-writing workers, `steward` for coordination, `double` for supervision, and `context-routing` before delegation.',
       '',
-      'Bounded `general-purpose` delegates execute their assigned prompt directly without invoking `poteto-mode`, opening playbooks, or spawning nested subagents.',
+      'Read-only, single-pass scouts, critics, judges, and reviewers execute their assigned prompt directly without invoking `poteto-mode`, opening playbooks, or spawning nested subagents.',
     ].join('\n'),
     'skills/steward/SKILL.md': [
       'Use [context-routing](../context-routing/SKILL.md). Never invoke `poteto-mode` or `figure-it-out` in the root.',
       '',
-      'Use `arena cross-judge pool` for a `--member` whose vendor family differs from Steward and the worker. If no configured member differs, fall back to `--member 0`.',
-      '',
-      'Bounded `general-purpose` scouts and critics execute directly, and their prompt must forbid file writes, `poteto-mode`, playbooks, and nested subagents.',
-      '',
       '## Supervision skills and principles',
       'Invoke `how` and `unslop` by name with the `skill` tool.',
+      'Inspect the `merge-base` diff for `read-only` checks on `main` without `poteto-worker`.',
       'Read `principle-model-the-domain`, `principle-boundary-discipline`,',
       '`principle-migrate-callers-then-delete-legacy-apis`, and `principle-test-behavior-not-implementation`.',
-      '',
-      '## Start',
-      'On resumed follow-up or pivot turns, rerun the rework critic when the cumulative diff from merge-base plus untracked repository files touches multiple files.',
       '',
       '## Phase A. Frame goal and scope',
       'Frame purpose.',
       '',
       '## Phase B. Coordinate milestone steps',
-      'Use `mode: "sync"` for a single sequential delegate and `mode: "background"` only for parallel waves; never sleep or poll in a shell while waiting.',
+      'Coordinate workers.',
       '',
       '## Phase C. Check in and steer',
       'Steer workers.',
       '',
       '## Phase D. Verify behavior and claims',
-      'Verify that added files wire into real entrypoints and discovery paths, and confirm cross-platform portable doc commands. Verification must distinguish executed checks from skipped or optional checks.',
+      '- Verify that added files wire into real entrypoints and discovery paths, and confirm cross-platform portable doc commands.',
+      '',
+      '- Distinguish executed checks from skipped or optional checks.',
+      '',
+      '- Never verify against mock data.',
       '',
       '## Phase E. Run rework critic and hand back',
       'Run the critic.',
@@ -69,7 +68,10 @@ function stewardFixture(t) {
       'Invoke `steward` and `context-routing`, not `poteto-mode` or `figure-it-out`.',
       '',
       '## Supervision and review skills',
-      'Available skills are `how` and `unslop`.',
+      '| Skill | Reach for it when |',
+      '| --- | --- |',
+      '| `how` | Understand `read-only` behavior on `main`. |',
+      '| `unslop` | Clean prose outside the `merge-base` diff without `poteto-worker`. |',
       '',
       '## Principles',
       'Read `principle-model-the-domain`, `principle-boundary-discipline`,',
@@ -90,110 +92,140 @@ test('the repository satisfies the Steward contract and skill exposure index', (
   assert.deepEqual(checkStewardContract(root), []);
 });
 
-test('Steward contract fixtures accept a complete contract and diagnose broken or inverted safeguards', (t) => {
-  const dir = stewardFixture(t);
-  assert.deepEqual(checkStewardContract(dir), []);
+test('Steward contract fixtures enforce file structure, ordered non-empty phases, and index-only agent headings', async (t) => {
   const instructions = 'always-on/copilot-instructions.md';
   const skill = 'skills/steward/SKILL.md';
   const agent = 'agents/steward.agent.md';
-  for (const [name, before, after, expected] of [
-    [instructions, 'and project workers.', 'and all subagents in every repository.',
-      `${instructions}: must not enable poteto-mode across all inline subagents`],
-    [instructions, 'without invoking `poteto-mode`, opening playbooks, or spawning nested subagents.', 'immediately.',
-      `${instructions}: must keep bounded general-purpose delegates out of poteto-mode, playbooks, and nested subagents`],
-    [instructions, 'without invoking `poteto-mode`, opening playbooks, or spawning nested subagents.',
-      'quickly. Do not invoke `poteto-mode`, open playbooks, or spawn nested subagents.',
-      `${instructions}: must keep bounded general-purpose delegates out of poteto-mode, playbooks, and nested subagents`],
-    [agent, '## Principles', '## Lifecycle\n- Phase A.\n\n## Principles',
+  await t.test('accepts code-writing subagents, read-only delegates, and formatted verification bullets', (t) => {
+    assert.deepEqual(checkStewardContract(stewardFixture(t)), []);
+  });
+  for (const name of [instructions, skill, agent]) {
+    await t.test(`requires ${name}`, (t) => {
+      const dir = stewardFixture(t);
+      rmSync(join(dir, name));
+      assert.deepEqual(checkStewardContract(dir), [`${name}: missing Steward contract`]);
+    });
+  }
+  for (const slug of ['poteto-mode', 'steward', 'double', 'context-routing']) {
+    await t.test(`requires the ${slug} mode routing reference`, (t) => {
+      const dir = stewardFixture(t);
+      const file = join(dir, instructions);
+      const body = readFileSync(file, 'utf8');
+      assert.ok(body.includes(`\`${slug}\``));
+      writeFileSync(file, body.replaceAll(`\`${slug}\``, slug));
+      assert.deepEqual(checkStewardContract(dir), [`${instructions}: missing mode routing reference ${slug}`]);
+    });
+  }
+  for (const [description, name, before, after, expected] of [
+    ['rejects an agent Lifecycle heading', agent, '## Principles', '## Lifecycle\nOwn phases.\n\n## Principles',
       `${agent}: must remain a routing index instead of duplicating Steward lifecycle phases`],
-    [agent, '`how` and `unslop`', '`how`',
-      `${agent}: missing Steward skill unslop referenced by ${skill}`],
-    [skill, '`how` and `unslop`', '`how`',
-      `${skill}: missing Steward skill unslop exposed by ${agent}`],
-    [skill, '## Phase E. Run rework critic and hand back', '## Handback',
+    ['rejects an agent Phase heading', agent, '## Principles', '## Phase A. Frame goal and scope\nFrame purpose.\n\n## Principles',
+      `${agent}: must remain a routing index instead of duplicating Steward lifecycle phases`],
+    ['requires the Phase E heading', skill, '## Phase E. Run rework critic and hand back', '## Reply',
       `${skill}: missing required lifecycle heading Phase E`],
-    [skill, 'If no configured member differs, fall back to `--member 0`.', '',
-      `${skill}: rework critic selection must define a --member 0 fallback for narrow vendor pools`],
-    [skill, 'If no configured member differs, fall back to `--member 0`.',
-      'If no configured member differs, never fall back to `--member 0`.',
-      `${skill}: rework critic selection must define a --member 0 fallback for narrow vendor pools`],
-    [skill, 'file writes, `poteto-mode`, playbooks, and nested subagents.', '`poteto-mode` and nested subagents.',
-      `${skill}: bounded general-purpose scouts and critics must forbid writes, poteto-mode, playbooks, and nested subagents`],
-    [skill, 'rerun the rework critic', 'never rerun the rework critic',
-      `${skill}: must require rework critic on resumed turns when cumulative merge-base diff spans multiple files`],
-    [skill, ' plus untracked repository files', '',
-      `${skill}: must require rework critic on resumed turns when cumulative merge-base diff spans multiple files`],
-    [skill, 'Verification must distinguish executed checks from skipped or optional checks.',
-      'Report skipped checks and optional tests as executed checks that passed.',
-      `${skill}: verification must distinguish executed checks from skipped or optional checks`],
-    [skill, 'Verify that added files wire into real entrypoints and discovery paths, and confirm cross-platform portable doc commands. ', '',
-      `${skill}: Phase D must verify real entrypoint wiring and cross-platform doc command portability`],
-    [skill, 'never sleep or poll in a shell while waiting.', 'poll while waiting.',
-      `${skill}: Phase B must use mode: "sync" for single sequential delegates and forbid shell sleep polling`],
+    ['rejects an empty Phase E before another heading', skill, 'Run the critic.', '\n## Reply\nDone.\n',
+      `${skill}: lifecycle section Phase E must not be empty`],
+    ['rejects an empty Phase E at EOF', skill, 'Run the critic.', '',
+      `${skill}: lifecycle section Phase E must not be empty`],
   ]) {
-    const file = join(dir, name);
-    const original = readFileSync(file, 'utf8');
-    assert.ok(original.includes(before), `Fixture must contain ${before}`);
-    writeFileSync(file, original.replace(before, after));
-    assert.deepEqual(checkStewardContract(dir), [expected], expected);
-    writeFileSync(file, original);
+    await t.test(description, (t) => {
+      const dir = stewardFixture(t);
+      const file = join(dir, name);
+      const body = readFileSync(file, 'utf8');
+      assert.ok(body.includes(before), `Fixture must contain ${before}`);
+      writeFileSync(file, body.replace(before, after));
+      assert.deepEqual(checkStewardContract(dir), [expected]);
+    });
   }
-  assert.deepEqual(checkStewardContract(dir), []);
+  await t.test('requires Phase E to follow Phase D', (t) => {
+    const dir = stewardFixture(t);
+    const file = join(dir, skill);
+    const body = readFileSync(file, 'utf8');
+    const phases = /(## Phase D\.[\s\S]*?)(## Phase E\.[\s\S]*)$/;
+    assert.match(body, phases);
+    writeFileSync(file, body.replace(phases, '$2\n\n$1'));
+    assert.deepEqual(checkStewardContract(dir), [`${skill}: lifecycle heading Phase E must follow Phase D`]);
+  });
 });
 
-test('Steward skill references must resolve and required principles must remain indexed', (t) => {
-  const dir = stewardFixture(t);
-  const skill = join(dir, 'skills', 'steward', 'SKILL.md');
-  const original = readFileSync(skill, 'utf8');
-  writeFileSync(skill, original.replace(
-    'Invoke `how` and `unslop` by name with the `skill` tool.',
-    'Invoke `how`, `unslop`, `principle-missing`, and [missing-review](../missing-review/SKILL.md).',
-  ));
-  assert.deepEqual(checkStewardContract(dir), [
-    'skills/steward/SKILL.md: referenced skill missing-review has no skills/missing-review/SKILL.md',
-    'skills/steward/SKILL.md: referenced skill principle-missing has no skills/principle-missing/SKILL.md',
-    'agents/steward.agent.md: missing Steward skill missing-review referenced by skills/steward/SKILL.md',
-    'agents/steward.agent.md: missing Steward skill principle-missing referenced by skills/steward/SKILL.md',
-  ]);
-  writeFileSync(skill, original);
-  writeFileSync(skill, `${original}\nIn the root, never invoke \`swarm\` directly.\n`);
-  assert.deepEqual(checkStewardContract(dir), []);
-  writeFileSync(skill, original);
-  const leaf = join(dir, 'skills', 'unslop', 'SKILL.md');
-  rmSync(leaf);
-  assert.deepEqual(checkStewardContract(dir), [
-    'skills/steward/SKILL.md: referenced skill unslop has no skills/unslop/SKILL.md',
-    'agents/steward.agent.md: referenced skill unslop has no skills/unslop/SKILL.md',
-  ]);
-  writeFileSync(leaf, '# Unslop\n');
-  for (const slug of REQUIRED_STEWARD_PRINCIPLES) {
-    const agent = join(dir, 'agents', 'steward.agent.md');
-    const index = readFileSync(agent, 'utf8');
-    writeFileSync(skill, original.replace(`\`${slug}\``, ''));
-    writeFileSync(agent, index.replace(`\`${slug}\``, ''));
+test('Steward skill references resolve table columns, links, and principles while ignoring non-skill code spans', async (t) => {
+  const skill = 'skills/steward/SKILL.md';
+  const agent = 'agents/steward.agent.md';
+  for (const [description, name, before, after, expected] of [
+    ['resolves unknown table skills from column one', agent, '| --- | --- |',
+      '| --- | --- |\n| `missing-table-skill` | Check diffs. |', [
+        `${agent}: referenced skill missing-table-skill has no skills/missing-table-skill/SKILL.md`,
+        `${skill}: missing Steward skill missing-table-skill exposed by ${agent}`,
+      ]],
+    ['resolves relative skill links and principle names', skill, 'Invoke `how` and `unslop` by name with the `skill` tool.',
+      'Invoke `how` and `unslop` by name with the `skill` tool.\nRead [missing-review](../missing-review/SKILL.md) and `principle-missing`.', [
+        `${skill}: referenced skill missing-review has no skills/missing-review/SKILL.md`,
+        `${skill}: referenced skill principle-missing has no skills/principle-missing/SKILL.md`,
+        `${agent}: missing Steward skill missing-review referenced by ${skill}`,
+        `${agent}: missing Steward skill principle-missing referenced by ${skill}`,
+      ]],
+    ['requires agent parity with the skill index', agent,
+      '| `unslop` | Clean prose outside the `merge-base` diff without `poteto-worker`. |\n', '', [
+        `${agent}: missing Steward skill unslop referenced by ${skill}`,
+      ]],
+    ['requires skill parity with the agent index', skill, '`how` and `unslop`', '`how`', [
+      `${skill}: missing Steward skill unslop exposed by ${agent}`,
+    ]],
+  ]) {
+    await t.test(description, (t) => {
+      const dir = stewardFixture(t);
+      const file = join(dir, name);
+      const body = readFileSync(file, 'utf8');
+      assert.ok(body.includes(before), `Fixture must contain ${before}`);
+      writeFileSync(file, body.replace(before, after));
+      assert.deepEqual(checkStewardContract(dir), expected);
+    });
+  }
+  await t.test('requires referenced skill files from both indexes', (t) => {
+    const dir = stewardFixture(t);
+    rmSync(join(dir, 'skills', 'unslop', 'SKILL.md'));
     assert.deepEqual(checkStewardContract(dir), [
-      `agents/steward.agent.md: missing required Steward principle ${slug}`,
+      `${skill}: referenced skill unslop has no skills/unslop/SKILL.md`,
+      `${agent}: referenced skill unslop has no skills/unslop/SKILL.md`,
     ]);
-    writeFileSync(skill, original);
-    writeFileSync(agent, index);
+  });
+  for (const slug of REQUIRED_STEWARD_PRINCIPLES) {
+    await t.test(`requires ${slug} in the exposure index`, (t) => {
+      const dir = stewardFixture(t);
+      for (const name of [skill, agent]) {
+        const file = join(dir, name);
+        const body = readFileSync(file, 'utf8');
+        assert.ok(body.includes(`\`${slug}\``));
+        writeFileSync(file, body.replace(`\`${slug}\``, ''));
+      }
+      assert.deepEqual(checkStewardContract(dir), [`${agent}: missing required Steward principle ${slug}`]);
+    });
   }
-  assert.deepEqual(checkStewardContract(dir), []);
-});
-
-test('Steward safeguards accept equivalent wording instead of pinning full sentences', (t) => {
-  const dir = stewardFixture(t);
-  writeFileSync(join(dir, 'always-on', 'copilot-instructions.md'),
-    'Bounded general-purpose reviewers run the assigned prompt directly without poteto-mode, playbooks, or nested subagents.\n');
-  const skill = join(dir, 'skills', 'steward', 'SKILL.md');
-  const body = readFileSync(skill, 'utf8')
-    .replace('If no configured member differs, fall back to `--member 0`.',
-      'When none differs from that vendor family, select `--member 0`.')
-    .replace('On resumed follow-up or pivot turns, rerun the rework critic when the cumulative diff from merge-base plus untracked repository files touches multiple files.',
-      'For resumed follow-ups and pivots, repeat the rework critic if the cumulative merge-base diff and untracked repository files affect more than one file.')
-    .replace('Verification must distinguish executed checks from skipped or optional checks.',
-      'List checks you ran separately from skipped and optional checks.');
-  writeFileSync(skill, body);
-  assert.deepEqual(checkStewardContract(dir), []);
+  await t.test('ignores domain code spans in supervision and principle prose', (t) => {
+    const dir = stewardFixture(t);
+    const prose = 'Use the `skill` tool for `read-only` checks on `main` against `merge-base` without `poteto-worker`.\n';
+    for (const [name, heading] of [[skill, '## Supervision skills and principles'], [agent, '## Principles']]) {
+      const file = join(dir, name);
+      const body = readFileSync(file, 'utf8');
+      assert.ok(body.includes(heading));
+      writeFileSync(file, body.replace(heading, `${heading}\n${prose}`));
+    }
+    assert.deepEqual(checkStewardContract(dir), []);
+  });
+  await t.test('ignores known skills in table descriptions and outside the supervision index', (t) => {
+    const dir = stewardFixture(t);
+    const leaf = join(dir, 'skills', 'tdd', 'SKILL.md');
+    mkdirSync(dirname(leaf), { recursive: true });
+    writeFileSync(leaf, '# TDD\n');
+    const file = join(dir, agent);
+    const body = readFileSync(file, 'utf8');
+    const description = 'Understand `read-only` behavior on `main`.';
+    assert.ok(body.includes(description));
+    writeFileSync(file, body.replace(description, `${description} Workers run \`tdd\` separately.`));
+    const skillFile = join(dir, skill);
+    writeFileSync(skillFile, `${readFileSync(skillFile, 'utf8')}\n\n## Worker notes\nWorkers run \`tdd\` separately.\n`);
+    assert.deepEqual(checkStewardContract(dir), []);
+  });
 });
 
 test('a complete package binds every required workflow and a missing binding fails', (t) => {
