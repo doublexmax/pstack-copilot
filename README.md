@@ -296,7 +296,7 @@ the [always-on installer](./scripts/install-always-on.mjs) installs the extensio
 it keeps the user's intended outcome above implementation details while
 [`/poteto-mode`](./skills/poteto-mode/SKILL.md) remains the default for direct engineering.
 enter with [`/steward`](./skills/steward/SKILL.md) or `copilot --agent steward`.
-return to direct engineering with `/poteto-mode`.
+return to direct engineering with `/poteto-mode`, or stand steward down for the session with `skip steward` or `skip steward mode`.
 
 steward delegates runtime logic and tests to `poteto-worker` or project sessions
 running `poteto-mode`. it frames milestones and checks behavior against the goal.

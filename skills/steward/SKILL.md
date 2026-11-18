@@ -37,7 +37,7 @@ Read each principle's leaf `SKILL.md` before applying it.
 ## Start
 
 - Start a todolist for Phase A through Phase E before dispatching work.
-- Stay in `steward` across bare follow-ups until the user switches back with `/poteto-mode`.
+- Stay in `steward` across bare follow-ups. Leave when the user switches to `/poteto-mode` or stands Steward down with `skip steward` or `skip steward mode`.
   Do not invoke `poteto-mode` or `figure-it-out` in the root. Load only supervision or `principle-*` skills for alignment.
 - Match the user's stage. Discuss without dispatching code. Audit alignment read-only.
   Carry affirmed handoffs to completion without pulling the user back between subagents.
@@ -64,8 +64,7 @@ Read each principle's leaf `SKILL.md` before applying it.
 - Gate the next milestone on review of the current milestone's evidence and alignment.
 - Sketch a thin contract before delegating only when prose risks ambiguity.
 - Preserve existing public contracts, version identifiers, schemas, and naming or casing conventions unless the user's goal requires changing them.
-- Keep verification proportional to the repository's existing checks. Do not add unrequested external-service harnesses, Docker runners, or CLI flags.
-- Record or commit a pre-slice baseline before dispatching a milestone onto paths that already hold uncommitted accepted work.
+- Keep verification proportional to the repository's existing checks without inventing unrequested harnesses or flags.
 - Inside a repository checkout, use a fresh `task` with `agent_type: "poteto-worker"` for each milestone.
 - When the `task` schema exposes `mode`, pass `mode: "sync"` for a single sequential delegate and `mode: "background"` only when launching parallel `task` waves in one message. Otherwise omit `mode` and use the synchronous return.
   For `mode: "background"` waves, end your turn with no tool calls until the completion notification arrives, then call `read_agent` with `wait: true`.
@@ -83,13 +82,12 @@ Read each principle's leaf `SKILL.md` before applying it.
 ## Phase C. Check in and steer
 
 - Review each worker report against the goal, scope, and adjacent behavior.
-- Exercise real user-observable behavior directly. Use read-only, single-pass scouts or critics for code-structure, bloat, and hidden compromise checks.
-- Preserve Phase B contracts and check proportionality. Have workers remove invented contract-version bumps, compatibility shims, and oversized harnesses rather than rationalizing them in the reply.
-- Make permitted surgical trims or deletions directly when faster than a worker round-trip and no worker is editing those paths.
-- When the worker's core approach is sound, dispatch targeted fixes tied to the goal. For synchronous milestone workers, launch a fresh synchronous `poteto-worker` with consolidated slice context. Reserve `write_agent` and ending your turn until the completion notification arrives for `mode: "background"` parallel-wave workers, never sleeping in a shell.
-- When the design or compromises lean away from the goal, or the worker defends unnecessary complexity, **scrap the slice**.
-  If a background worker owns the slice, have it stop and reset only its slice's changes on owned paths to the pre-slice baseline. After a synchronous worker exits, reset only that slice's owned paths to the pre-slice baseline.
-  Preserve unrelated work, accepted prior work, and Steward contracts. Then launch a fresh `poteto-worker` with consolidated context.
+- Exercise real user-observable behavior directly. Use read-only, single-pass scouts or critics when helpful to check structure, scope drift, and hidden compromises.
+- Choose the lightest path that closes each implementation gap toward the goal without writing runtime logic yourself.
+  - Apply permitted surgical doc, contract, or cleanup trims when the paths are idle.
+  - Steer a live `mode: "background"` worker with `write_agent`. Wait for its completion notification rather than sleeping or polling in a shell.
+  - After a synchronous run, hand consolidated context to a fresh `poteto-worker`.
+  - Scrap and rework misaligned slices while preserving accepted and unrelated work.
 - Embrace user pivots immediately. Redirect or scrap work to match, never defend code because it already exists.
 - If a premise fails repeatedly, apply [attack-the-premise](../principle-attack-the-premise/SKILL.md).
 

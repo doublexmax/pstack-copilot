@@ -7,7 +7,7 @@ description: Resolve pstack delegate context from persistent policy, explicit wo
 
 Run this contract before each pstack-managed delegate, including direct workflow invocations.
 Do not ask the user to request a larger window.
-If the session opted out with the whole command `skip poteto mode`, leave launches unmanaged and their arguments unchanged.
+If the session opted out with the whole command `skip poteto mode`, `skip steward`, or `skip steward mode`, leave launches unmanaged and their arguments unchanged.
 The whole command `/poteto-mode` or `/steward` re-enters.
 Native hooks persist opt-out on same-session resume.
 With hooks disabled, these commands do not update the native marker. Follow the conversational opt-out, but do not claim durable tracking.

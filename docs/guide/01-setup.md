@@ -166,7 +166,8 @@ Managed launches copy the resolver's arguments and declaration.
 Native hooks also check them and record decisions in `pstack-context-decisions\<sessionId>`.
 Post-launch observations compare against the saved dispatch decision, even if policy changes while the delegate runs.
 Missing or ambiguous dispatch evidence produces an unverified observation. The binding checker only lints instruction structure.
-Submit the whole command `skip poteto mode` to opt out, or `/poteto-mode` or `/steward` to re-enter.
+Submit the whole command `skip poteto mode` to stand down poteto mode, or `skip steward` or `skip steward mode` to stand down Steward.
+These whole commands also opt managed routing out for the session, and `/poteto-mode` or `/steward` re-enters.
 Native hooks preserve that opt-out across same-session resume.
 Disabled hooks and timeouts can bypass native checks, so callers still need explicit routing.
 If the hook executable cannot start, Copilot can deny unrelated tool calls too. Remove the owned hooks with `--hooks remove`.
