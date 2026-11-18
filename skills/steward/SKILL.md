@@ -22,7 +22,7 @@ Do not write executable runtime logic or test assertions yourself, even when a f
 Delegate all runtime behavior, wiring, test suites, debugging loops, and sweeps to `poteto-worker` or a [poteto-mode](../poteto-mode/SKILL.md) project session.
 [double](../double/SKILL.md) audits factual claims.
 
-Bounded `general-purpose` scouts and critics execute their assigned prompt directly, read-only and single-pass.
+Read-only, single-pass `general-purpose` scouts and critics execute their assigned prompt directly.
 Their prompt must forbid file writes, invoking `poteto-mode`, opening playbooks, and spawning nested subagents.
 
 ## Supervision skills and principles
@@ -43,8 +43,8 @@ Read each principle's leaf `SKILL.md` before applying it.
   Carry affirmed handoffs to completion without pulling the user back between subagents.
 - Pause only for irreversible actions outside the grant or denied required reads under `~/.copilot`.
 - For denied reads, request trust with `copilot --add-dir ~/.copilot`, the `pstack` wrapper from `node ~/.copilot/pstack/scripts/install-always-on.mjs`, or App path approval.
-- On resumed follow-ups, user pivots, or direct manager trims that modify repository state, refresh `<session_dir>/files/overview.md` and reopen or add todos through Phase D and Phase E.
-  Rerun the rework critic whenever the cumulative merge-base diff plus untracked repository files touches multiple files.
+- When a resumed follow-up, user pivot, or direct manager trim modifies repository state, refresh `<session_dir>/files/overview.md`, reopen Phase D and Phase E, and rerun the rework critic if the cumulative merge-base diff plus untracked repository files is a multi-file or multi-step change.
+  Read-only follow-ups do not reopen Phase D or Phase E.
 
 ## Phase A. Frame goal and scope
 
@@ -66,8 +66,8 @@ Read each principle's leaf `SKILL.md` before applying it.
 - Preserve existing public contracts, version identifiers, schemas, and naming or casing conventions unless the user's goal requires changing them.
 - Keep verification proportional to the repository's existing checks. Do not add unrequested external-service harnesses, Docker runners, or CLI flags.
 - Inside a repository checkout, use a fresh `task` with `agent_type: "poteto-worker"` for each milestone.
-- Use `mode: "sync"` for a single sequential `task` delegate when no parallel sibling runs alongside it.
-  Use `mode: "background"` only when launching parallel `task` waves in one message; then end your turn with no tool calls to wait for the completion notification before calling `read_agent` with `wait: true`.
+- When the `task` schema exposes `mode`, pass `mode: "sync"` for a single sequential delegate and `mode: "background"` only when launching parallel `task` waves in one message. Otherwise omit `mode` and use the synchronous return.
+  For `mode: "background"` waves, end your turn with no tool calls until the completion notification arrives, then call `read_agent` with `wait: true`.
   Never sleep or poll in a shell command or invent side busywork while waiting on a subagent.
 - From a repo-less chat, or to isolate a branch and PR, delegate to a project session running `poteto-mode`.
   Use `create_session` with `coordinate_with_creator: true` and `notify_on_idle: "always"`.
@@ -82,12 +82,12 @@ Read each principle's leaf `SKILL.md` before applying it.
 ## Phase C. Check in and steer
 
 - Review each worker report against the goal, scope, and adjacent behavior.
-- Exercise real user-observable behavior directly. Use bounded read-only scouts or critics for code-structure, bloat, and hidden compromise checks.
+- Exercise real user-observable behavior directly. Use read-only, single-pass scouts or critics for code-structure, bloat, and hidden compromise checks.
 - Preserve Phase B contracts and check proportionality. Have workers remove invented contract-version bumps, compatibility shims, and oversized harnesses rather than rationalizing them in the reply.
 - Make permitted surgical trims or deletions directly when faster than a worker round-trip and no worker is editing those paths.
-- When the worker's core approach is sound, use `write_agent` for targeted fixes tied to the goal, then end your turn with no tool calls until the completion notification arrives rather than sleeping in a shell.
+- When the worker's core approach is sound, dispatch targeted fixes tied to the goal. For synchronous milestone workers, launch a fresh synchronous `poteto-worker` with consolidated slice context. Reserve `write_agent` and ending your turn until the completion notification arrives for `mode: "background"` parallel-wave workers, never sleeping in a shell.
 - When the design or compromises lean away from the goal, or the worker defends unnecessary complexity, **scrap the slice**.
-  Have the worker stop and reset only its slice's changes on owned paths to the pre-slice baseline.
+  If a background worker owns the slice, have it stop and reset only its slice's changes on owned paths to the pre-slice baseline. After a synchronous worker exits, reset only that slice's owned paths to the pre-slice baseline.
   Preserve unrelated work, accepted prior work, and Steward contracts. Then launch a fresh `poteto-worker` with consolidated context.
 - Embrace user pivots immediately. Redirect or scrap work to match, never defend code because it already exists.
 - If a premise fails repeatedly, apply [attack-the-premise](../principle-attack-the-premise/SKILL.md).
@@ -104,7 +104,7 @@ Read each principle's leaf `SKILL.md` before applying it.
 
 ## Phase E. Run rework critic and hand back
 
-- Before handing back a multi-file or multi-step change, launch one read-only, single-pass `general-purpose` rework critic with `mode: "sync"` using the pool above.
+- Before handing back a multi-file or multi-step change, launch one read-only, single-pass `general-purpose` rework critic using the pool above. When the `task` schema exposes `mode`, pass `mode: "sync"`. Otherwise omit `mode`.
 - Pass verbatim user context, `<session_dir>/files/overview.md`, the cumulative branch and working-tree diff from the merge-base with the base branch, `git status --short`, and all untracked repository files.
 - Ask only what would make the user send the result back for rework.
   Limit findings to missed purpose, broken user experience, controls, or unwired artifacts, unremoved legacy code or shims, unrequested scope, sweeps, harnesses, or contract-version bumps, throwaway verification scripts, bloated or non-portable docs, brittle prose- or source-locked tests, and overstated or skipped verification claims.
