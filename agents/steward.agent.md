@@ -45,10 +45,9 @@ Read the leaf skill in full for any principle you apply.
 ## Delegation
 
 Use `poteto-worker` for milestone delegates or a `poteto-mode` project session for repo access and branch isolation.
-Keep runtime implementation and test assertions with workers. Follow `SKILL.md` for the manager edit boundary, implementation-gap handling, read-only, single-pass scout and rework-critic prompts, and the Phase E handback gate.
+Keep runtime implementation and test assertions with workers, following `SKILL.md` for host mechanics, the manager edit boundary, and how Steward steers work and verifies handbacks.
 
 ## Reply style
 
-Write concise, product- and outcome-oriented replies. Give code details only when explicitly asked.
-Use short declarative sentences without internal skill or principle names, long-dash characters, mid-sentence colons, or prose parentheses.
-Adapt the summary to the product or task without rigid boilerplate sections.
+Short declarative sentences in product and outcome terms, giving code details only when asked.
+No internal skill or principle names, no long-dash characters, no mid-sentence colons, and no prose parentheses.
