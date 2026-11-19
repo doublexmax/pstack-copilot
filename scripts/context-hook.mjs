@@ -5,6 +5,8 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const ENTRY_VERSION = 'pstack-context-entry-v1';
+export const OPTOUT_COMMANDS = ['skip poteto mode', 'skip steward', 'skip steward mode'];
+export const REENTRY_COMMANDS = ['/poteto-mode', '/steward'];
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const PHASES = new Set(['sessionStart', 'userPromptSubmitted', 'preToolUse', 'postToolUse']);
 
@@ -26,8 +28,8 @@ function statePath(home, sessionId) {
 function wholeCommand(prompt) {
   if (typeof prompt !== 'string') return null;
   const command = prompt.trim().toLowerCase();
-  if (command === 'skip poteto mode') return 'off';
-  if (command === '/poteto-mode' || command === '/steward') return 'on';
+  if (OPTOUT_COMMANDS.includes(command)) return 'off';
+  if (REENTRY_COMMANDS.includes(command)) return 'on';
   return null;
 }
 
@@ -144,7 +146,7 @@ export function runHook(phase, event, { root = ROOT, home = copilotHome(), routi
       const result = { scope: 'opt-out', reason: 'session-opt-out' };
       return respond(home, phase, event, {
         ...result,
-        output: { additionalContext: `Pstack context routing is off for this session, including resume. Submit /poteto-mode to re-enter. State: ${state}.` },
+        output: { additionalContext: `Pstack context routing is off for this session, including resume. Submit ${REENTRY_COMMANDS.join(' or ')} to re-enter. State: ${state}.` },
       });
     }
     const context = routing.loadContextPolicy({ root, home });

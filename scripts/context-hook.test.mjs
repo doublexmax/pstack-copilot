@@ -5,8 +5,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { runHook } from './context-hook.mjs';
+import * as contextHook from './context-hook.mjs';
 import { configurePolicy, loadContextPolicy, resolveRole, routeToolCall } from './context-routing.mjs';
+
+const { runHook } = contextHook;
 
 const script = fileURLToPath(new URL('./context-hook.mjs', import.meta.url));
 
@@ -114,6 +116,56 @@ test('whole-command opt-out persists on resume, bypasses routing, and explicit r
   });
 });
 
+for (const [phase, promptField] of [['userPromptSubmitted', 'prompt'], ['sessionStart', 'initialPrompt']]) {
+  for (const command of ['skip poteto mode', 'skip steward', 'skip steward mode']) {
+    test(`${phase} persists ${command} and bypasses routing until re-entry`, (t) => {
+      const f = fixture(t);
+      const event = launch(f);
+      const result = runHook(phase, envelope({ [promptField]: `  ${command.toUpperCase()}  ` }), f);
+      assert.equal(result.record?.reason, 'session-opt-out');
+      assert.equal(result.record.scope, 'opt-out');
+      const state = join(f.home, 'session-state', 'session-1', 'files', 'pstack-context-opt-out');
+      assert.equal(readFileSync(state, 'utf8'), 'disabled\n');
+      const resumed = runHook('sessionStart', envelope({ source: 'resume' }), { ...f, routing: undefined });
+      assert.equal(resumed.record.scope, 'opt-out');
+      assert.deepEqual(runHook('preToolUse', event, { ...f, routing: undefined }).output, {});
+      runHook('userPromptSubmitted', envelope({ prompt: '/steward' }), f);
+      assert.equal(existsSync(state), false);
+      assert.deepEqual(runHook('preToolUse', event, f).output, {
+        modifiedArgs: { ...event.toolArgs, context_tier: 'long_context' },
+      });
+    });
+  }
+}
+
+test('quoted and extended Steward opt-out commands leave routing active in both prompt phases', (t) => {
+  const f = fixture(t);
+  const event = launch(f);
+  const state = join(f.home, 'session-state', 'session-1', 'files', 'pstack-context-opt-out');
+  for (const [phase, promptField] of [['userPromptSubmitted', 'prompt'], ['sessionStart', 'initialPrompt']]) {
+    for (const prompt of ['Explain "skip steward".', 'skip steward mode for this turn']) {
+      runHook(phase, envelope({ [promptField]: prompt }), f);
+      assert.equal(existsSync(state), false);
+      assert.deepEqual(runHook('preToolUse', event, f).output, {
+        modifiedArgs: { ...event.toolArgs, context_tier: 'long_context' },
+      });
+    }
+  }
+});
+
+test('stdio session-start opt-outs bypass an unavailable routing checkout', (t) => {
+  for (const initialPrompt of ['skip poteto mode', 'skip steward', 'skip steward mode']) {
+    const f = fixture(t);
+    const result = spawnSync(process.execPath, [script, 'sessionStart', join(f.home, 'missing-checkout')], {
+      env: { ...process.env, COPILOT_HOME: f.home }, encoding: 'utf8',
+      input: JSON.stringify(envelope({ initialPrompt })),
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(JSON.parse(result.stdout).additionalContext, /Pstack context routing is off for this session/);
+    assert.equal(readFileSync(join(f.home, 'session-state', 'session-1', 'files', 'pstack-context-opt-out'), 'utf8'), 'disabled\n');
+  }
+});
+
 test('the whole /steward command clears opt-out but quoted prose does not', (t) => {
   const f = fixture(t);
   const event = launch(f);
@@ -128,6 +180,25 @@ test('the whole /steward command clears opt-out but quoted prose does not', (t) 
   assert.deepEqual(runHook('preToolUse', event, f).output, {
     modifiedArgs: { ...event.toolArgs, context_tier: 'long_context' },
   });
+  runHook('userPromptSubmitted', envelope({ prompt: 'skip poteto mode' }), f);
+  assert.equal(existsSync(state), true);
+  const resumed = runHook('sessionStart', envelope({ initialPrompt: '/steward', source: 'resume' }), f);
+  assert.equal(existsSync(state), false);
+  assert.equal(resumed.record.reason, 'context-routing-ready');
+});
+
+test('resumed opted-out sessions advertise and accept every registered re-entry command', (t) => {
+  const f = fixture(t);
+  assert.deepEqual(contextHook.REENTRY_COMMANDS, ['/poteto-mode', '/steward']);
+  runHook('userPromptSubmitted', envelope({ prompt: 'skip poteto mode' }), f);
+  const resumed = runHook('sessionStart', envelope({ source: 'resume' }), f);
+  assert.equal(resumed.record.scope, 'opt-out');
+  for (const command of contextHook.REENTRY_COMMANDS) {
+    assert.ok(resumed.output.additionalContext.includes(command), `Missing ${command} in resume notice`);
+    runHook('userPromptSubmitted', envelope({ prompt: 'skip poteto mode' }), f);
+    const cleared = runHook('sessionStart', envelope({ initialPrompt: command, source: 'resume' }), f);
+    assert.equal(cleared.record.reason, 'context-routing-ready');
+  }
 });
 
 test('quoted prose, code, and extended commands do not change session opt-out', (t) => {

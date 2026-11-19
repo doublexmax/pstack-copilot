@@ -9,13 +9,14 @@ features with explicit verification rather than just generating more code.
 
 a port of [pstack](https://github.com/cursor/plugins/tree/main/pstack) by
 [poteto](https://x.com/poteto), rewritten to run on the github copilot
-app. 53 skills, 23 playbooks, 24 principles, and 4 agents. MIT, same license as upstream.
+app. 54 skills, 23 playbooks, 24 principles, and 5 agents. MIT, same license as upstream.
 
 this is not a mirror. the cursor plugin manifest, the `/add-plugin` install path,
 the event-triggered automations, and the graphite stacking layer are all gone.
 copilot and azure devops equivalents took their place. this port also adds
-[double](#double-supervisor), created by [@doublexmax](https://github.com/doublexmax)
-for `pstack-copilot`. double is not in upstream `cursor/plugins` `pstack`. see
+[double](#double-supervisor) and [steward](#steward-supervisor),
+created by [@doublexmax](https://github.com/doublexmax) for `pstack-copilot`.
+neither is available in upstream `cursor/plugins` `pstack`. see
 [what changed](#what-changed-from-upstream).
 
 there's a growing sense that ai writes too much slop code. i agree. i don't want to ship like a team of twenty slop artists. throughput without quality is not a goal i aspire to. if you want to go fast, go deep first.
@@ -40,8 +41,8 @@ git clone https://github.com/doublexmax/pstack-copilot ~/.copilot/pstack
 copilot skill add ~/.copilot/pstack/skills
 ```
 
-then copy the four agents so `poteto`, `poteto-worker`, `comment-sicko`, and `double`
-show up as spawnable subagents:
+then copy the five agents so `poteto`, `poteto-worker`, `comment-sicko`, `double`,
+and `steward` are installed:
 
 ```bash
 cp ~/.copilot/pstack/agents/*.agent.md ~/.copilot/agents/
@@ -188,6 +189,7 @@ the full rules and playbooks live in [`skills/poteto-mode/SKILL.md`](./skills/po
 | [`/figure-it-out`](./skills/figure-it-out/SKILL.md) | no bundled playbook fits. designs a rigorous, auditable playbook for the task. |
 | [`/show-me-your-work`](./skills/show-me-your-work/SKILL.md) | you want a reviewable decision trail. logs decisions to a tsv you can commit. |
 | [`/double`](./skills/double/SKILL.md) | you want an independent supervisor session to check factual claims and test edits against real session artifacts, preferring a different model vendor family from your configured pool. custom to `pstack-copilot` by [@doublexmax](https://github.com/doublexmax), not in upstream pstack. |
+| [`/steward`](./skills/steward/SKILL.md) | you want a manual alignment manager above `poteto-mode` to coordinate workers around your intended outcome and run a pre-handback rework critic from your configured `arena cross-judge pool`, preferring a different model vendor family. custom to `pstack-copilot` by [@doublexmax](https://github.com/doublexmax), not in upstream pstack. |
 | [`/create-verification-skill`](./skills/create-verification-skill/SKILL.md) | your project has no scripted way to prove app behavior. generates a project-local verify skill with a feature map, for any language or platform. |
 | [`/maintain-verification-skill`](./skills/maintain-verification-skill/SKILL.md) | your verify skill's feature map has drifted from the app. source wave + one live pass, at most one PR of proven corrections. |
 | [`/unslop`](./skills/unslop/SKILL.md) | you're cleaning up writing or a code diff. prose path removes AI tells; code path is the old deslop pass. |
@@ -285,6 +287,23 @@ at zero model tokens. the runtime extension at
 `~/.copilot/extensions/double/extension.mjs` wakes an idle double session when the
 worker resumes. verification turns spend model tokens.
 the [always-on installer](./scripts/install-always-on.mjs) installs the extension.
+
+## steward supervisor
+
+[steward](./agents/steward.agent.md) is a custom addition by
+[@doublexmax](https://github.com/doublexmax) for `pstack-copilot`, not available in upstream
+[`cursor/plugins` `pstack`](https://github.com/cursor/plugins/tree/main/pstack).
+it keeps the user's intended outcome above implementation details while
+[`/poteto-mode`](./skills/poteto-mode/SKILL.md) remains the default for direct engineering.
+enter with [`/steward`](./skills/steward/SKILL.md) or `copilot --agent steward`.
+return to direct engineering with `/poteto-mode`, or stand steward down for the session with `skip steward` or `skip steward mode`.
+
+steward delegates runtime logic and tests to `poteto-worker` or project sessions
+running `poteto-mode`. it frames milestones and checks behavior against the goal.
+before handback on multi-file changes, it runs a read-only rework critic from your
+configured `arena cross-judge pool`, preferring a vendor family different from both
+steward and the worker, then different from the worker, and falling back to the
+first pool entry if none differs.
 
 ## principles
 
@@ -467,7 +486,8 @@ project verify skill or a generated one, not an operator-drive default.
 ### custom additions
 
 [@doublexmax](https://github.com/doublexmax) created
-[double](./agents/double.agent.md) and [`/double`](./skills/double/SKILL.md)
+[double](./agents/double.agent.md), [`/double`](./skills/double/SKILL.md),
+[steward](./agents/steward.agent.md), and [`/steward`](./skills/steward/SKILL.md)
 for `pstack-copilot`. they are custom additions, not available in upstream
 [`cursor/plugins` `pstack`](https://github.com/cursor/plugins/tree/main/pstack).
 see the [local-only files](./docs/upstream-sync.md#local-only-files) for this port's additions.
