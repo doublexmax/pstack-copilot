@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { checkBindings, checkStewardContract, REQUIRED_BINDINGS, REQUIRED_STEWARD_PRINCIPLES } from './check-context-routing.mjs';
+import { checkBindings, checkStewardContract, REQUIRED_BINDINGS, REQUIRED_STEWARD_PRINCIPLES, REQUIRED_STEWARD_SECTIONS } from './check-context-routing.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 
@@ -45,23 +45,22 @@ function stewardFixture(t) {
       'Read `principle-model-the-domain`, `principle-boundary-discipline`,',
       '`principle-migrate-callers-then-delete-legacy-apis`, and `principle-test-behavior-not-implementation`.',
       '',
-      '## Phase A. Frame goal and scope',
+      '## Outcome',
       'Frame purpose.',
       '',
-      '## Phase B. Coordinate milestone steps',
-      'Coordinate workers.',
+      '## Context and capability',
+      'Gather context and report gaps.',
       '',
-      '## Phase C. Check in and steer',
-      'Steer workers.',
+      '## Production commitments',
+      'Bound worker slices and probes.',
       '',
-      '## Phase D. Verify behavior and claims',
+      '## Confidence',
       '- Verify that added files wire into real entrypoints and discovery paths, and confirm cross-platform portable doc commands.',
       '',
       '- Distinguish executed checks from skipped or optional checks.',
       '',
       '- Never verify against mock data.',
       '',
-      '## Phase E. Run rework critic and hand back',
       'Run the critic.',
     ].join('\n'),
     'agents/steward.agent.md': [
@@ -92,12 +91,21 @@ test('the repository satisfies the Steward contract and skill exposure index', (
   assert.deepEqual(checkStewardContract(root), []);
 });
 
-test('Steward contract fixtures enforce file structure, ordered non-empty phases, and index-only agent headings', async (t) => {
+test('Steward contract fixtures enforce unordered non-empty sections and index-only agent headings', async (t) => {
   const instructions = 'always-on/copilot-instructions.md';
   const skill = 'skills/steward/SKILL.md';
   const agent = 'agents/steward.agent.md';
-  await t.test('accepts code-writing subagents, read-only delegates, and formatted verification bullets', (t) => {
+  await t.test('accepts the literal framework fixture with code-writing subagents, read-only delegates, and formatted verification bullets', (t) => {
     assert.deepEqual(checkStewardContract(stewardFixture(t)), []);
+  });
+  await t.test('accepts reordered framework sections', (t) => {
+    const dir = stewardFixture(t);
+    const file = join(dir, skill);
+    const body = readFileSync(file, 'utf8');
+    const [preamble, supervision, ...sections] = body.split(/(?=^## )/m);
+    assert.equal(sections.length, 4);
+    writeFileSync(file, [preamble, supervision, ...sections.reverse()].join('\n'));
+    assert.deepEqual(checkStewardContract(dir), []);
   });
   for (const name of [instructions, skill, agent]) {
     await t.test(`requires ${name}`, (t) => {
@@ -116,35 +124,66 @@ test('Steward contract fixtures enforce file structure, ordered non-empty phases
       assert.deepEqual(checkStewardContract(dir), [`${instructions}: missing mode routing reference ${slug}`]);
     });
   }
-  for (const [description, name, before, after, expected] of [
-    ['rejects an agent Lifecycle heading', agent, '## Principles', '## Lifecycle\nOwn phases.\n\n## Principles',
-      `${agent}: must remain a routing index instead of duplicating Steward lifecycle phases`],
-    ['rejects an agent Phase heading', agent, '## Principles', '## Phase A. Frame goal and scope\nFrame purpose.\n\n## Principles',
-      `${agent}: must remain a routing index instead of duplicating Steward lifecycle phases`],
-    ['requires the Phase E heading', skill, '## Phase E. Run rework critic and hand back', '## Reply',
-      `${skill}: missing required lifecycle heading Phase E`],
-    ['rejects an empty Phase E before another heading', skill, 'Run the critic.', '\n## Reply\nDone.\n',
-      `${skill}: lifecycle section Phase E must not be empty`],
-    ['rejects an empty Phase E at EOF', skill, 'Run the critic.', '',
-      `${skill}: lifecycle section Phase E must not be empty`],
-  ]) {
-    await t.test(description, (t) => {
+  for (const heading of REQUIRED_STEWARD_SECTIONS) {
+    for (const replacement of [`${heading} notes`, heading.toLowerCase()]) {
+      await t.test(`requires the exact ${heading} heading instead of ${replacement}`, (t) => {
+        const dir = stewardFixture(t);
+        const file = join(dir, skill);
+        const body = readFileSync(file, 'utf8');
+        assert.ok(body.includes(`## ${heading}\n`));
+        writeFileSync(file, body.replace(`## ${heading}\n`, `## ${replacement}\n`));
+        assert.deepEqual(checkStewardContract(dir), [`${skill}: missing required Steward section ${heading}`]);
+      });
+    }
+    await t.test(`rejects duplicate ${heading} sections`, (t) => {
       const dir = stewardFixture(t);
-      const file = join(dir, name);
+      const file = join(dir, skill);
       const body = readFileSync(file, 'utf8');
-      assert.ok(body.includes(before), `Fixture must contain ${before}`);
-      writeFileSync(file, body.replace(before, after));
-      assert.deepEqual(checkStewardContract(dir), [expected]);
+      writeFileSync(file, `${body}\n\n## ${heading}\nA duplicate section.\n`);
+      assert.deepEqual(checkStewardContract(dir), [`${skill}: duplicate Steward section ${heading}`]);
+    });
+    for (const position of ['before another heading', 'at EOF']) {
+      await t.test(`rejects an empty ${heading} section ${position}`, (t) => {
+        const dir = stewardFixture(t);
+        const file = join(dir, skill);
+        const sections = readFileSync(file, 'utf8').split(/(?=^## )/m);
+        const index = sections.findIndex((section) => section.startsWith(`## ${heading}\n`));
+        assert.notEqual(index, -1);
+        sections[index] = `## ${heading}\n\n`;
+        if (position === 'at EOF') sections.push(...sections.splice(index, 1));
+        else sections.push('## Reply\nDone.\n');
+        writeFileSync(file, sections.join('\n'));
+        assert.deepEqual(checkStewardContract(dir), [`${skill}: Steward section ${heading} must not be empty`]);
+      });
+    }
+  }
+  for (const name of [skill, agent]) {
+    for (const heading of ['Phase A. Frame goal and scope', 'Lifecycle', 'phase a', 'lifecycle']) {
+      await t.test(`rejects the legacy ${heading} heading in ${name}`, (t) => {
+        const dir = stewardFixture(t);
+        const file = join(dir, name);
+        writeFileSync(file, `${readFileSync(file, 'utf8')}\n\n## ${heading}\nLegacy instructions.\n`);
+        assert.deepEqual(checkStewardContract(dir), [name === skill
+          ? `${skill}: must use non-sequential framework sections instead of lifecycle phases`
+          : `${agent}: must remain a routing index instead of duplicating Steward framework sections`]);
+      });
+    }
+  }
+  for (const heading of REQUIRED_STEWARD_SECTIONS.flatMap((heading) => [heading, heading.toLowerCase()])) {
+    await t.test(`rejects a copied ${heading} framework heading in the agent`, (t) => {
+      const dir = stewardFixture(t);
+      const file = join(dir, agent);
+      writeFileSync(file, `${readFileSync(file, 'utf8')}\n\n## ${heading}\nCopied framework instructions.\n`);
+      assert.deepEqual(checkStewardContract(dir), [
+        `${agent}: must remain a routing index instead of duplicating Steward framework sections`,
+      ]);
     });
   }
-  await t.test('requires Phase E to follow Phase D', (t) => {
+  await t.test('allows other routing-index headings to evolve', (t) => {
     const dir = stewardFixture(t);
-    const file = join(dir, skill);
-    const body = readFileSync(file, 'utf8');
-    const phases = /(## Phase D\.[\s\S]*?)(## Phase E\.[\s\S]*)$/;
-    assert.match(body, phases);
-    writeFileSync(file, body.replace(phases, '$2\n\n$1'));
-    assert.deepEqual(checkStewardContract(dir), [`${skill}: lifecycle heading Phase E must follow Phase D`]);
+    const file = join(dir, agent);
+    writeFileSync(file, `${readFileSync(file, 'utf8')}\n\n## Dispatch notes\nRoute the next worker.\n`);
+    assert.deepEqual(checkStewardContract(dir), []);
   });
 });
 
