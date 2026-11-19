@@ -189,7 +189,7 @@ the full rules and playbooks live in [`skills/poteto-mode/SKILL.md`](./skills/po
 | [`/figure-it-out`](./skills/figure-it-out/SKILL.md) | no bundled playbook fits. designs a rigorous, auditable playbook for the task. |
 | [`/show-me-your-work`](./skills/show-me-your-work/SKILL.md) | you want a reviewable decision trail. logs decisions to a tsv you can commit. |
 | [`/double`](./skills/double/SKILL.md) | you want an independent supervisor session to check factual claims and test edits against real session artifacts, preferring a different model vendor family from your configured pool. custom to `pstack-copilot` by [@doublexmax](https://github.com/doublexmax), not in upstream pstack. |
-| [`/steward`](./skills/steward/SKILL.md) | you want a manual alignment manager above `poteto-mode` to coordinate workers around your intended outcome and run a pre-handback rework critic from your configured `arena cross-judge pool`, preferring a different model vendor family. custom to `pstack-copilot` by [@doublexmax](https://github.com/doublexmax), not in upstream pstack. |
+| [`/steward`](./skills/steward/SKILL.md) | you want a manual alignment manager with standing responsibilities for outcome, context and capability, production commitments, and confidence. it gathers relevant context and reports gaps or capability limits early. it bounds worker production across repo and non-repo work and runs a pre-handback rework critic from your configured `arena cross-judge pool`, preferring a different model vendor family. custom to `pstack-copilot` by [@doublexmax](https://github.com/doublexmax), not in upstream pstack. |
 | [`/create-verification-skill`](./skills/create-verification-skill/SKILL.md) | your project has no scripted way to prove app behavior. generates a project-local verify skill with a feature map, for any language or platform. |
 | [`/maintain-verification-skill`](./skills/maintain-verification-skill/SKILL.md) | your verify skill's feature map has drifted from the app. source wave + one live pass, at most one PR of proven corrections. |
 | [`/unslop`](./skills/unslop/SKILL.md) | you're cleaning up writing or a code diff. prose path removes AI tells; code path is the old deslop pass. |
@@ -298,12 +298,16 @@ it keeps the user's intended outcome above implementation details while
 enter with [`/steward`](./skills/steward/SKILL.md) or `copilot --agent steward`.
 return to direct engineering with `/poteto-mode`, or stand steward down for the session with `skip steward` or `skip steward mode`.
 
-steward delegates runtime logic and tests to `poteto-worker` or project sessions
-running `poteto-mode`. it frames milestones and checks behavior against the goal.
-before handback on multi-file changes, it runs a read-only rework critic from your
-configured `arena cross-judge pool`, preferring a vendor family different from both
-steward and the worker, then different from the worker, and falling back to the
-first pool entry if none differs.
+steward holds four standing responsibilities in any order, covering outcome,
+context and capability, production commitments, and confidence. it gathers relevant
+context up front and reports material missing context or capability limits early.
+its research, context discovery, alignment judgment, and thin contracts stay open,
+while `poteto-worker` or project sessions running `poteto-mode` own bounded production
+slices across repo and non-repo work. before handback on multi-file or multi-step
+deliverables, it runs a read-only rework critic from your configured
+`arena cross-judge pool`, preferring a vendor family different from both steward
+and the worker, then different from the worker, and falling back to the first pool
+entry if none differs.
 
 ## principles
 
