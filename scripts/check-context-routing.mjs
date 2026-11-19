@@ -60,6 +60,15 @@ export const REQUIRED_STEWARD_PRINCIPLES = [
   'principle-migrate-callers-then-delete-legacy-apis', 'principle-test-behavior-not-implementation',
 ];
 
+export const REQUIRED_STEWARD_SECTIONS = [
+  'Outcome',
+  'Context and capability',
+  'Production commitments',
+  'Confidence',
+];
+
+const LEGACY_STEWARD_HEADING_RE = /^(?:Phase\s+[A-E]\b|Lifecycle\b)/i;
+const STEWARD_SECTION_SET = new Set(REQUIRED_STEWARD_SECTIONS.map((heading) => heading.toLowerCase()));
 const NON_SUPERVISION_MODES = new Set(['steward', 'context-routing', 'poteto-mode', 'figure-it-out']);
 
 function h2Sections(body) {
@@ -115,28 +124,27 @@ export function checkStewardContract(root) {
   for (const slug of ['poteto-mode', 'steward', 'double', 'context-routing']) {
     if (!instructions.includes(`\`${slug}\``)) errors.push(`${instructionsPath}: missing mode routing reference ${slug}`);
   }
-  if (/^##\s+(?:Phase\s+[A-E]\b|Lifecycle\b)/im.test(agent)) {
-    errors.push(`${agentPath}: must remain a routing index instead of duplicating Steward lifecycle phases`);
-  }
 
   const skillSections = h2Sections(skill);
-  let latestPhase = null;
-  for (const phase of ['A', 'B', 'C', 'D', 'E']) {
-    const indices = skillSections.flatMap(({ heading }, idx) => (new RegExp(`^Phase\\s+${phase}\\.`).test(heading) ? [idx] : []));
-    if (!indices.length) {
-      errors.push(`${skillPath}: missing required lifecycle heading Phase ${phase}`);
+  const agentSections = h2Sections(agent);
+  if (agentSections.some(({ heading }) => LEGACY_STEWARD_HEADING_RE.test(heading) || STEWARD_SECTION_SET.has(heading.toLowerCase()))) {
+    errors.push(`${agentPath}: must remain a routing index instead of duplicating Steward framework sections`);
+  }
+  if (skillSections.some(({ heading }) => LEGACY_STEWARD_HEADING_RE.test(heading))) {
+    errors.push(`${skillPath}: must use non-sequential framework sections instead of lifecycle phases`);
+  }
+  for (const heading of REQUIRED_STEWARD_SECTIONS) {
+    const matches = skillSections.filter((section) => section.heading === heading);
+    if (!matches.length) {
+      errors.push(`${skillPath}: missing required Steward section ${heading}`);
       continue;
     }
-    if (indices.length > 1) errors.push(`${skillPath}: duplicate lifecycle heading Phase ${phase}`);
-    const index = indices[0];
-    if (latestPhase && index < latestPhase.index) {
-      errors.push(`${skillPath}: lifecycle heading Phase ${phase} must follow Phase ${latestPhase.phase}`);
-    } else latestPhase = { phase, index };
-    if (!skillSections[index].body.trim()) errors.push(`${skillPath}: lifecycle section Phase ${phase} must not be empty`);
+    if (matches.length > 1) errors.push(`${skillPath}: duplicate Steward section ${heading}`);
+    if (!matches[0].body.trim()) errors.push(`${skillPath}: Steward section ${heading} must not be empty`);
   }
 
   const skillIndex = extractStewardSkillRefs(root, skillPath, skill, skillSections);
-  const agentIndex = extractStewardSkillRefs(root, agentPath, agent, h2Sections(agent));
+  const agentIndex = extractStewardSkillRefs(root, agentPath, agent, agentSections);
   for (const [path, { refs, errors: refErrors }] of [[skillPath, skillIndex], [agentPath, agentIndex]]) {
     errors.push(...refErrors);
     for (const slug of [...refs].sort()) {
