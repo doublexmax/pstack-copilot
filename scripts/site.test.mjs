@@ -84,6 +84,18 @@ test('README all-skills table exposes the Steward skill', () => {
   assert.match(table, /^\| \[`\/steward`\]\(\.\/skills\/steward\/SKILL\.md\) \|/m);
 });
 
+test('guide overview covers stepping above poteto-mode with Steward', () => {
+  const guideUrl = new URL('../docs/guide/README.md', import.meta.url);
+  const guide = readFileSync(guideUrl, 'utf8');
+  assert.match(guide, /^## Step above `\/poteto-mode` with `\/steward`\r?$/m);
+  assert.match(guide, /copilot --agent steward/);
+  assert.match(guide, /poteto-worker/);
+  assert.match(guide, /skip steward/);
+  for (const [, target] of guide.matchAll(/\]\((\.[^)#]+)\)/g)) {
+    assert.ok(existsSync(new URL(target, guideUrl)), `Missing guide link target: ${target}`);
+  }
+});
+
 test('README custom additions include Steward alongside Double', () => {
   const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
   const additions = readme.match(/(?:^|\n)### custom additions\r?\n([\s\S]*?)(?:\r?\n#{1,3} |$)/)?.[1];
