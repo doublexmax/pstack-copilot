@@ -31,7 +31,7 @@ there's a growing sense that ai writes too much slop code. i agree. i don't want
 
 **double checks claims against real artifacts.** run [`/double`](./skills/double/SKILL.md) inside the worker session to attach an independent, read-only supervisor. it checks factual claims and test edits against repository state and session artifacts. it messages the worker only when evidence refutes a claim. it does not write code or prescribe fixes.
 
-**steward keeps work aligned with the outcome.** run [`/steward`](./skills/steward/SKILL.md) or start with `copilot --agent steward` when you want a supervisor to hold your intended outcome above implementation weeds. it gathers context up front, flags gaps or capability limits early, and coordinates bounded work across repo and non-repo deliverables.
+**steward orchestrates above the poteto level.** writing clean code is only half the problem. run [`/steward`](./skills/steward/SKILL.md) or start with `copilot --agent steward` to work above [`/poteto-mode`](./skills/poteto-mode/SKILL.md), letting a model guide itself toward your desired outcome by orchestrating its own team of [`poteto-worker`](./agents/poteto-worker.agent.md) subagents and `poteto-mode` sessions. it gathers context up front, flags gaps early, and steers bounded slices across repo and non-repo deliverables until the result matches what you meant.
 
 fork it. improve it. make it yours. PRs are welcome!
 
@@ -245,6 +245,7 @@ reflect:           /reflect that took too long. capture what we learned so the n
                    repeat it.
 correct:           /correct
 show-me-your-work: /show-me-your-work keep a decision trail i can review when i'm back.
+steward:           /steward own this end to end and keep the team aligned with the outcome we discussed.
 automate-me:       /automate-me
 ```
 
@@ -297,21 +298,42 @@ the [always-on installer](./scripts/install-always-on.mjs) installs the extensio
 [steward](./agents/steward.agent.md) is a custom addition by
 [@doublexmax](https://github.com/doublexmax) for `pstack-copilot`, not available in upstream
 [`cursor/plugins` `pstack`](https://github.com/cursor/plugins/tree/main/pstack).
-it keeps the user's intended outcome above implementation details while
-[`/poteto-mode`](./skills/poteto-mode/SKILL.md) remains the default for direct engineering.
-enter with [`/steward`](./skills/steward/SKILL.md) or `copilot --agent steward`.
-return to direct engineering with `/poteto-mode`, or stand steward down for the session with `skip steward` or `skip steward mode`.
+where [`/poteto-mode`](./skills/poteto-mode/SKILL.md) focuses on writing and verifying
+clean code inside an engineering task, steward works a level above it. it moves
+from direct implementation to outcome-driven agent orchestration, allowing a model
+to guide itself toward your desired outcome by managing its own team of
+[`poteto-worker`](./agents/poteto-worker.agent.md) subagents and `poteto-mode`
+project sessions.
+
+steward holds your intended outcome above implementation details. it gathers
+domain and repository context up front, inventories available host and shell tools,
+and surfaces material missing context or capability limits before committing to
+costly builds. instead of authoring deliverables inline, it keeps research, options
+analysis, alignment judgment, and thin contracts open in the root session while
+dispatching bounded production slices across code, docs, designs, scripts, media
+pipelines, and test suites to its `poteto-worker` team. it evaluates each worker's
+output against the intended experience, steers follow-up slices, and scraps
+misaligned attempts without defending sunk cost.
+
+### run steward
+
+enter with [`/steward`](./skills/steward/SKILL.md) inside a session, or start a
+session directly at the orchestration layer:
+
+```
+copilot --agent steward
+```
+
+return to direct engineering with `/poteto-mode`, or stand steward down for the
+session with `skip steward` or `skip steward mode`.
 
 steward holds four standing responsibilities in any order, covering outcome,
-context and capability, production commitments, and confidence. it gathers relevant
-context up front and reports material missing context or capability limits early.
-its research, context discovery, alignment judgment, and thin contracts stay open,
-while `poteto-worker` or project sessions running `poteto-mode` own bounded production
-slices across repo and non-repo work. before handback on multi-file or multi-step
-deliverables, it runs a read-only rework critic from your configured
-`arena cross-judge pool`, preferring a vendor family different from both steward
-and the worker, then different from the worker, and falling back to the first pool
-entry if none differs.
+context and capability, production commitments, and confidence. before handback on
+multi-file or multi-step deliverables, it runs a read-only rework critic from your
+configured `arena cross-judge pool`, preferring a vendor family different from both
+steward and the worker, then different from the worker, and falling back to the
+first pool entry if none differs. on long or unattended runs, it also attaches
+[double](#double-supervisor) to audit factual claims.
 
 ## principles
 

@@ -142,6 +142,11 @@ test('README separates Double additions from upstream adaptations', () => {
   assert.match(double, /\[@doublexmax\]\(https:\/\/github\.com\/doublexmax\)/);
   assert.match(double, /not (?:available )?in upstream/i);
   assert.match(double, /cursor\/plugins/);
+  const steward = readme.match(/(?:^|\n)## steward supervisor\r?\n([\s\S]*?)(?:\r?\n## |$)/)?.[1];
+  assert.ok(steward, 'Missing Steward supervisor section');
+  assert.match(steward, /^### run steward\r?$/m);
+  assert.match(steward, /poteto-worker/);
+  assert.match(steward, /copilot --agent steward/);
   const upstream = readme.match(/(?:^|\n)## what changed from upstream\r?\n([\s\S]*?)(?:\r?\n## |$)/)[1];
   assert.match(upstream, /^### port adaptations\r?$/m);
   assert.match(upstream, /^### custom additions\r?$/m);
