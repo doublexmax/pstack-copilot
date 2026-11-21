@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>pstack for GitHub Copilot | Multi-agent engineering workflows</title>
-  <meta name="description" content="Multi-agent engineering workflows for GitHub Copilot, with Azure DevOps integration and Double supervision that checks claims against real artifacts.">
+  <meta name="description" content="An independent port of pstack for Cursor to GitHub Copilot, with multi-agent engineering playbooks, Double for evidence checks, and Steward for coordinating work.">
   <meta name="google-site-verification" content="X00SCREtqxwvSwsGG0A3Md6jXMQNGUW6aII2g-MXhT0" />
   <link rel="canonical" href="https://doublexmax.github.io/pstack-copilot/">
   <link rel="stylesheet" href="style.css">
@@ -14,12 +14,15 @@
     <header>
       <p class="eyebrow">Open-source skills and agents</p>
       <h1>pstack for GitHub Copilot</h1>
-      <p class="intro">Bring multi-agent engineering workflows to GitHub Copilot.
+      <p class="intro">An independent port of
+        <a href="https://github.com/cursor/plugins/tree/main/pstack">pstack for Cursor</a> to GitHub Copilot.
         Investigate bugs, review code, and build features with evidence.
-        This port adds <a href="#double">Double</a> to check your agent's claims against real artifacts.</p>
+        <a href="#double">Double</a> checks your agent's claims against real artifacts.
+        <a href="#steward">Steward</a> keeps delegated work aligned with your goal.</p>
       <nav aria-label="Project links">
         <a href="https://github.com/doublexmax/pstack-copilot">View the repository</a>
         <a href="#double">Double supervisor</a>
+        <a href="#steward">Steward coordinator</a>
         <a href="#install">Install pstack</a>
         <a href="https://github.com/doublexmax/pstack-copilot/blob/main/docs/guide/README.md">Read the guide</a>
       </nav>
@@ -27,18 +30,15 @@
 
     <section aria-labelledby="workflows">
       <p class="eyebrow">Adapted from upstream pstack</p>
-      <h2 id="workflows">Engineering playbooks, not just code generation</h2>
+      <h2 id="workflows">Engineering playbooks for Copilot</h2>
       <p>Start with a goal and a way to verify it. The <code>/poteto-mode</code> skill
         selects a playbook and coordinates the skills and agents needed for the task.
         Workflows cover investigation, bug fixes, feature development, code review,
         performance work, and longer autonomous runs.</p>
       <p>Choose the models used for delegated work and review panels with
-        <code>/setup-pstack</code>. The port also includes Azure DevOps pull request
-        workflows in place of upstream's Graphite stacking and GitHub review flows.</p>
-      <p>pstack Copilot is an independent port of
-        <a href="https://github.com/cursor/plugins/tree/main/pstack">pstack for Cursor</a>
-        by <a href="https://github.com/poteto">poteto</a>.
-        It is MIT-licensed and adapted to Copilot, not a mirror of the Cursor plugin.</p>
+        <code>/setup-pstack</code>.</p>
+      <p><a href="https://github.com/poteto">poteto</a> created the original pstack.
+        This port uses the same MIT license.</p>
     </section>
 
     <section aria-labelledby="double">
@@ -64,6 +64,19 @@
       <p>Double messages the worker only when primary evidence refutes a claim.
         It stays silent on verified and unverified claims. Silence is not approval.
         <a href="#try-double">Try Double in a worker session</a>.</p>
+    </section>
+
+    <section aria-labelledby="steward">
+      <p class="eyebrow">Custom addition to this port</p>
+      <h2 id="steward">Steward keeps work aligned with your goal</h2>
+      <p>Use Steward when you want an agent to keep track of the outcome while
+        other agents handle parts of the work. Steward gathers context, flags gaps
+        early, and coordinates code and non-code deliverables.</p>
+      <p>Run <code>/steward</code> in Copilot or start with
+        <code>copilot --agent steward</code>. Use <code>/poteto-mode</code> for direct
+        engineering work. Read the
+        <a href="https://github.com/doublexmax/pstack-copilot/blob/main/skills/steward/SKILL.md">Steward skill</a>
+        for how it coordinates work and reviews results before handing them back.</p>
     </section>
 
     <section aria-labelledby="install">

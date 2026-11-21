@@ -1,35 +1,27 @@
 # pstack for GitHub Copilot
 
-pstack brings multi-agent workflows, engineering playbooks, and Azure DevOps
-integration to GitHub Copilot. Use it to investigate bugs, review code, and build
-features with explicit verification rather than just generating more code.
+pstack for GitHub Copilot is an independent port of
+[pstack for Cursor](https://github.com/cursor/plugins/tree/main/pstack) by
+[poteto](https://github.com/poteto). Its multi-agent playbooks help you investigate
+bugs, review code, and build features with a plan for verifying the result.
 
 [Project overview and quick start](https://doublexmax.github.io/pstack-copilot/)
 | [Full guide](./docs/guide/README.md)
 
-a port of [pstack](https://github.com/cursor/plugins/tree/main/pstack) by
-[poteto](https://x.com/poteto), rewritten to run on the github copilot
-app. 54 skills, 23 playbooks, 24 principles, and 5 agents. MIT, same license as upstream.
+Run `/poteto-mode` to pick a playbook for your task. Use `/setup-pstack` to
+choose the models for delegated work and review panels.
 
-this is not a mirror. the cursor plugin manifest, the `/add-plugin` install path,
-the event-triggered automations, and the graphite stacking layer are all gone.
-copilot and azure devops equivalents took their place. this port also adds
-[double](#double-supervisor) and [steward](#steward-supervisor),
-created by [@doublexmax](https://github.com/doublexmax) for `pstack-copilot`.
-neither is available in upstream `cursor/plugins` `pstack`. see
-[what changed](#what-changed-from-upstream).
+The port adds two agents that are not in upstream pstack:
 
-there's a growing sense that ai writes too much slop code. i agree. i don't want to ship like a team of twenty slop artists. throughput without quality is not a goal i aspire to. if you want to go fast, go deep first.
+- [Double](#double-supervisor) checks an agent's factual claims and test edits
+  against repository state and session artifacts. Run `/double` in the worker
+  session to attach the read-only verifier.
+- [Steward](#steward-supervisor) keeps delegated work aligned with your intended
+  outcome. Run `/steward` to gather context, flag gaps, and coordinate work
+  across code and non-code deliverables.
 
-**pstack is the answer.** it turns copilot into a real engineering team. the goal is not to maximize loc, in fact it's the opposite. pstack helps you write less, but higher quality code.
-
-**pstack gives you fearless parallelism.** when you can go deep on one agent and trust it to write good, verifiable code, you can truly parallelize with confidence. start multiple agents up with `poteto-mode` and trust that they'll apply rigorous engineering principles to their work.
-
-**copilot gives you the best of all worlds.** every frontier model has its strengths and weaknesses. use any model with pstack. in fact, many of my skills use multi-model workflows to take advantage of each model's unique strengths.
-
-**double checks claims against real artifacts.** run [`/double`](./skills/double/SKILL.md) inside the worker session to attach an independent, read-only supervisor. it checks factual claims and test edits against repository state and session artifacts. it messages the worker only when evidence refutes a claim. it does not write code or prescribe fixes.
-
-fork it. improve it. make it yours. PRs are welcome! 
+The port includes 54 skills, 23 playbooks, 24 principles, and 5 agents.
+See [what changed from upstream](#what-changed-from-upstream).
 
 ## install
 
@@ -476,8 +468,7 @@ there is no CI gate. this org disables hosted runners and the repo has no self-h
 | `AskQuestion` tool | the `ask_user` tool |
 | one model slug per role | `model` plus `reasoning_effort`, two fields |
 | three-vendor panel (opus 5.5 / sol / grok) | a fourth seat, `gemini-4-argon`, so the panels read four lineages |
-| graphite (`gt`) stacking | azure devops PR chains driven by `az repos` |
-| github PR review threads | ado threads via the ado mcp |
+| graphite (`gt`) stacking and github PR review flows | GitHub PR tools on GitHub repos. `az repos` and the Azure DevOps MCP on Azure DevOps repos. |
 | event-triggered automations | scheduled copilot workflows via `save_workflow` |
 | slack intake for benny | intake adapter, defaults to ado work items |
 | separate `deslop` skill | Code path inside [`/unslop`](./skills/unslop/SKILL.md) |
