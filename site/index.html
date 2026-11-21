@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>pstack for GitHub Copilot | Multi-agent engineering workflows</title>
-  <meta name="description" content="An independent port of pstack for Cursor to GitHub Copilot, with multi-agent engineering playbooks, consistent supervision, and help keeping work aligned with your goals.">
+  <meta name="description" content="Multi-agent engineering workflows for GitHub Copilot, with consistent supervision that checks claims against real artifacts and alignment that keeps work focused on the intended outcome.">
   <meta name="google-site-verification" content="X00SCREtqxwvSwsGG0A3Md6jXMQNGUW6aII2g-MXhT0" />
   <link rel="canonical" href="https://doublexmax.github.io/pstack-copilot/">
   <link rel="stylesheet" href="style.css">
@@ -14,11 +14,10 @@
     <header>
       <p class="eyebrow">Open-source skills and agents</p>
       <h1>pstack for GitHub Copilot</h1>
-      <p class="intro">An independent port of
-        <a href="https://github.com/cursor/plugins/tree/main/pstack">pstack for Cursor</a> to GitHub Copilot.
+      <p class="intro">Bring multi-agent engineering workflows to GitHub Copilot.
         Investigate bugs, review code, and build features with evidence.
-        Get <a href="#double">consistent supervision</a> and keep
-        <a href="#steward">delegated work aligned with your goal</a>.</p>
+        This port adds <a href="#double">consistent supervision</a> and
+        <a href="#steward">outcome alignment</a>.</p>
       <nav aria-label="Project links">
         <a href="https://github.com/doublexmax/pstack-copilot">View the repository</a>
         <a href="#double">Supervision</a>
@@ -30,31 +29,37 @@
 
     <section aria-labelledby="workflows">
       <p class="eyebrow">Adapted from upstream pstack</p>
-      <h2 id="workflows">Engineering playbooks for Copilot</h2>
+      <h2 id="workflows">Engineering playbooks, not just code generation</h2>
       <p>Start with a goal and a way to verify it. The <code>/poteto-mode</code> skill
         selects a playbook and coordinates the skills and agents needed for the task.
         Workflows cover investigation, bug fixes, feature development, code review,
         performance work, and longer autonomous runs.</p>
       <p>Choose the models used for delegated work and review panels with
         <code>/setup-pstack</code>.</p>
-      <p><a href="https://github.com/poteto">poteto</a> created the original pstack.
-        This port uses the same MIT license.</p>
+      <p>pstack Copilot is an independent port of
+        <a href="https://github.com/cursor/plugins/tree/main/pstack">pstack for Cursor</a>
+        by <a href="https://github.com/poteto">poteto</a>.
+        It is MIT-licensed and adapted to Copilot, not a mirror of the Cursor plugin.</p>
     </section>
 
     <section aria-labelledby="double">
+      <p class="eyebrow">Custom addition to this port</p>
       <h2 id="double">Consistent supervision</h2>
-      <p>An independent, read-only verifier checks an agent's claims and test edits
-        against the repository and session artifacts. It flags claims that the evidence
-        contradicts, even when you're away.</p>
-      <p><a href="https://github.com/doublexmax/pstack-copilot/blob/main/README.md#double-supervisor">How independent supervision works</a></p>
+      <p>Attach an independent, read-only verifier to any worker session.
+        It checks factual claims and test or comparator edits against real repository
+        state and session artifacts, and messages the worker only when primary
+        evidence refutes a claim. It never writes the worker's code or prescribes fixes.</p>
+      <p><a href="https://github.com/doublexmax/pstack-copilot/blob/main/README.md#double-supervisor">Read how independent supervision works in the README</a>.</p>
     </section>
 
     <section aria-labelledby="steward">
-      <h2 id="steward">Alignment with your goal</h2>
-      <p>A coordinator keeps the intended outcome in focus while other agents do
-        the work. It gathers context, flags gaps early, and checks whether the
-        results match what you asked for.</p>
-      <p><a href="https://github.com/doublexmax/pstack-copilot/blob/main/README.md#steward-supervisor">How the coordinator keeps work aligned</a></p>
+      <p class="eyebrow">Custom addition to this port</p>
+      <h2 id="steward">Outcome alignment</h2>
+      <p>Keep your intended outcome above implementation details while
+        <code>/poteto-mode</code> handles direct engineering. It gathers relevant
+        context up front, flags missing context or capability limits early, and
+        coordinates bounded work across repository and non-repository deliverables.</p>
+      <p><a href="https://github.com/doublexmax/pstack-copilot/blob/main/README.md#steward-supervisor">Read how outcome alignment works in the README</a>.</p>
     </section>
 
     <section aria-labelledby="install">
