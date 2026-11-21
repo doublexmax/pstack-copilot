@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>pstack for GitHub Copilot | Multi-agent engineering workflows</title>
-  <meta name="description" content="An independent port of pstack for Cursor to GitHub Copilot, with multi-agent engineering playbooks, Double for evidence checks, and Steward for coordinating work.">
+  <meta name="description" content="An independent port of pstack for Cursor to GitHub Copilot, with multi-agent engineering playbooks, consistent supervision, and help keeping work aligned with your goals.">
   <meta name="google-site-verification" content="X00SCREtqxwvSwsGG0A3Md6jXMQNGUW6aII2g-MXhT0" />
   <link rel="canonical" href="https://doublexmax.github.io/pstack-copilot/">
   <link rel="stylesheet" href="style.css">
@@ -17,12 +17,12 @@
       <p class="intro">An independent port of
         <a href="https://github.com/cursor/plugins/tree/main/pstack">pstack for Cursor</a> to GitHub Copilot.
         Investigate bugs, review code, and build features with evidence.
-        <a href="#double">Double</a> checks your agent's claims against real artifacts.
-        <a href="#steward">Steward</a> keeps delegated work aligned with your goal.</p>
+        Get <a href="#double">consistent supervision</a> and keep
+        <a href="#steward">delegated work aligned with your goal</a>.</p>
       <nav aria-label="Project links">
         <a href="https://github.com/doublexmax/pstack-copilot">View the repository</a>
-        <a href="#double">Double supervisor</a>
-        <a href="#steward">Steward coordinator</a>
+        <a href="#double">Supervision</a>
+        <a href="#steward">Alignment</a>
         <a href="#install">Install pstack</a>
         <a href="https://github.com/doublexmax/pstack-copilot/blob/main/docs/guide/README.md">Read the guide</a>
       </nav>
@@ -42,47 +42,25 @@
     </section>
 
     <section aria-labelledby="double">
-      <p class="eyebrow">Custom addition to this port</p>
-      <h2 id="double">Double checks your agent's claims</h2>
-      <p><a href="https://github.com/doublexmax">@doublexmax</a> created Double for
-        <code>pstack-copilot</code>. It is a custom addition, not available in upstream
-        <a href="https://github.com/cursor/plugins/tree/main/pstack"><code>cursor/plugins</code> <code>pstack</code></a>.
-        Read the <a href="https://github.com/doublexmax/pstack-copilot/blob/main/skills/double/SKILL.md">Double skill</a>
-        and <a href="https://github.com/doublexmax/pstack-copilot/blob/main/agents/double.agent.md">supervisor agent</a>
-        for the full behavior.</p>
-      <p>Run <code>/double</code> inside the worker session, not a separate chat.
-        It attaches a nested <code>Double: &lt;worker name&gt;</code> verifier session.
-        Long unattended tasks in <code>/poteto-mode</code> attach Double automatically.</p>
-      <p>Double selects from your configured <code>double verifier</code> pool.
-        It prefers a model with a different vendor family from the worker.
-        It falls back to the first pool entry if none differs.</p>
-      <p>A local Python watcher waits at zero model tokens.
-        The runtime extension wakes an idle Double session when the worker resumes.
-        Verification turns spend model tokens.</p>
-      <p>Double checks factual claims and test or comparator edits against real repository state and session artifacts.
-        It is a read-only supervisor. It never writes the worker's code or prescribes fixes.</p>
-      <p>Double messages the worker only when primary evidence refutes a claim.
-        It stays silent on verified and unverified claims. Silence is not approval.
-        <a href="#try-double">Try Double in a worker session</a>.</p>
+      <h2 id="double">Consistent supervision</h2>
+      <p>An independent, read-only verifier checks an agent's claims and test edits
+        against the repository and session artifacts. It flags claims that the evidence
+        contradicts, even when you're away.</p>
+      <p><a href="https://github.com/doublexmax/pstack-copilot/blob/main/README.md#double-supervisor">How independent supervision works</a></p>
     </section>
 
     <section aria-labelledby="steward">
-      <p class="eyebrow">Custom addition to this port</p>
-      <h2 id="steward">Steward keeps work aligned with your goal</h2>
-      <p>Use Steward when you want an agent to keep track of the outcome while
-        other agents handle parts of the work. Steward gathers context, flags gaps
-        early, and coordinates code and non-code deliverables.</p>
-      <p>Run <code>/steward</code> in Copilot or start with
-        <code>copilot --agent steward</code>. Use <code>/poteto-mode</code> for direct
-        engineering work. Read the
-        <a href="https://github.com/doublexmax/pstack-copilot/blob/main/skills/steward/SKILL.md">Steward skill</a>
-        for how it coordinates work and reviews results before handing them back.</p>
+      <h2 id="steward">Alignment with your goal</h2>
+      <p>A coordinator keeps the intended outcome in focus while other agents do
+        the work. It gathers context, flags gaps early, and checks whether the
+        results match what you asked for.</p>
+      <p><a href="https://github.com/doublexmax/pstack-copilot/blob/main/README.md#steward-supervisor">How the coordinator keeps work aligned</a></p>
     </section>
 
     <section aria-labelledby="install">
       <h2 id="install">Install pstack for GitHub Copilot</h2>
       <p>You need Git, Node.js, and the GitHub Copilot CLI with access to the models
-        you select. Double also needs Python, with <code>python</code> on your <code>PATH</code>.
+        you select. The independent verifier also needs Python, with <code>python</code> on your <code>PATH</code>.
         In a POSIX shell, clone the project, register its skills, and copy its agents:</p>
       <pre><code>git clone https://github.com/doublexmax/pstack-copilot ~/.copilot/pstack
 copilot skill add ~/.copilot/pstack/skills
@@ -90,7 +68,7 @@ mkdir -p ~/.copilot/agents
 cp ~/.copilot/pstack/agents/*.agent.md ~/.copilot/agents/
 copilot skill list</code></pre>
       <p>For always-on mode, run the installer. It updates your Copilot instructions,
-        path trust, shell wrapper, and runtime hooks. It also installs Double's runtime extension.
+        path trust, shell wrapper, and runtime hooks. It also installs the verifier's runtime extension.
         Preview the changes first if needed:</p>
       <pre><code>node ~/.copilot/pstack/scripts/install-always-on.mjs --dry-run
 node ~/.copilot/pstack/scripts/install-always-on.mjs</code></pre>
@@ -108,11 +86,7 @@ Reproduce it first, fix the root cause, and verify the result.</code></pre>
       <pre><code>/poteto-mode review this PR for correctness and regressions.
 Explain the evidence for each finding and what still needs verification.</code></pre>
       <h3 id="try-double">Supervise a worker session</h3>
-      <p>Run this inside the worker session, not a separate chat:</p>
-      <pre><code>/double</code></pre>
-      <p>Look for the nested <code>Double: &lt;worker name&gt;</code> session.
-        It messages the worker only with evidence that refutes a claim.
-        Silence is not approval, even when a claim remains unverified.</p>
+      <p><a href="https://github.com/doublexmax/pstack-copilot/blob/main/README.md#attach-double">Attach an independent verifier to a worker session</a>.</p>
       <p>You do not need to name every skill or prescribe the delegation plan.
         Describe the outcome and what would prove it works.</p>
     </section>

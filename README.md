@@ -11,7 +11,8 @@ bugs, review code, and build features with a plan for verifying the result.
 Run `/poteto-mode` to pick a playbook for your task. Use `/setup-pstack` to
 choose the models for delegated work and review panels.
 
-The port adds two agents that are not in upstream pstack:
+The port adds consistent supervision and a way to keep delegated work aligned
+with your goal:
 
 - [Double](#double-supervisor) checks an agent's factual claims and test edits
   against repository state and session artifacts. Run `/double` in the worker

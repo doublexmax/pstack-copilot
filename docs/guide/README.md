@@ -2,7 +2,7 @@
 
 This guide covers the GitHub Copilot port of pstack for Cursor. Describe what you want and how you'll know it's done. `/poteto-mode` picks a playbook, runs the skills it needs, and shows you the evidence.
 
-Use `/poteto-mode` for direct engineering work. To check a worker's claims against repository state and session artifacts, attach [Double](../../README.md#double-supervisor). To keep delegated work aligned with your intended outcome, use [Steward](../../README.md#steward-supervisor).
+Use `/poteto-mode` for direct engineering work. The README explains how to [check an agent's claims against evidence](../../README.md#double-supervisor) and [keep delegated work aligned with your goal](../../README.md#steward-supervisor).
 
 Here's what you'll learn:
 
