@@ -98,7 +98,7 @@ Overwrite the whole file so re-runs stay idempotent. Representative override syn
 ```
 # budget: unlimited (max)
 how explainer: auto
-swarm workers: gpt-6.1-sol / high
+swarm workers: gpt-6.2-sol / high
 ```
 
 ### 6. Confirm

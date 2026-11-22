@@ -24,7 +24,7 @@ function envelope(overrides = {}) {
 
 function launch(f) {
   const result = resolveRole({
-    role: 'how explainer', model: 'gpt-6.1-sol', effort: 'max', workload: 'large-corpus',
+    role: 'how explainer', model: 'gpt-6.2-sol', effort: 'max', workload: 'large-corpus',
     why: 'Compare the named contracts together.', inputs: ['skills', 'always-on'],
     hostContext: true, hostSource: 'Current task schema', support: 'supported', source: 'Current exact-model task schema',
   }, f);
@@ -41,7 +41,7 @@ test('native mutation preserves payload and writes a concise durable decision', 
   const routed = runHook('preToolUse', event, f);
   assert.deepEqual(routed.output, { modifiedArgs: { ...event.toolArgs, context_tier: 'long_context' } });
   assert.equal(routed.record.role, 'how explainer');
-  assert.equal(routed.record.effectiveModel, 'gpt-6.1-sol');
+  assert.equal(routed.record.effectiveModel, 'gpt-6.2-sol');
   assert.equal(routed.record.tier, 'long_context');
   const dir = join(f.home, 'pstack-context-decisions', 'session-1');
   const files = readdirSync(dir);
@@ -343,7 +343,7 @@ test('task and kickoff observations retain dispatch policy when policy or opt-ou
   for (const target of ['task', 'create_session', 'open_pr_session', 'open_issue_session']) {
     configurePolicy({ defaultMode: 'always_long' }, f);
     const plan = resolveRole({
-      role: 'how explainer', target, model: 'gpt-6.1-sol', effort: 'max',
+      role: 'how explainer', target, model: 'gpt-6.2-sol', effort: 'max',
       workload: 'bounded', why: 'Read one helper.', support: 'supported',
       source: 'Current exact-model schema', hostContext: true, hostSource: 'Current launch schema',
     }, f);

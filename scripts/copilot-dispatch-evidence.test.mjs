@@ -6,23 +6,23 @@ function fixture() {
   const args = {
     name: 'pstack-proof',
     prompt: 'Read the named file.',
-    model: 'gpt-6.1-sol',
+    model: 'gpt-6.2-sol',
     reasoning_effort: 'max',
     context_tier: 'default',
     agent_type: 'general-purpose',
   };
   return {
-    expectedModel: 'gpt-6.1-sol',
+    expectedModel: 'gpt-6.2-sol',
     expectedTier: 'long_context',
     events: [
       { type: 'session.start', data: {
-        sessionId: 'session', copilotVersion: '1.0.87-0', selectedModel: 'gpt-6.1-sol',
+        sessionId: 'session', copilotVersion: '1.0.87-0', selectedModel: 'gpt-6.2-sol',
         contextTier: 'default', context: { branch: 'feature', headCommit: 'abc' },
       } },
       { type: 'assistant.message', data: { toolRequests: [{ name: 'task', toolCallId: 'call', arguments: args }] } },
       { type: 'subagent.started', agentId: 'agent', data: { toolCallId: 'call' } },
       { type: 'subagent.configured', agentId: 'agent', timestamp: 'configured', data: {
-        model: 'gpt-6.1-sol', reasoningEffort: 'max', contextTier: 'long_context',
+        model: 'gpt-6.2-sol', reasoningEffort: 'max', contextTier: 'long_context',
       } },
       { type: 'tool.execution_complete', timestamp: 'completed', data: { toolCallId: 'call', success: true } },
     ],
@@ -32,9 +32,9 @@ function fixture() {
 
 test('reports original, post-hook, and effective values for the same successful delegate', () => {
   assert.deepEqual(inspectDispatch(fixture()), {
-    sessionId: 'session', copilotVersion: '1.0.87-0', parentModel: 'gpt-6.1-sol', parentTier: 'default',
+    sessionId: 'session', copilotVersion: '1.0.87-0', parentModel: 'gpt-6.2-sol', parentTier: 'default',
     branch: 'feature', headCommit: 'abc', delegates: [{
-      agentId: 'agent', toolCallId: 'call', name: 'pstack-proof', model: 'gpt-6.1-sol',
+      agentId: 'agent', toolCallId: 'call', name: 'pstack-proof', model: 'gpt-6.2-sol',
       reasoningEffort: 'max', requestedTier: 'default', postHookTier: 'long_context',
       effectiveTier: 'long_context', configuredAt: 'configured', completedAt: 'completed',
     }],
