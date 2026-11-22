@@ -37,7 +37,7 @@ test('read-only verification permits only the exact resolver read commands', () 
 test('independent observation records the actual post-hook payload without granting permission', () => {
   const dir = mkdtempSync(join(tmpdir(), 'pstack-observer-'));
   try {
-    const event = { toolName: 'task', toolArgs: { name: 'pstack-reader', context_tier: 'long_context', model: 'gpt-6.1-sol' } };
+    const event = { toolName: 'task', toolArgs: { name: 'pstack-reader', context_tier: 'long_context', model: 'gpt-6.2-sol' } };
     const result = spawnSync(process.execPath, [script, 'post', dir, resolver], {
       encoding: 'utf8', input: JSON.stringify(event),
     });

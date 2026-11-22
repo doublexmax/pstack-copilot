@@ -25,7 +25,7 @@ assert.ok(process.env.COPILOT_GITHUB_TOKEN || process.env.GH_TOKEN || process.en
   'provide authentication in the process environment; the verifier never reads or writes credentials');
 const cli = resolve(options['--cli']);
 const out = resolve(options['--out']);
-const model = options['--model'] ?? 'gpt-6.1-sol';
+const model = options['--model'] ?? 'gpt-6.2-sol';
 assert.ok(/^[a-z0-9][a-z0-9.-]*$/.test(model), 'invalid model ID');
 assert.ok(!existsSync(out), 'use a new evidence directory; existing evidence is never overwritten');
 mkdirSync(out, { recursive: true });

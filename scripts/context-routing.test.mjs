@@ -30,7 +30,7 @@ function fixture(t, mode = 'adaptive') {
 function request(overrides = {}) {
   return {
     role: 'feature, refactoring',
-    model: 'gpt-6.1-sol',
+    model: 'gpt-6.2-sol',
     effort: 'max',
     workload: 'bounded',
     why: 'Read the named helper.',
@@ -62,10 +62,10 @@ test('shipped policy requires long context when no personal policy exists', (t) 
   const f = fixture(t, null);
   const result = resolveRole(request(), f);
   assert.deepEqual(result.toolArguments, {
-    model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: 'long_context',
+    model: 'gpt-6.2-sol', reasoning_effort: 'max', context_tier: 'long_context',
   });
   assert.deepEqual(result.decision, {
-    role: 'feature, refactoring', effectiveModel: 'gpt-6.1-sol', workload: 'bounded',
+    role: 'feature, refactoring', effectiveModel: 'gpt-6.2-sol', workload: 'bounded',
     policy: 'always_long', evidence: [
       join(f.root, 'context.default.json'), 'Current task context_tier schema', 'Current exact-model task schema',
     ], diagnostics: [], status: 'resolved', tier: 'long_context', reason: 'policy-long',
@@ -93,7 +93,7 @@ test('supported joint large-corpus work gets long context without changing the m
   const f = fixture(t);
   const result = resolveRole(request({ workload: 'large-corpus' }), f);
   assert.deepEqual(result.toolArguments, {
-    model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: 'long_context',
+    model: 'gpt-6.2-sol', reasoning_effort: 'max', context_tier: 'long_context',
   });
   assert.equal(result.decision.reason, 'eligible-large-corpus');
 });
@@ -105,7 +105,7 @@ test('exact role policy overrides the global mode', (t) => {
   });
   const result = resolveRole(request({ workload: 'large-corpus' }), f);
   assert.deepEqual(result.toolArguments, {
-    model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: 'default',
+    model: 'gpt-6.2-sol', reasoning_effort: 'max', context_tier: 'default',
   });
   assert.equal(result.decision.reason, 'policy-default');
 });
@@ -116,7 +116,7 @@ test('always_long ignores workload size but still needs current host and model s
   for (const workload of ['bounded', 'large-corpus']) {
     const supported = resolveRole(request({ workload }), f);
     assert.deepEqual(supported.toolArguments, {
-      model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: 'long_context',
+      model: 'gpt-6.2-sol', reasoning_effort: 'max', context_tier: 'long_context',
     });
     assert.equal(supported.decision.policy, 'always_long');
     assert.equal(supported.decision.reason, 'policy-long');
@@ -139,14 +139,14 @@ test('fixed policies select the same tier for tasks and every kickoff target reg
     for (const workload of ['bounded', 'large-corpus']) {
       for (const target of ['task', 'create_session', 'open_pr_session', 'open_issue_session']) {
         const result = resolveRole(request({ target, workload }), f);
-        const args = { model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: tier };
+        const args = { model: 'gpt-6.2-sol', reasoning_effort: 'max', context_tier: tier };
         assert.deepEqual(result.toolArguments, target === 'task' ? args : { kickoff: args });
       }
     }
   }
   f.write('pstack-context.json', { schemaVersion: 1, roles: { 'feature, refactoring': 'always_long' } });
   assert.deepEqual(resolveRole(request(), f).toolArguments, {
-    model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: 'long_context',
+    model: 'gpt-6.2-sol', reasoning_effort: 'max', context_tier: 'long_context',
   });
   for (const invalid of [
     { schemaVersion: 1, default: 'long_context' },
@@ -165,7 +165,7 @@ test('adaptive unknown and unsupported support select default with explicit diag
   ]) {
     const result = resolveRole(request({ workload: 'large-corpus', support }), f);
     assert.deepEqual(result.toolArguments, {
-      model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: 'default',
+      model: 'gpt-6.2-sol', reasoning_effort: 'max', context_tier: 'default',
     });
     assert.equal(result.decision.reason, reason);
     assert.deepEqual(result.decision.diagnostics, [reason]);
@@ -190,7 +190,7 @@ test('Double resolves the original shipped multi-vendor pool without personal ov
   const f = fixture(t, null);
   const choices = [
     { model: 'claude-opus-5.5', reasoning_effort: 'max', context_tier: 'long_context' },
-    { model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: 'long_context' },
+    { model: 'gpt-6.2-sol', reasoning_effort: 'max', context_tier: 'long_context' },
     { model: 'gemini-4-argon', reasoning_effort: 'high', context_tier: 'long_context' },
   ];
   for (const [member, expected] of choices.entries()) {
@@ -200,18 +200,18 @@ test('Double resolves the original shipped multi-vendor pool without personal ov
     assert.deepEqual(result.toolArguments, { kickoff: expected });
   }
   assert.deepEqual(resolveRole(request({ model: undefined, effort: undefined }), f).toolArguments, {
-    model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: 'long_context',
+    model: 'gpt-6.2-sol', reasoning_effort: 'max', context_tier: 'long_context',
   });
 });
 
 test('a single-model Double override replaces the entire default pool', (t) => {
   const f = fixture(t, null);
-  f.write('pstack-models.md', 'double verifier: gpt-6.1-sol / xhigh\n');
+  f.write('pstack-models.md', 'double verifier: gpt-6.2-sol / xhigh\n');
   const launch = request({
     role: 'double verifier', member: 0, model: undefined, effort: undefined, target: 'create_session',
   });
   assert.deepEqual(resolveRole(launch, f).toolArguments, {
-    kickoff: { model: 'gpt-6.1-sol', reasoning_effort: 'xhigh', context_tier: 'long_context' },
+    kickoff: { model: 'gpt-6.2-sol', reasoning_effort: 'xhigh', context_tier: 'long_context' },
   });
   assert.throws(() => resolveRole({ ...launch, member: 1 }, f), /invalid panel member/);
 });
@@ -219,7 +219,7 @@ test('a single-model Double override replaces the entire default pool', (t) => {
 test('legacy model configuration and mixed panels resolve every member independently', (t) => {
   const f = fixture(t);
   const models = '# budget: unlimited (max)\n'
-    + 'arena runners: claude-opus-5.5 / max, gpt-6.1-sol / max, grok-4.7 / xhigh, gemini-3.8-flash / high\n';
+    + 'arena runners: claude-opus-5.5 / max, gpt-6.2-sol / max, grok-4.7 / xhigh, gemini-3.8-flash / high\n';
   f.write('pstack-models.md', models);
   const states = ['supported', 'supported', 'unknown', 'unsupported'];
   const results = states.map((support, member) => resolveRole({
@@ -229,7 +229,7 @@ test('legacy model configuration and mixed panels resolve every member independe
   }, f));
   assert.deepEqual(results.map((result) => result.toolArguments), [
     { model: 'claude-opus-5.5', reasoning_effort: 'max', context_tier: 'long_context' },
-    { model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: 'long_context' },
+    { model: 'gpt-6.2-sol', reasoning_effort: 'max', context_tier: 'long_context' },
     { model: 'grok-4.7', reasoning_effort: 'xhigh', context_tier: 'default' },
     { model: 'gemini-3.8-flash', reasoning_effort: 'high', context_tier: 'default' },
   ]);
@@ -300,7 +300,7 @@ test('parent settings do not enable long context for a bounded child', (t) => {
   const f = fixture(t);
   f.write('settings.json', { contextTier: 'long_context', subagents: { agents: { 'general-purpose': { contextTier: 'long_context' } } } });
   assert.deepEqual(resolveRole(request(), f).toolArguments, {
-    model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: 'default',
+    model: 'gpt-6.2-sol', reasoning_effort: 'max', context_tier: 'default',
   });
 });
 
@@ -353,7 +353,7 @@ test('malformed policy, duplicate JSON keys, unknown roles, and malformed legacy
   }
   f.write('pstack-context.json', { schemaVersion: 1 });
   for (const raw of [
-    'feature, refactoring: gpt-6.1-sol / impossible\n', 'feature, refactoring: auto / max\n',
+    'feature, refactoring: gpt-6.2-sol / impossible\n', 'feature, refactoring: auto / max\n',
     'bad line\n',
     'feature, refactoring: auto\nfeature, refactoring: inherit-parent\n',
   ]) {
@@ -364,11 +364,11 @@ test('malformed policy, duplicate JSON keys, unknown roles, and malformed legacy
 
 test('retired valid model-role lines are diagnostic and never rewritten or allowed to block context-only setup', (t) => {
   const f = fixture(t);
-  const models = 'how critics: gpt-6.1-sol / max\nfeature, refactoring: gpt-6.1-sol / max\n';
+  const models = 'how critics: gpt-6.2-sol / max\nfeature, refactoring: gpt-6.2-sol / max\n';
   f.write('pstack-models.md', models);
   configurePolicy({ defaultMode: 'adaptive' }, f);
   const result = resolveRole(request(), f);
-  assert.deepEqual(result.toolArguments, { model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: 'default' });
+  assert.deepEqual(result.toolArguments, { model: 'gpt-6.2-sol', reasoning_effort: 'max', context_tier: 'default' });
   assert.deepEqual(result.decision.diagnostics, ['retired-model-role:how critics']);
   assert.equal(readFileSync(join(f.home, 'pstack-models.md'), 'utf8'), models);
   assert.deepEqual(routeToolCall(event(result), f).output, { modifiedArgs: event(result).toolArgs });
@@ -426,16 +426,16 @@ test('the executable resolver returns tool arguments and rejects invalid CLI opt
   assert.equal(JSON.parse(shown.stdout).personalFile, join(f.home, 'pstack-context.json'));
   const args = [
     'resolve', '--role', 'feature, refactoring', '--workload', 'bounded', '--why', 'Read one helper.',
-    '--model', 'gpt-6.1-sol', '--effort', 'max', '--host-context', 'supported', '--host-source', 'Current task schema',
+    '--model', 'gpt-6.2-sol', '--effort', 'max', '--host-context', 'supported', '--host-source', 'Current task schema',
     '--support', 'supported', '--source', 'Current exact-model evidence',
   ];
   const result = f.run(...args);
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout).toolArguments, {
-    model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: 'default',
+    model: 'gpt-6.2-sol', reasoning_effort: 'max', context_tier: 'default',
   });
 
-  for (const extra of [['--role', 'bug-fix'], ['--member', '1.5'], ['--nope', 'value'], ['--default', 'adaptive'], ['--parent-model', 'gpt-6.1-sol']]) {
+  for (const extra of [['--role', 'bug-fix'], ['--member', '1.5'], ['--nope', 'value'], ['--default', 'adaptive'], ['--parent-model', 'gpt-6.2-sol']]) {
     const failed = f.run(...args, ...extra);
     assert.equal(failed.status, 1);
     assert.equal(failed.stdout, '');
@@ -445,14 +445,14 @@ test('the executable resolver returns tool arguments and rejects invalid CLI opt
 
 test('role discovery and resolution use the same configured panel, including aliases', (t) => {
   const f = fixture(t);
-  f.write('pstack-models.md', 'arena runners: gpt-6.1-sol / high, auto\n');
+  f.write('pstack-models.md', 'arena runners: gpt-6.2-sol / high, auto\n');
   const shown = f.run('show', '--role', 'arena runners');
   assert.equal(shown.status, 0, shown.stderr);
   assert.deepEqual(JSON.parse(shown.stdout), {
-    role: 'arena runners', models: [{ model: 'gpt-6.1-sol', reasoning_effort: 'high' }, { alias: 'auto' }], diagnostics: [],
+    role: 'arena runners', models: [{ model: 'gpt-6.2-sol', reasoning_effort: 'high' }, { alias: 'auto' }], diagnostics: [],
   });
   for (const [member, expected] of [
-    [0, { model: 'gpt-6.1-sol', reasoning_effort: 'high', context_tier: 'default' }],
+    [0, { model: 'gpt-6.2-sol', reasoning_effort: 'high', context_tier: 'default' }],
     [1, { context_tier: 'default' }],
   ]) {
     const resolved = f.run('resolve', '--role', 'arena runners', '--member', String(member),

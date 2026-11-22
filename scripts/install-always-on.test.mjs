@@ -640,13 +640,13 @@ const cases = {
       delete after['.copilot/pstack-context.json'];
       assert.deepStrictEqual(after, before);
       const result = JSON.parse(execFileSync(process.execPath, [resolver, 'resolve',
-        '--role', 'how explainer', '--model', 'gpt-6.1-sol', '--effort', 'max',
+        '--role', 'how explainer', '--model', 'gpt-6.2-sol', '--effort', 'max',
         '--workload', 'bounded', '--why', 'Read one helper.', '--input', 'src/format.mjs',
         '--host-context', 'supported', '--host-source', 'Current task context schema',
         '--support', 'supported', '--source', 'Exact-model current task schema',
       ], { env, encoding: 'utf8' }));
       assert.deepStrictEqual(result.toolArguments, {
-        model: 'gpt-6.1-sol', reasoning_effort: 'max', context_tier: 'default',
+        model: 'gpt-6.2-sol', reasoning_effort: 'max', context_tier: 'default',
       });
       assert.strictEqual(result.decision.reason, 'bounded-work');
       assert.ok(result.declaration.startsWith('PSTACK_CONTEXT_V1 '));
