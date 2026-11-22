@@ -29,8 +29,14 @@ test('page links resolve to local assets, sections, or existing repository paths
     if (href.startsWith('#')) {
       assert.ok(html.includes(`id="${href.slice(1)}"`), `Missing section: ${href}`);
     } else if (href.startsWith(`${repository}/blob/main/`)) {
-      const path = href.slice(`${repository}/blob/main/`.length);
-      assert.ok(existsSync(new URL(`../${path}`, site)), `Missing repository file: ${path}`);
+      const [path, anchor] = href.slice(`${repository}/blob/main/`.length).split('#');
+      const file = new URL(`../${path}`, site);
+      assert.ok(existsSync(file), `Missing repository file: ${path}`);
+      if (path === 'README.md' && anchor) {
+        const headings = [...readFileSync(file, 'utf8').matchAll(/^#{1,6}\s+([\w -]+)\r?$/gm)];
+        assert.ok(headings.some(([, heading]) => heading.toLowerCase().replaceAll(' ', '-') === anchor),
+          `Missing README section: ${anchor}`);
+      }
     } else if (!href.startsWith('https://')) {
       assert.ok(existsSync(new URL(href, site)), `Missing asset: ${href}`);
     }
@@ -78,6 +84,18 @@ test('README all-skills table exposes the Steward skill', () => {
   assert.match(table, /^\| \[`\/steward`\]\(\.\/skills\/steward\/SKILL\.md\) \|/m);
 });
 
+test('guide overview covers stepping above poteto-mode with Steward', () => {
+  const guideUrl = new URL('../docs/guide/README.md', import.meta.url);
+  const guide = readFileSync(guideUrl, 'utf8');
+  assert.match(guide, /^## Step above `\/poteto-mode` with `\/steward`\r?$/m);
+  assert.match(guide, /copilot --agent steward/);
+  assert.match(guide, /poteto-worker/);
+  assert.match(guide, /skip steward/);
+  for (const [, target] of guide.matchAll(/\]\((\.[^)#]+)\)/g)) {
+    assert.ok(existsSync(new URL(target, guideUrl)), `Missing guide link target: ${target}`);
+  }
+});
+
 test('README custom additions include Steward alongside Double', () => {
   const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
   const additions = readme.match(/(?:^|\n)### custom additions\r?\n([\s\S]*?)(?:\r?\n#{1,3} |$)/)?.[1];
@@ -99,43 +117,29 @@ test('each section labels itself with its own heading', () => {
   }
 });
 
-test('navigation and introduction lead to Double before installation', () => {
+test('navigation and introduction lead to supervision and alignment before installation', () => {
   const nav = html.match(/<nav\b[^>]*>([\s\S]*?)<\/nav>/)[1];
   const intro = html.match(/<p class="intro">([\s\S]*?)<\/p>/)[1];
-  assert.match(nav, /href="#double"/);
-  assert.match(intro, /href="#double"/);
-  assert.ok(html.includes('id="double"'));
-  assert.ok(html.indexOf('id="double"') < html.indexOf('id="install"'));
+  for (const id of ['double', 'steward']) {
+    assert.ok(nav.includes(`href="#${id}"`));
+    assert.ok(intro.includes(`href="#${id}"`));
+    assert.ok(html.indexOf(`id="${id}"`) < html.indexOf('id="install"'));
+  }
+  const description = html.match(/<meta name="description" content="([^"]+)">/)[1];
+  assert.doesNotMatch(`${description} ${nav} ${intro}`.replace(/<[^>]*>/g, ''), /\b(?:double|steward)\b/i);
   const workflows = html.match(/<section aria-labelledby="workflows">([\s\S]*?)<\/section>/)[1];
   assert.match(workflows, /class="eyebrow">Adapted from upstream/);
 });
 
-test('Double documents its provenance, verifier selection, and supervision limits', () => {
-  const section = html.match(/<section aria-labelledby="double">([\s\S]*?)<\/section>/)?.[1];
-  assert.ok(section, 'Missing Double section');
-  const text = section.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
-  for (const href of [
-    'https://github.com/doublexmax',
-    'https://github.com/doublexmax/pstack-copilot/blob/main/skills/double/SKILL.md',
-    'https://github.com/doublexmax/pstack-copilot/blob/main/agents/double.agent.md',
-    'https://github.com/cursor/plugins/tree/main/pstack',
-    '#try-double',
+test('capability sections send readers to detailed README instructions', () => {
+  for (const [section, anchor] of [
+    ['double', 'double-supervisor'],
+    ['steward', 'steward-supervisor'],
+    ['examples', 'attach-double'],
   ]) {
-    assert.ok(section.includes(`href="${href}"`), `Missing Double link: ${href}`);
+    const body = html.match(new RegExp(`<section aria-labelledby="${section}">([\\s\\S]*?)</section>`))?.[1];
+    assert.ok(body?.includes(`/blob/main/README.md#${anchor}"`), `Missing README link in ${section}`);
   }
-  assert.match(text, /@doublexmax/);
-  assert.match(text, /custom addition/i);
-  assert.match(text, /not (?:available )?in upstream/i);
-  assert.match(text, /cursor\/plugins/);
-  assert.match(text, /worker session/i);
-  assert.match(text, /double verifier/);
-  assert.match(text, /vendor family/i);
-  assert.match(text, /model tokens/i);
-  assert.match(text, /refutes/i);
-  assert.match(text, /silence[^.]*not[^.]*approval/i);
-  assert.doesNotMatch(html, /on another model family/i);
-  const example = html.match(/<h3 id="try-double">[\s\S]*?<pre><code>([\s\S]*?)<\/code><\/pre>/);
-  assert.equal(example?.[1], '/double');
   const install = html.match(/<section aria-labelledby="install">([\s\S]*?)<\/section>/)[1];
   assert.match(install, /Python/);
   assert.match(install, /runtime extension/i);
@@ -150,6 +154,11 @@ test('README separates Double additions from upstream adaptations', () => {
   assert.match(double, /\[@doublexmax\]\(https:\/\/github\.com\/doublexmax\)/);
   assert.match(double, /not (?:available )?in upstream/i);
   assert.match(double, /cursor\/plugins/);
+  const steward = readme.match(/(?:^|\n)## steward supervisor\r?\n([\s\S]*?)(?:\r?\n## |$)/)?.[1];
+  assert.ok(steward, 'Missing Steward supervisor section');
+  assert.match(steward, /^### run steward\r?$/m);
+  assert.match(steward, /poteto-worker/);
+  assert.match(steward, /copilot --agent steward/);
   const upstream = readme.match(/(?:^|\n)## what changed from upstream\r?\n([\s\S]*?)(?:\r?\n## |$)/)[1];
   assert.match(upstream, /^### port adaptations\r?$/m);
   assert.match(upstream, /^### custom additions\r?$/m);
