@@ -158,4 +158,5 @@ it is a source-coverage gate, not a tree inventory.
   The census emits only grouped cloud metadata queries. Draft auditing does not require a history plan.
 - `extensions/double/extension.mjs`.
 - `skills/poteto-mode/references/ado.md`.
+- [`docs/guide/11-steward.md`](./guide/11-steward.md) explains how to use Steward above `poteto-mode`.
 - `models.default.md`, `context.default.json`, `CONTRIBUTING.md`, `.github/`, and this page.

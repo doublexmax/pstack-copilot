@@ -57,6 +57,15 @@ test('README links to the public project overview', () => {
   assert.ok(readme.includes(`](${canonical})`));
 });
 
+test('README introduces Steward and links its guide before direct usage', () => {
+  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const steward = readme.search(/^## steward supervisor\r?$/m);
+  const usage = readme.search(/^## usage\r?$/m);
+  assert.ok(steward >= 0, 'Missing Steward supervisor section');
+  assert.ok(usage > steward, 'Usage must follow the Steward supervisor section');
+  assert.match(readme.slice(steward, usage), /\]\(\.\/docs\/guide\/11-steward\.md\)/);
+});
+
 test('README inventory matches the skill, playbook, principle, and agent files', () => {
   const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
   const skills = readdirSync(new URL('../skills/', import.meta.url), { withFileTypes: true })
@@ -91,8 +100,41 @@ test('guide overview covers stepping above poteto-mode with Steward', () => {
   assert.match(guide, /copilot --agent steward/);
   assert.match(guide, /poteto-worker/);
   assert.match(guide, /skip steward/);
+  assert.match(guide, /\]\(\.\/11-steward\.md\)/);
   for (const [, target] of guide.matchAll(/\]\((\.[^)#]+)\)/g)) {
     assert.ok(existsSync(new URL(target, guideUrl)), `Missing guide link target: ${target}`);
+  }
+});
+
+test('Steward guide explains coordination and gives commands to copy', () => {
+  const guideUrl = new URL('../docs/guide/11-steward.md', import.meta.url);
+  const guide = readFileSync(guideUrl, 'utf8');
+  const lines = guide.split(/\r?\n/);
+  for (const responsibility of ['Outcome', 'Context and capability', 'Production commitments', 'Confidence']) {
+    assert.ok(lines.includes(`### ${responsibility}`), `Missing Steward responsibility: ${responsibility}`);
+  }
+  for (const topic of [
+    '<session_dir>/files/overview.md', 'open_canvas', 'poteto-worker', 'mode: "sync"', 'mode: "background"',
+    'create_session', 'send_session_message', 'get_changes_overview', 'PSTACK_CONTEXT_V1',
+    'arena cross-judge pool', 'rework critic', 'Double',
+  ]) {
+    assert.ok(guide.includes(topic), `Missing Steward guide topic: ${topic}`);
+  }
+  assert.match(guide, /^```mermaid\r?$/m);
+  const examples = [...guide.matchAll(/^```(?:bash|text)\r?\n([\s\S]*?)^```\r?$/gm)]
+    .flatMap(([, example]) => example.trimEnd().split(/\r?\n/));
+  for (const command of [
+    'copilot --agent steward', 'pstack --agent steward', '/steward', '/poteto-mode', 'skip steward', 'skip steward mode',
+  ]) {
+    assert.ok(examples.includes(command), `Missing Steward command example: ${command}`);
+  }
+  assert.ok(examples.some((line) => line.startsWith('/steward ')), 'Missing a Steward handoff prompt');
+  assert.match(guide, /\]\(\.\/README\.md\)/);
+  for (const [, target] of guide.matchAll(/\]\(([^)\s]+)\)/g)) {
+    const url = new URL(target, guideUrl);
+    if (url.protocol === 'file:') {
+      assert.ok(existsSync(url), `Missing Steward guide link target: ${target}`);
+    }
   }
 });
 

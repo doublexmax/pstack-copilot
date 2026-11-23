@@ -64,6 +64,27 @@ const cases = [
     output: /ok: 1 skills, 3 markdown files/,
   },
   {
+    name: 'allows the local Steward guide without an upstream manifest entry',
+    frontmatter: 'description: A description.',
+    files: { 'docs/guide/11-steward.md': '# Steward\n\n[Project README](../../README.md)\n' },
+    status: 0,
+    output: /ok: 1 skills, 2 markdown files/,
+  },
+  {
+    name: 'rejects foreign tokens in the local Steward guide',
+    frontmatter: 'description: A description.',
+    files: { 'docs/guide/11-steward.md': '# Steward\n\nUse AskQuestion.\n' },
+    status: 1,
+    output: /foreign-token \(1\)\s+docs\/guide\/11-steward\.md: .*AskQuestion/,
+  },
+  {
+    name: 'rejects broken links in the local Steward guide',
+    frontmatter: 'description: A description.',
+    files: { 'docs/guide/11-steward.md': '# Steward\n\n[Missing page](./missing.md)\n' },
+    status: 1,
+    output: /broken-link \(1\)\s+docs\/guide\/11-steward\.md: \.\/missing\.md does not resolve/,
+  },
+  {
     name: 'rejects docs excluded by the upstream manifest',
     frontmatter: 'description: A description.',
     files: {

@@ -1,12 +1,13 @@
 # pstack for GitHub Copilot
 
 pstack brings multi-agent workflows, engineering playbooks, and consistent
-supervision and alignment to GitHub Copilot. Use it to investigate bugs, review
-code, and build features with explicit verification rather than just generating
-more code.
+supervision and alignment to GitHub Copilot. use it to verify a bounded
+engineering change or hand an entire outcome to an orchestrator that directs its
+own worker team.
 
 [Project overview and quick start](https://doublexmax.github.io/pstack-copilot/)
 | [Full guide](./docs/guide/README.md)
+| [Steward guide](./docs/guide/11-steward.md)
 
 a port of [pstack](https://github.com/cursor/plugins/tree/main/pstack) by
 [poteto](https://x.com/poteto), rewritten to run on the github copilot
@@ -14,24 +15,45 @@ app. 54 skills, 23 playbooks, 24 principles, and 5 agents. MIT, same license as 
 
 this is not a mirror. the cursor plugin manifest, the `/add-plugin` install path,
 the event-triggered automations, and the graphite stacking layer are all gone.
-copilot equivalents took their place. this port also adds consistent supervision
-and outcome alignment through [double](#double-supervisor) and
-[steward](#steward-supervisor), created by
+copilot equivalents took their place. this port also adds outcome alignment and
+consistent supervision through [steward](#steward-supervisor) and
+[double](#double-supervisor), created by
 [@doublexmax](https://github.com/doublexmax) for `pstack-copilot`.
 neither is available in upstream `cursor/plugins` `pstack`. see
 [what changed](#what-changed-from-upstream).
 
-there's a growing sense that ai writes too much slop code. i agree. i don't want to ship like a team of twenty slop artists. throughput without quality is not a goal i aspire to. if you want to go fast, go deep first.
+there's a growing sense that ai writes too much slop code. throughput without
+quality just ships twenty slop diffs faster. if you want to scale agents, each
+worker has to go deep first, and an owner above the workers has to hold the
+outcome.
 
-**pstack is the answer.** it turns copilot into a real engineering team. the goal is not to maximize loc, in fact it's the opposite. pstack helps you write less, but higher quality code.
+**`poteto-mode` is the core.** before you can trust a team of agents, one agent
+has to build and verify cleanly. [`/poteto-mode`](./skills/poteto-mode/SKILL.md)
+gives every engineering task 23 playbooks, 24 principles, multi-model review
+panels, and verification against the real artifact. every
+[`poteto-worker`](./agents/poteto-worker.agent.md) runs that same contract on
+its slice, so parallelism scales rigor instead of slop.
 
-**pstack gives you fearless parallelism.** when you can go deep on one agent and trust it to write good, verifiable code, you can truly parallelize with confidence. start multiple agents up with `poteto-mode` and trust that they'll apply rigorous engineering principles to their work.
+**`steward` is the highest layer of value, operating above `poteto-mode`.**
+clean, verified code on the wrong problem still misses the mark. once
+`poteto-mode` makes individual worker slices trustworthy,
+[`/steward`](./skills/steward/SKILL.md) moves you up from task execution to
+outcome ownership. you bring the goal, and steward gathers domain and repository
+context up front, flags missing inputs or tool limits early, and directs its own
+team of `poteto-worker` subagents and `poteto-mode` sessions across code and
+non-code deliverables until the result matches what you meant.
 
-**copilot gives you the best of all worlds.** every frontier model has its strengths and weaknesses. use any model with pstack. in fact, many of my skills use multi-model workflows to take advantage of each model's unique strengths.
+**`double` checks claims against real artifacts.** run
+[`/double`](./skills/double/SKILL.md) inside a worker session, or let steward
+attach this [read-only supervisor](#double-supervisor) on long unattended runs.
+it checks factual claims and edits to tests or comparators against repository
+state and session artifacts, and messages the worker only when primary evidence
+refutes a claim.
 
-**double checks claims against real artifacts.** run [`/double`](./skills/double/SKILL.md) inside the worker session to attach an independent, read-only supervisor. it checks factual claims and test edits against repository state and session artifacts. it messages the worker only when evidence refutes a claim. it does not write code or prescribe fixes.
-
-**steward orchestrates above the poteto level.** writing clean code is only half the problem. run [`/steward`](./skills/steward/SKILL.md) or start with `copilot --agent steward` to work above [`/poteto-mode`](./skills/poteto-mode/SKILL.md), letting a model guide itself toward your desired outcome by orchestrating its own team of [`poteto-worker`](./agents/poteto-worker.agent.md) subagents and `poteto-mode` sessions. it gathers context up front, flags gaps early, and steers bounded slices across repo and non-repo deliverables until the result matches what you meant.
+**copilot gives every role the right frontier model.** every model family has
+distinct strengths. out of the box, pstack splits code, speed, and judgment
+across frontier lineages and routes cross-vendor critics and verifiers so an
+agent does not grade its own work.
 
 fork it. improve it. make it yours. PRs are welcome!
 
@@ -71,10 +93,17 @@ probe.
 
 ## get started
 
-two steps:
+run [`/setup-pstack`](./skills/setup-pstack/SKILL.md) to choose your models. then
+work at the layer your problem calls for:
 
-1. run [`/setup-pstack`](./skills/setup-pstack/SKILL.md) and choose which models you want.
-2. describe your task. the mode is already on.
+- **work above `poteto-mode` with [`/steward`](#steward-supervisor) or `copilot --agent steward`.**
+  use steward when you want an outcome owner to clarify open scope, surface
+  missing context early, and coordinate `poteto-worker` subagents and
+  `poteto-mode` sessions across repository and non-repository deliverables.
+- **drive the `poteto-mode` core directly.** describe one bounded engineering
+  task, such as a bug fix, refactor, or scoped feature. `poteto-mode` is already
+  on after the always-on install, or type `/poteto-mode` explicitly if you
+  skipped that step.
 
 delegate context defaults to `always_long`. managed launches require long-context
 support for the selected model and tool, and block aliases or unproven support.
@@ -83,20 +112,103 @@ without rewriting model or effort choices. existing personal policy choices take
 capability and workload declarations are agent assertions, not independent proof. see
 [the setup guide](./docs/guide/01-setup.md#configure-delegated-context).
 
-`/poteto-mode` still works if you skipped the always-on step or want to name it
-explicitly.
+new here? start with the [Steward guide](./docs/guide/11-steward.md) for
+outcome-level orchestration, or walk through the [full pstack guide](./docs/guide/README.md)
+from setup and prompting through verification and overnight runs. out of the box
+pstack splits work by model strength. precisely specified code goes to sol, fast
+mechanical code goes to grok, and prose and judgment go to gemini, with a
+four-vendor default panel of gemini, sol, grok, and opus. [`/setup-pstack`](./skills/setup-pstack/SKILL.md)
+changes any of it.
 
-new here? the [pstack guide](./docs/guide/README.md) walks you through a first real task, from setup and prompting through verification and overnight runs.
+## steward supervisor
 
-that's it. the other skills are situational; the mode skill uses them for you as needed. out of the box the mode splits work by model strength: precisely-specified code goes to sol, fast mechanical code goes to grok, and prose and judgment go to gemini. the default panel is gemini / sol / grok / opus 5. [`/setup-pstack`](./skills/setup-pstack/SKILL.md) changes any of it.
+[steward](./agents/steward.agent.md) is a custom addition by
+[@doublexmax](https://github.com/doublexmax) for `pstack-copilot`, not available in upstream
+[`cursor/plugins` `pstack`](https://github.com/cursor/plugins/tree/main/pstack).
+`poteto-mode` is the core that makes individual engineering slices trustworthy.
+steward sits above that core as the highest layer of value, turning reliable
+task execution into end-to-end outcome alignment across a team of
+[`poteto-worker`](./agents/poteto-worker.agent.md) subagents and `poteto-mode`
+project sessions.
+
+### run steward
+
+type [`/steward`](./skills/steward/SKILL.md) in an existing session or start a
+session directly at the orchestration layer:
+
+```bash
+copilot --agent steward
+```
+
+if you installed the `pstack` wrapper, run `pstack --agent steward`.
+steward stays active across follow-ups. drop down to direct engineering with
+`/poteto-mode`, or stand steward down for the session with `skip steward` or
+`skip steward mode`.
+
+### how steward directs poteto-mode
+
+steward holds four standing responsibilities in any order, covering **outcome**,
+**context and capability**, **production commitments**, and **confidence**. it
+tracks the intended outcome, known facts, open gaps, and active slices in a
+session `overview.md` outside the worktree. before committing to costly builds,
+it traces repository or domain context, checks host and shell tools, and
+surfaces missing inputs or capability trade-offs that would change what gets
+built.
+
+instead of writing deliverables inline, steward keeps research, options
+analysis, slice briefs, and acceptance judgment in the root session while
+dispatching bounded work across code, docs, designs, scripts, media pipelines,
+and test suites to synchronous `poteto-worker` slices, parallel waves across
+clean seams, or coordinated `poteto-mode` project sessions. when technical
+viability is uncertain, it proves a short sample slice first. when direction
+changes, it treats earlier drafts as zero sunk cost.
+
+steward inspects user-visible behavior and deliverables directly rather than
+trusting worker self-reports. before returning multi-file or multi-step work, it
+runs a single-pass, read-only rework critic from your configured
+`arena cross-judge pool`, preferring a vendor family different from both steward
+and the worker, then different from the worker, and falling back to the first
+pool entry if none differs. on supervised or long unattended runs, it also
+attaches [double](#double-supervisor) when `create_session` is available.
+
+### steward examples
+
+start from an open brief in chat, even without a repository open, and hand off
+both code and non-repo deliverables:
+
+```text
+/steward take it on from here. own the ticket export flow and the support team's walkthrough.
+keep the walkthrough outside the repo. flag anything that changes what we can build before you start,
+and hand both back for review without publishing.
+```
+
+pull up mid-session when an engineering thread drifts into implementation weeds:
+
+```text
+/steward review our chat against my goal. check what the current changes prove,
+what to cut, and what still needs building. don't edit files yet.
+```
+
+pivot in product terms without micromanaging workers:
+
+```text
+managers need a printable weekly summary instead of the interactive chart.
+keep the verified totals, replace the chart with a one-page pdf, and show me one sample first.
+```
+
+read the [Steward guide](./docs/guide/11-steward.md) for the full architecture,
+five end-to-end workflows, layer-switching commands, and common pitfalls.
 
 ## usage
 
-use [`/poteto-mode`](./skills/poteto-mode/SKILL.md) at the start of a task. it reads your request, picks from a set of playbooks, and runs the other skills as the steps need them.
+`poteto-mode` is the core execution engine underneath steward's workers, and the
+direct entry point whenever you already have one bounded engineering task. use
+[`/poteto-mode`](./skills/poteto-mode/SKILL.md) to pick from twenty-three
+playbooks and run the supporting skills as each step needs them.
 
 ### just use [`/poteto-mode`](./skills/poteto-mode/SKILL.md)
 
-this skill is the main shortcut. i use it whenever i need the agent to do rigorous engineering work. it comes with twenty-three playbooks:
+this skill is the main shortcut for direct engineering execution:
 
 ```
 /poteto-mode this pr has a subtle bug where the scroll drifts every 750ms even when idle. repro
@@ -292,48 +404,6 @@ at zero model tokens. the runtime extension at
 `~/.copilot/extensions/double/extension.mjs` wakes an idle double session when the
 worker resumes. verification turns spend model tokens.
 the [always-on installer](./scripts/install-always-on.mjs) installs the extension.
-
-## steward supervisor
-
-[steward](./agents/steward.agent.md) is a custom addition by
-[@doublexmax](https://github.com/doublexmax) for `pstack-copilot`, not available in upstream
-[`cursor/plugins` `pstack`](https://github.com/cursor/plugins/tree/main/pstack).
-where [`/poteto-mode`](./skills/poteto-mode/SKILL.md) focuses on writing and verifying
-clean code inside an engineering task, steward works a level above it. it moves
-from direct implementation to outcome-driven agent orchestration, allowing a model
-to guide itself toward your desired outcome by managing its own team of
-[`poteto-worker`](./agents/poteto-worker.agent.md) subagents and `poteto-mode`
-project sessions.
-
-steward holds your intended outcome above implementation details. it gathers
-domain and repository context up front, inventories available host and shell tools,
-and surfaces material missing context or capability limits before committing to
-costly builds. instead of authoring deliverables inline, it keeps research, options
-analysis, alignment judgment, and thin contracts open in the root session while
-dispatching bounded production slices across code, docs, designs, scripts, media
-pipelines, and test suites to its `poteto-worker` team. it evaluates each worker's
-output against the intended experience, steers follow-up slices, and scraps
-misaligned attempts without defending sunk cost.
-
-### run steward
-
-enter with [`/steward`](./skills/steward/SKILL.md) inside a session, or start a
-session directly at the orchestration layer:
-
-```
-copilot --agent steward
-```
-
-return to direct engineering with `/poteto-mode`, or stand steward down for the
-session with `skip steward` or `skip steward mode`.
-
-steward holds four standing responsibilities in any order, covering outcome,
-context and capability, production commitments, and confidence. before handback on
-multi-file or multi-step deliverables, it runs a read-only rework critic from your
-configured `arena cross-judge pool`, preferring a vendor family different from both
-steward and the worker, then different from the worker, and falling back to the
-first pool entry if none differs. on long or unattended runs, it also attaches
-[double](#double-supervisor) to audit factual claims.
 
 ## principles
 

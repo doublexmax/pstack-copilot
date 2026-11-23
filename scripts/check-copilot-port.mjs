@@ -53,6 +53,7 @@ const FOREIGN_TOKENS = [
 const TOKEN_ROOTS = ['skills', 'agents', 'docs'];
 
 const UPSTREAM_MAPPING_DOCS = new Set(['docs/upstream-sync.md']);
+const LOCAL_GUIDE_DOCS = new Set(['docs/guide/11-steward.md']);
 
 const violations = [];
 
@@ -176,7 +177,7 @@ for (const file of walk(join(root, 'agents'))) {
   checkManifest(file, basename(file).replace(/\.agent\.md$/, ''));
 }
 
-const allowedDocs = new Set(UPSTREAM_MAPPING_DOCS);
+const allowedDocs = new Set([...UPSTREAM_MAPPING_DOCS, ...LOCAL_GUIDE_DOCS]);
 const syncManifest = join(root, 'scripts', 'upstream-sync.manifest.tsv');
 if (existsSync(syncManifest)) {
   for (const line of read(syncManifest).split('\n')) {
@@ -188,7 +189,7 @@ if (existsSync(syncManifest)) {
 for (const file of walk(join(root, 'docs'))) {
   const path = relative(root, file).split('\\').join('/');
   if (!allowedDocs.has(path)) {
-    fail(file, 'untracked-doc', 'docs/ only allows upstream-synced guide files and docs/upstream-sync.md');
+    fail(file, 'untracked-doc', 'docs/ only allows manifest-claimed files and explicitly listed local docs');
   }
 }
 
