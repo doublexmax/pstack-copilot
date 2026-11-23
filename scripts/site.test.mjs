@@ -57,6 +57,15 @@ test('README links to the public project overview', () => {
   assert.ok(readme.includes(`](${canonical})`));
 });
 
+test('README introduces Steward and links its guide before direct usage', () => {
+  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const steward = readme.search(/^## steward supervisor\r?$/m);
+  const usage = readme.search(/^## usage\r?$/m);
+  assert.ok(steward >= 0, 'Missing Steward supervisor section');
+  assert.ok(usage > steward, 'Usage must follow the Steward supervisor section');
+  assert.match(readme.slice(steward, usage), /\]\(\.\/docs\/guide\/11-steward\.md\)/);
+});
+
 test('README inventory matches the skill, playbook, principle, and agent files', () => {
   const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
   const skills = readdirSync(new URL('../skills/', import.meta.url), { withFileTypes: true })
