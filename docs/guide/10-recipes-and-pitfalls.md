@@ -44,6 +44,16 @@ The qualifiers do real work. "don't change anything yet" keeps it read-only, and
 
 "if there's a cheap test path" matters. Forcing a test through brittle mocks proves less than running the real command, and the playbook is allowed to say so.
 
+## Hand an open outcome to Steward
+
+```text
+/steward take it on from here. Own the export flow we discussed and the support team's walkthrough.
+Keep the walkthrough outside the repo. Flag anything that changes what we can build before you start.
+Show the export with sample data and hand both deliverables back for review. Don't publish.
+```
+
+Steward can take the handoff in a chat without a repository. Read [the Steward page](./11-steward.md) for how it coordinates the work and checks the result.
+
 ## Keep a run honest while you're away
 
 ```text
@@ -89,6 +99,4 @@ That's the whole prompt. [`/bro`](../../skills/bro/SKILL.md) restates the last m
 - **Reporting success off a green build.** A build proves it compiles. Ask for the real command, flow, stored value, or profile, and expect the evidence in the reply.
 - **Writing a `SKILL.md` freehand.** Route it through the [Authoring or modifying a skill playbook](../../skills/poteto-mode/playbooks/authoring-a-skill.md) so validation and review happen.
 
-That's the guide. If you skipped ahead, go back to [setup](./01-setup.md) and run one real task. The habits stick from use, not from reading.
-
-Back to the [guide index](./README.md).
+Next: [Work above `/poteto-mode` with `/steward`](./11-steward.md).
