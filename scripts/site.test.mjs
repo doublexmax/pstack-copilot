@@ -19,8 +19,22 @@ test('project page contains indexable content and canonical metadata', () => {
   assert.match(html, /copilot skill add/);
   assert.match(html, /install-always-on\.mjs --dry-run/);
   assert.match(html, /\/setup-pstack/);
-  assert.match(html, /Reproduce it first/);
-  assert.match(html, /review this PR/);
+});
+
+test('feature example scopes work before handing the conversation to Steward', () => {
+  const examples = html.match(/<section aria-labelledby="examples">([\s\S]*?)<\/section>/)[1];
+  const prompts = [...examples.matchAll(/<pre><code>([\s\S]*?)<\/code><\/pre>/g)]
+    .map(([, prompt]) => prompt);
+  assert.equal(prompts.length, 2);
+  assert.match(prompts[0], /scope/);
+  assert.match(prompts[0], /Don't implement anything yet/);
+  assert.match(prompts[1], /^\/steward use our discussion as the brief/);
+  assert.match(prompts[1], /verify that a saved filter survives a reload/);
+  assert.match(prompts[1], /Leave the changes for review/);
+  const workflows = html.match(/<section aria-labelledby="workflows">([\s\S]*?)<\/section>/)[1];
+  assert.match(workflows, /poteto-worker/);
+  assert.match(workflows, /poteto-mode/);
+  assert.match(workflows, /checks the combined result against your goal/);
 });
 
 test('page links resolve to local assets, sections, or existing repository paths', () => {

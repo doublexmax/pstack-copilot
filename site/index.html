@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>pstack for GitHub Copilot | Multi-agent engineering workflows</title>
-  <meta name="description" content="Multi-agent engineering workflows for GitHub Copilot, with consistent supervision that checks claims against real artifacts and alignment that keeps work focused on the intended outcome.">
+  <meta name="description" content="Shape a feature with GitHub Copilot, then hand it to a team of agents with consistent supervision and alignment around your intended outcome.">
   <meta name="google-site-verification" content="X00SCREtqxwvSwsGG0A3Md6jXMQNGUW6aII2g-MXhT0" />
   <link rel="canonical" href="https://doublexmax.github.io/pstack-copilot/">
   <link rel="stylesheet" href="style.css">
@@ -14,12 +14,13 @@
     <header>
       <p class="eyebrow">Open-source skills and agents</p>
       <h1>pstack for GitHub Copilot</h1>
-      <p class="intro">Bring multi-agent engineering workflows to GitHub Copilot.
-        Investigate bugs, review code, and build features with evidence.
-        This port adds <a href="#double">consistent supervision</a> and
-        <a href="#steward">outcome alignment</a>.</p>
+      <p class="intro">Work with GitHub Copilot to shape a feature, then hand it to
+        a team of agents to build and verify. This port adds
+        <a href="#double">consistent supervision</a> and
+        <a href="#steward">outcome alignment</a> to keep the work on track.</p>
       <nav aria-label="Project links">
         <a href="https://github.com/doublexmax/pstack-copilot">View the repository</a>
+        <a href="#workflows">How it works</a>
         <a href="#double">Supervision</a>
         <a href="#steward">Alignment</a>
         <a href="#install">Install pstack</a>
@@ -29,13 +30,18 @@
 
     <section aria-labelledby="workflows">
       <p class="eyebrow">Adapted from upstream pstack</p>
-      <h2 id="workflows">Engineering playbooks, not just code generation</h2>
-      <p>Start with a goal and a way to verify it. The <code>/poteto-mode</code> skill
-        selects a playbook and coordinates the skills and agents needed for the task.
-        Workflows cover investigation, bug fixes, feature development, code review,
-        performance work, and longer autonomous runs.</p>
-      <p>Choose the models used for delegated work and review panels with
-        <code>/setup-pstack</code>.</p>
+      <h2 id="workflows">From idea to verified work</h2>
+      <p>First, talk through the feature with Copilot. Agree on who it is for,
+        what it should do, what is out of scope, and how to check the result.</p>
+      <p>Then hand the conversation to <code>/steward</code>. Steward keeps the
+        outcome in view and directs <code>poteto-worker</code> subagents and
+        <code>poteto-mode</code> sessions to build and verify the work.</p>
+      <p>You stay focused on the decisions that matter while the team works through
+        the details. Steward checks the combined result against your goal, so
+        verified code is less likely to solve the wrong problem.</p>
+      <p>For a single bounded task, you can also use <code>/poteto-mode</code>
+        directly. Its playbooks cover investigation, bug fixes, features, review,
+        performance, and longer runs.</p>
       <p>pstack Copilot is an independent port of
         <a href="https://github.com/cursor/plugins/tree/main/pstack">pstack for Cursor</a>
         by <a href="https://github.com/poteto">poteto</a>.
@@ -55,13 +61,11 @@
     <section aria-labelledby="steward">
       <p class="eyebrow">Custom addition to this port</p>
       <h2 id="steward">Outcome alignment</h2>
-      <p>Move beyond writing clean code in a single loop. An orchestration layer works
-        above <code>/poteto-mode</code> so the model can guide itself toward your desired
-        outcome by directing its own team of <code>poteto-worker</code> subagents and
-        <code>poteto-mode</code> sessions.</p>
-      <p>It holds your intended outcome above implementation details, gathers relevant
-        context up front, flags missing context or capability limits early, and steers
-        bounded production slices across repository and non-repository deliverables.</p>
+      <p>Steward works above <code>/poteto-mode</code>, the core engineering layer.
+        It gathers context, flags missing information or capability limits, and
+        directs bounded pieces of work across repository and non-repository deliverables.</p>
+      <p>It checks the deliverables against the outcome you agreed on, rather than
+        relying only on the workers' reports.</p>
       <p><a href="https://github.com/doublexmax/pstack-copilot/blob/main/README.md#steward-supervisor">Read how outcome alignment works in the README</a>.</p>
     </section>
 
@@ -86,17 +90,18 @@ node ~/.copilot/pstack/scripts/install-always-on.mjs</code></pre>
     </section>
 
     <section aria-labelledby="examples">
-      <h2 id="examples">Three tasks to try</h2>
-      <h3>Investigate and fix a bug</h3>
-      <pre><code>/poteto-mode the export writes duplicate rows when a retry lands mid-run.
-Reproduce it first, fix the root cause, and verify the result.</code></pre>
-      <h3>Review a change before shipping</h3>
-      <pre><code>/poteto-mode review this PR for correctness and regressions.
-Explain the evidence for each finding and what still needs verification.</code></pre>
+      <h2 id="examples">Try the workflow</h2>
+      <p>Start a conversation in Copilot and work out the feature together:</p>
+      <pre><code>Help me plan saved filters for the support dashboard.
+Ask what users need, what should be in scope, and how we should verify it.
+Don't implement anything yet.</code></pre>
+      <p>Once you agree on the scope, hand the same conversation to Steward:</p>
+      <pre><code>/steward use our discussion as the brief. Build saved filters and
+verify that a saved filter survives a reload. Leave the changes for review.</code></pre>
+      <p>Steward can divide the work among its workers, check what they deliver,
+        and bring the result back to you.</p>
       <h3 id="try-double">Supervise a worker session</h3>
       <p><a href="https://github.com/doublexmax/pstack-copilot/blob/main/README.md#attach-double">Attach an independent verifier to a worker session</a>.</p>
-      <p>You do not need to name every skill or prescribe the delegation plan.
-        Describe the outcome and what would prove it works.</p>
     </section>
 
     <footer>
