@@ -146,6 +146,13 @@ export function checkStewardContract(root) {
   if (productionSection && /\bverbatim\s+user\b/i.test(productionSection.body)) {
     errors.push(`${skillPath}: Production commitments must pass Steward's resolved direction rather than verbatim user text`);
   }
+  if (productionSection && /\bunconstrained\b/i.test(productionSection.body)) {
+    errors.push(`${skillPath}: Production commitments must bound root reads and edits rather than leaving root work unconstrained`);
+  }
+  const confidenceSection = skillSections.find((section) => section.heading === 'Confidence');
+  if (confidenceSection && /\brerun the critic if deliverables change\b/i.test(confidenceSection.body)) {
+    errors.push(`${skillPath}: Confidence must bound rework-critic reruns rather than looping whenever deliverables change`);
+  }
 
   const skillIndex = extractStewardSkillRefs(root, skillPath, skill, skillSections);
   const agentIndex = extractStewardSkillRefs(root, agentPath, agent, agentSections);

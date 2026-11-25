@@ -194,6 +194,24 @@ test('Steward contract fixtures enforce unordered non-empty sections and index-o
       `${skill}: Production commitments must pass Steward's resolved direction rather than verbatim user text`,
     ]);
   });
+  await t.test('rejects unconstrained root execution inside Production commitments', (t) => {
+    const dir = stewardFixture(t);
+    const file = join(dir, skill);
+    const body = readFileSync(file, 'utf8');
+    writeFileSync(file, body.replace('Bound worker slices and probes.', 'Keep investigation and polish unconstrained.'));
+    assert.deepEqual(checkStewardContract(dir), [
+      `${skill}: Production commitments must bound root reads and edits rather than leaving root work unconstrained`,
+    ]);
+  });
+  await t.test('rejects unbounded rework-critic loops inside Confidence', (t) => {
+    const dir = stewardFixture(t);
+    const file = join(dir, skill);
+    const body = readFileSync(file, 'utf8');
+    writeFileSync(file, body.replace('Run the critic.', 'Route findings and rerun the critic if deliverables change afterward.'));
+    assert.deepEqual(checkStewardContract(dir), [
+      `${skill}: Confidence must bound rework-critic reruns rather than looping whenever deliverables change`,
+    ]);
+  });
 });
 
 test('Steward skill references resolve table columns, links, and principles while ignoring non-skill code spans', async (t) => {

@@ -156,22 +156,23 @@ it traces repository or domain context, checks host and shell tools, and
 surfaces missing inputs or capability trade-offs that would change what gets
 built.
 
-instead of writing deliverables inline, steward keeps research, options
-analysis, slice briefs, and acceptance judgment in the root session while
-translating your goal into resolved slice direction across code, docs, designs,
-scripts, media pipelines, and test suites for synchronous `poteto-worker`
-slices, parallel waves across clean seams, or coordinated `poteto-mode` project
-sessions. when technical viability or subjective fit is uncertain, it proves a
-short sample slice first. when direction changes, it treats earlier drafts as
-zero sunk cost.
+instead of writing deliverables or running multi-step sweeps inline, steward
+keeps brief discovery reads, options analysis, slice briefs, and acceptance
+judgment in the root session while translating your goal into resolved slice
+direction across code, docs, designs, scripts, media pipelines, and test suites
+for synchronous `poteto-worker` slices, parallel waves across clean seams, or
+coordinated `poteto-mode` project sessions. when technical viability or
+subjective fit is uncertain, it proves a short sample slice first. when
+direction changes, it treats earlier drafts as zero sunk cost.
 
 steward inspects user-visible behavior and deliverables directly rather than
 trusting worker self-reports. before returning multi-file or multi-step work, it
-runs a single-pass, read-only rework critic from your configured
-`arena cross-judge pool`, preferring a vendor family different from both steward
-and the worker, then different from the worker, and falling back to the first
-pool entry if none differs. on supervised or long unattended runs, it also
-attaches [double](#double-supervisor) when `create_session` is available.
+verifies scope, numbers, and reader-facing wording against `overview.md`, then
+runs a bounded rework critic from your configured `arena cross-judge pool`,
+preferring a vendor family different from both steward and the worker, then
+different from the worker, and falling back to the first pool entry if none
+differs. on supervised or long unattended runs, it also attaches
+[double](#double-supervisor) when `create_session` is available.
 
 ### steward examples
 
