@@ -513,8 +513,9 @@ const cases = {
     try {
       h.run();
       const dir = h.copilotDir;
-      mkdirSync(join(dir, 'agents'));
+      mkdirSync(join(dir, 'agents'), { recursive: true });
       copyFileSync(join(root, 'agents', 'poteto.agent.md'), join(dir, 'agents', 'poteto.agent.md'));
+      writeFileSync(join(dir, 'agents', 'custom.agent.md'), '---\nname: custom\ndescription: Custom agent.\n---\n# custom\n');
       writeFileSync(join(dir, 'settings.json'), '{"contextTier":"default","subagents":{"agents":{"poteto-worker":{"contextTier":"inherit"}}}}\n');
       writeFileSync(join(dir, 'pstack-models.md'), readFileSync(join(root, 'models.default.md')));
       writeFileSync(join(dir, 'pstack-context.json'), '{"schemaVersion":1,"default":"invalid"}\n');
@@ -668,6 +669,46 @@ const cases = {
         assert.deepStrictEqual(snapshot(h.home), before);
       } finally { h.cleanup(); }
     }
+  },
+  'managed agents install, refresh stale copies, preserve user agents, and refuse foreign collisions'() {
+    const h = withHome();
+    try {
+      const dir = join(h.copilotDir, 'agents');
+      const customFile = join(dir, 'custom.agent.md');
+      const customBody = '---\nname: custom\ndescription: User agent.\n---\n# custom\n';
+      const stewardTarget = join(dir, 'steward.agent.md');
+      const staleSteward = [
+        '---',
+        'name: steward',
+        'description: Legacy Steward copy.',
+        '---',
+        '# steward',
+        'Invoke the `steward` skill and read `SKILL.md` in full.',
+        'Start a todolist from `SKILL.md`\'s phases before dispatching work.',
+      ].join('\n');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(customFile, customBody);
+      writeFileSync(stewardTarget, staleSteward);
+      h.run('--skip-trust', '--skip-shell');
+      for (const name of readdirSync(join(root, 'agents')).filter((entry) => entry.endsWith('.agent.md'))) {
+        assert.strictEqual(readFileSync(join(dir, name), 'utf8'), readFileSync(join(root, 'agents', name), 'utf8'));
+      }
+      assert.strictEqual(readFileSync(customFile, 'utf8'), customBody);
+      h.run('--uninstall', '--skip-trust', '--skip-shell');
+      assert.strictEqual(existsSync(stewardTarget), false);
+      assert.strictEqual(readFileSync(customFile, 'utf8'), customBody);
+      rmSync(customFile);
+      h.run('--skip-trust', '--skip-shell');
+      h.run('--uninstall', '--skip-trust', '--skip-shell');
+      assert.strictEqual(existsSync(dir), false);
+
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(stewardTarget, '---\nname: steward\ndescription: Foreign.\n---\n# foreign steward\n');
+      const before = snapshot(h.home);
+      assert.throws(() => h.run('--skip-trust', '--skip-shell'), /foreign agent/);
+      assert.throws(() => h.run('--uninstall', '--skip-trust', '--skip-shell'), /foreign agent/);
+      assert.deepStrictEqual(snapshot(h.home), before);
+    } finally { h.cleanup(); }
   },
   'help distinguishes hook skip from hook-only removal'() {
     const h = withHome();

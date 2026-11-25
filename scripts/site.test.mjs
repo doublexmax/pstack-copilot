@@ -225,9 +225,10 @@ test('README separates Double additions from upstream adaptations', () => {
   assert.match(additions, /cursor\/plugins/);
   assert.match(additions, /\]\(\.\/docs\/upstream-sync\.md#local-only-files\)/);
   const alwaysOn = readme.match(/(?:^|\n)## always-on\r?\n([\s\S]*?)(?:\r?\n## |$)/)[1];
-  assert.match(alwaysOn, /five user-scoped changes/);
+  assert.match(alwaysOn, /six user-scoped changes/);
+  assert.match(alwaysOn, /~\/\.copilot\/agents\//);
   assert.match(alwaysOn, /~\/\.copilot\/extensions\/double\/extension\.mjs/);
-  assert.match(alwaysOn, /`--uninstall`[^.]*double runtime extension/);
+  assert.match(alwaysOn, /`--uninstall`[^.]*managed agents[^.]*double runtime extension/);
   assert.match(alwaysOn, /`--hooks skip`[^.]*double runtime extension[^.]*unchanged/);
   assert.match(alwaysOn, /`--hooks remove`[^.]*double runtime extension/);
   const skill = readme.split(/\r?\n/).find((line) => line.startsWith('| [`/double`]'));
