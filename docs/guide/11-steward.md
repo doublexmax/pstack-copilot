@@ -34,9 +34,11 @@ flowchart TD
 	C -->|Meets the goal| H["Hand back within your permissions"]
 ```
 
-Steward keeps `<session_dir>/files/overview.md` outside the worktree. It records the intended
-outcome, known facts, open gaps, current slices, and evidence or limits. When the host
-offers `open_canvas`, Steward uses it to refresh the view.
+Steward keeps `<session_dir>/files/overview.md` outside the worktree as its working
+ledger. It records your exact words and decisions alongside its interpreted outcome, labeled
+inferences, known facts, open gaps, current slices, and evidence or limits, anchoring to
+any shared project context when goals span sessions. When the host offers `open_canvas`,
+Steward uses it to refresh the view.
 
 The next four responsibilities stay active throughout the run. If new evidence changes the
 goal during verification, Steward revisits the outcome and updates the worker briefs. It
@@ -45,43 +47,51 @@ responsibilities as phases.
 
 ### Outcome
 
-Steward keeps your words and decisions verbatim. It labels its own inferences and proposed
-scope changes. It checks the result against the experience you want, who it's for, and what
-you ruled out. When your direction or the evidence changes, Steward keeps only the work
-that still fits. Time spent on earlier code or drafts does not justify keeping them.
+Steward preserves your exact words and decisions in `overview.md` while separating its
+interpreted outcome, labeled inferences, and proposed scope changes. It checks the result
+against the lived experience you want, who it's for, and what you ruled out, rejecting
+high-friction workarounds that satisfy literal wording while shifting burden onto you unless
+you accept that trade-off. When your direction or the evidence changes, Steward keeps only
+the work that still fits. Time spent on earlier code or drafts does not justify keeping them.
 
 ### Context and capability
 
 For repository work, Steward traces what the code does now. For open work, it checks the
-domain, product details, references, and the public work of any creators you name. It
-checks shell tools as well as host tools such as the browser, `image_generation`, and
-available MCP servers.
+domain, product details, references, and the public work of any creators you name, settling
+observable unknowns with direct checks or cheap probes first. It checks available host tools
+such as the browser, `image_generation`, and MCP servers as well as local shell tools before
+turning to external dependencies.
 
 If a missing reference, conflicting fact, or tool limit would change the build, format,
 or quality you can get, Steward finishes discovery before it starts production. It updates
-`overview.md` and presents its findings and the options the tools support. It recommends a
-path before assigning work.
+`overview.md` and presents its findings and viable options that preserve your goal rather
+than process overhead or premature abandonment. It recommends a path before assigning work.
 
 ### Production commitments
 
 Steward keeps research, option comparisons, `overview.md`, slice briefs, and output
 inspection in its own session. It can generate host-only assets for workers, make one-line
 polish edits, and carry out authorized git steps. Workers create and revise deliverables.
-Steward does not invoke `poteto-mode` or `figure-it-out` in its own session.
+Steward translates your goal into resolved slice direction rather than passing raw user text
+for workers to interpret, and leaves tactical design and implementation choices to the worker
+unless a verified interface or constraint binds them. Steward does not invoke `poteto-mode`
+or `figure-it-out` in its own session.
 
 - For dependent work, Steward starts fresh `poteto-worker` slices one at a time. When `task`
   exposes `mode`, it uses `mode: "sync"` for these slices. Fresh slices share files on disk
   rather than waiting on `write_agent`, which can time out on non-interactive hosts.
-  If an approach might fail or fall short of the quality bar, Steward runs a short
-  synchronous proof sample and inspects the output before the full build.
+  If fidelity, subjective fit, or technical viability carries real uncertainty, Steward runs
+  a short synchronous proof sample and inspects the output before the full build.
 - For independent slices with separate owners and no shared writes, Steward starts workers
   in one parallel wave. It uses `mode: "background"` when `task` supports it. Steward waits
   for the completion notices before calling `read_agent`.
 - From a chat without a repository, Steward uses `create_session` when a worker needs
   repository access or its own branch or PR. It starts a `poteto-mode` project session
-  with `coordinate_with_creator: true` and `notify_on_idle: "always"`. It sends briefs with
-  `send_session_message` and inspects changes with `get_changes_overview`. Standalone
-  deliverables can go to `poteto-worker` without a repository session.
+  with `coordinate_with_creator: true` and `notify_on_idle: "always"`. It sends
+  coordinator-authored briefs with `send_session_message`, omitting `source_user_message`
+  unless relaying an explicit user restriction or permission, and inspects changes with
+  `get_changes_overview`. Standalone deliverables can go to `poteto-worker` without a
+  repository session.
 
 Before each managed delegate or session kickoff, Steward invokes
 [context routing](../../skills/context-routing/SKILL.md). It copies the resolver's literal
@@ -93,9 +103,10 @@ playbooks, and nested subagents.
 
 ### Confidence
 
-Steward exercises user-visible behavior and inspects the deliverables itself. It runs the
-flow, opens the PDF, or compares the exported data with the expected output. It separates
-what it verified from worker reports and gaps in the evidence.
+Steward exercises user-visible behavior and inspects the deliverables and live state itself
+before reporting completion or status. It runs the flow, opens the PDF, or compares the
+exported data with the expected output. It separates what it verified from worker reports
+and gaps in the evidence.
 
 When `create_session` is available, Steward attaches [Double](../../skills/double/SKILL.md)
 if you request supervision or leave a long run unattended. Double uses the `double verifier`
@@ -108,11 +119,12 @@ Before returning multi-file or multi-step work, Steward also runs a single-pass,
 a model vendor family different from both Steward and the worker, then one different from
 the worker, then `--member 0`.
 
-Steward asks the critic what would make you send the result back. It shares your words
-verbatim, `overview.md`, and the deliverables with inspection evidence. For repository
-work, Steward includes the cumulative merge-base diff, `git status --short`, and untracked
-files. Workers address findings that affect the result. If the deliverables change afterward,
-Steward reruns the critic.
+Steward asks the critic both whether Steward's direction drifted from or diluted your intent
+and what practical experience friction would make you send the result back. It shares your
+exact words and constraints, `overview.md`, and the deliverables with inspection evidence.
+For repository work, Steward includes the cumulative merge-base diff, `git status --short`,
+and untracked files. Workers address findings that affect the result. If the deliverables
+change afterward, Steward reruns the critic.
 
 ## Examples
 

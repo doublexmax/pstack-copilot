@@ -142,6 +142,10 @@ export function checkStewardContract(root) {
     if (matches.length > 1) errors.push(`${skillPath}: duplicate Steward section ${heading}`);
     if (!matches[0].body.trim()) errors.push(`${skillPath}: Steward section ${heading} must not be empty`);
   }
+  const productionSection = skillSections.find((section) => section.heading === 'Production commitments');
+  if (productionSection && /\bverbatim\s+user\b/i.test(productionSection.body)) {
+    errors.push(`${skillPath}: Production commitments must pass Steward's resolved direction rather than verbatim user text`);
+  }
 
   const skillIndex = extractStewardSkillRefs(root, skillPath, skill, skillSections);
   const agentIndex = extractStewardSkillRefs(root, agentPath, agent, agentSections);

@@ -83,7 +83,8 @@ then turn the mode on by default **and** grant path trust for playbooks:
 node ~/.copilot/pstack/scripts/install-always-on.mjs
 ```
 
-that writes the always-on block, adds `~/.copilot` to `config.json`
+that writes the always-on block, installs and refreshes the five agents under
+`~/.copilot/agents/`, adds `~/.copilot` to `config.json`
 `trustedFolders`, installs the [double](./skills/double/SKILL.md) runtime extension
 bound to this clone, and installs a `pstack` wrapper that passes
 `--add-dir ~/.copilot` so headless runs can read playbooks and model
@@ -157,11 +158,12 @@ built.
 
 instead of writing deliverables inline, steward keeps research, options
 analysis, slice briefs, and acceptance judgment in the root session while
-dispatching bounded work across code, docs, designs, scripts, media pipelines,
-and test suites to synchronous `poteto-worker` slices, parallel waves across
-clean seams, or coordinated `poteto-mode` project sessions. when technical
-viability is uncertain, it proves a short sample slice first. when direction
-changes, it treats earlier drafts as zero sunk cost.
+translating your goal into resolved slice direction across code, docs, designs,
+scripts, media pipelines, and test suites for synchronous `poteto-worker`
+slices, parallel waves across clean seams, or coordinated `poteto-mode` project
+sessions. when technical viability or subjective fit is uncertain, it proves a
+short sample slice first. when direction changes, it treats earlier drafts as
+zero sunk cost.
 
 steward inspects user-visible behavior and deliverables directly rather than
 trusting worker self-reports. before returning multi-file or multi-step work, it
@@ -482,7 +484,7 @@ copilot ignores that key, so the port carries the same behaviour a different way
 node scripts/install-always-on.mjs
 ```
 
-the installer manages five user-scoped changes:
+the installer manages six user-scoped changes:
 
 1. a managed block in `~/.copilot/copilot-instructions.md`. copilot loads that
    file into the **system prompt** of every session, in every directory, git or
@@ -492,19 +494,22 @@ the installer manages five user-scoped changes:
    into context. invoking by name matters: a block that pointed at an absolute
    path under `~/.copilot` would be denied the read, while the skill tool loads
    the same file with no permission at all.
-2. `~/.copilot` in `config.json` `trustedFolders`, so the host treats that tree
+2. the five managed agents (`poteto`, `poteto-worker`, `comment-sicko`, `double`,
+   and `steward`) under `~/.copilot/agents/`, refreshing earlier pstack copies
+   while preserving unrelated custom agents.
+3. `~/.copilot` in `config.json` `trustedFolders`, so the host treats that tree
    as trusted without wiping folders you already listed.
-3. a `pstack` CLI wrapper (`~/.copilot/bin/*` plus a marked profile/rc block)
+4. a `pstack` CLI wrapper (`~/.copilot/bin/*` plus a marked profile/rc block)
    that runs `copilot --add-dir ~/.copilot ...`. playbooks, references, and
    `pstack-models.md` are normal disk reads. without that grant, non-interactive
    sessions fail the read and used to invent upstream behavior from memory. the
    mode skill now **stops** on a denied playbook read instead.
-4. `~/.copilot/hooks/pstack-context.json` binds pstack-managed launches to the
+5. `~/.copilot/hooks/pstack-context.json` binds pstack-managed launches to the
    canonical context resolver. it uses direct Node execution, not a shell.
    ordinary unmanaged delegates stay unchanged. decisions have machine-readable
    records, and `skip poteto mode` opts the session out of routing too when hooks
    are enabled.
-5. `~/.copilot/extensions/double/extension.mjs` activates an idle double child
+6. `~/.copilot/extensions/double/extension.mjs` activates an idle double child
    when a supervised worker resumes. the installer binds the extension to this clone.
 
 three properties worth knowing:
@@ -517,7 +522,7 @@ three properties worth knowing:
   `~/.copilot` trust entry. anything else you keep survives.
 
 `--dry-run` shows the change without writing. `--uninstall` removes the managed
-instructions, hooks, double runtime extension, trust entry, and wrappers, not your context or model policy.
+instructions, managed agents, hooks, double runtime extension, trust entry, and wrappers, not your context, model policy, or unrelated custom agents.
 `--skip-shell` leaves profiles and shims alone. `--skip-trust` leaves `config.json`
 unchanged, including JSONC comments. `COPILOT_HOME` isolates the target directory.
 `--hooks skip` leaves existing hooks and the double runtime extension unchanged while refreshing the other integration.

@@ -7,9 +7,11 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const sourceFile = join(root, 'always-on', 'copilot-instructions.md');
+const agentsSourceDir = join(root, 'agents');
 const home = process.env.USERPROFILE || process.env.HOME || homedir();
 const copilotDir = resolve(process.env.COPILOT_HOME || join(home, '.copilot'));
 const instructionsFile = join(copilotDir, 'copilot-instructions.md');
+const agentsDir = join(copilotDir, 'agents');
 const configFile = join(copilotDir, 'config.json');
 const binDir = join(copilotDir, 'bin');
 const hookFile = join(copilotDir, 'hooks', 'pstack-context.json');
@@ -19,6 +21,22 @@ const extensionSource = join(root, 'extensions', 'double', 'extension.mjs');
 const extensionFile = join(copilotDir, 'extensions', 'double', 'extension.mjs');
 const extensionMarker = 'export const ENTRY_VERSION = "pstack-double-extension-v1";';
 const extensionRootLine = 'const pstackRoot = join(homedir(), ".copilot", "pstack");';
+function hasAgentFrontmatterName(text, expectedName) {
+  return new RegExp(`^---\\r?\\n(?:[\\s\\S]*?\\n)?name:\\s*${expectedName}\\r?\\n[\\s\\S]*?\\n---`).test(text);
+}
+
+const ownedAgentSignatures = {
+  'comment-sicko.agent.md': (text) => hasAgentFrontmatterName(text, 'comment-sicko')
+    && text.includes('Yes... Ha ha ha... Yes!'),
+  'double.agent.md': (text) => hasAgentFrontmatterName(text, 'double')
+    && text.includes('Invoke the `double` skill'),
+  'poteto-worker.agent.md': (text) => hasAgentFrontmatterName(text, 'poteto-worker')
+    && text.includes('`poteto-mode`'),
+  'poteto.agent.md': (text) => hasAgentFrontmatterName(text, 'poteto')
+    && text.includes('`poteto-mode`'),
+  'steward.agent.md': (text) => hasAgentFrontmatterName(text, 'steward')
+    && text.includes('Invoke the `steward` skill'),
+};
 
 const instructionsBegin = '<!-- pstack:begin poteto-mode -->';
 const instructionsEnd = '<!-- pstack:end poteto-mode -->';
@@ -27,12 +45,13 @@ const shellEnd = '# END pstack path trust';
 
 const USAGE = `usage: node install-always-on.mjs [--dry-run] [--uninstall] [--skip-shell] [--skip-trust] [--hooks <install|skip|remove>]
 
-Installs poteto-mode instructions, native pstack context hooks, and the double runtime
-extension, adds ~/.copilot to config.json trustedFolders, and installs a pstack wrapper
-that runs copilot with --add-dir ~/.copilot so playbooks and pstack-models.md are readable.
+Installs poteto-mode instructions, managed pstack agents, native pstack context hooks,
+and the double runtime extension, adds ~/.copilot to config.json trustedFolders, and
+installs a pstack wrapper that runs copilot with --add-dir ~/.copilot so playbooks and
+pstack-models.md are readable.
 --skip-trust leaves config.json untouched, including JSONC files.
 --hooks install is the default; skip leaves existing hooks unchanged, including the double extension.
---hooks remove changes only owned hook files and the double extension, not instructions, trust, or wrappers.
+--hooks remove changes only owned hook files and the double extension, not instructions, agents, trust, or wrappers.
 --uninstall removes all managed integration and cannot be combined with --hooks.
 --hooks remove accepts --dry-run but cannot be combined with --skip-shell or --skip-trust.`;
 
@@ -206,6 +225,52 @@ function installDoubleExtension(plan, dryRun) {
     writeFileSync(extensionFile, plan.next);
   }
   console.log(`${plan.next === null ? 'removed' : 'installed'} double extension at ${extensionFile}`);
+}
+
+function planAgents(removing) {
+  const expectedNames = Object.keys(ownedAgentSignatures).sort();
+  if (!removing) {
+    if (!existsSync(agentsSourceDir)) throw new Error(`missing required directory: ${agentsSourceDir}`);
+    const sourceNames = readdirSync(agentsSourceDir).filter((name) => name.endsWith('.agent.md')).sort();
+    if (sourceNames.join(',') !== expectedNames.join(',')) {
+      throw new Error(`${agentsSourceDir}: expected managed agents ${expectedNames.join(', ')}, found ${sourceNames.join(', ')}`);
+    }
+  }
+  return expectedNames.map((name) => {
+    const file = join(agentsDir, name);
+    const current = existsSync(file) ? readFileSync(file, 'utf8') : null;
+    if (current !== null && !ownedAgentSignatures[name](current)) {
+      throw new Error(`refusing to ${removing ? 'remove' : 'replace'} a foreign agent ${file}`);
+    }
+    if (removing) return { name, file, current, next: null };
+    const sourcePath = join(agentsSourceDir, name);
+    const next = readFileSync(sourcePath, 'utf8');
+    if (!ownedAgentSignatures[name](next)) {
+      throw new Error(`${sourcePath}: missing ownership signature for ${name}`);
+    }
+    return { name, file, current, next };
+  });
+}
+
+function installAgents(plan, dryRun) {
+  const changed = plan.filter((entry) => entry.current !== entry.next);
+  if (changed.length === 0) {
+    console.log(`no changes needed at ${agentsDir}`);
+    return;
+  }
+  const removing = changed[0].next === null;
+  if (dryRun) {
+    console.log(`would ${removing ? 'remove' : 'install'} managed agents at ${agentsDir}`);
+    return;
+  }
+  if (removing) {
+    for (const entry of changed) unlinkSync(entry.file);
+    if (existsSync(agentsDir) && readdirSync(agentsDir).length === 0) rmdirSync(agentsDir);
+  } else {
+    mkdirSync(agentsDir, { recursive: true });
+    for (const entry of changed) writeFileSync(entry.file, entry.next);
+  }
+  console.log(`${removing ? 'removed' : 'installed'} managed agents at ${agentsDir}`);
 }
 
 function installInstructions(removing, dryRun) {
@@ -471,9 +536,11 @@ try {
   } else {
     if (!skipTrust) readJson(configFile);
     const psProfile = skipShell ? null : powershellProfilePath();
+    const agents = planAgents(removing);
     const nativeHooks = hooks === 'skip' ? null : await planNativeHooks(removing);
     const extension = hooks === 'skip' ? null : planDoubleExtension(removing);
     installInstructions(removing, dryRun);
+    installAgents(agents, dryRun);
     if (nativeHooks) {
       installNativeHooks(nativeHooks, dryRun);
       installDoubleExtension(extension, dryRun);

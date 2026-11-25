@@ -185,6 +185,15 @@ test('Steward contract fixtures enforce unordered non-empty sections and index-o
     writeFileSync(file, `${readFileSync(file, 'utf8')}\n\n## Dispatch notes\nRoute the next worker.\n`);
     assert.deepEqual(checkStewardContract(dir), []);
   });
+  await t.test('rejects passing verbatim user context inside Production commitments', (t) => {
+    const dir = stewardFixture(t);
+    const file = join(dir, skill);
+    const body = readFileSync(file, 'utf8');
+    writeFileSync(file, body.replace('Bound worker slices and probes.', 'Give each worker slice verbatim user context.'));
+    assert.deepEqual(checkStewardContract(dir), [
+      `${skill}: Production commitments must pass Steward's resolved direction rather than verbatim user text`,
+    ]);
+  });
 });
 
 test('Steward skill references resolve table columns, links, and principles while ignoring non-skill code spans', async (t) => {

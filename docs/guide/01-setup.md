@@ -19,7 +19,7 @@ cp ~/.copilot/pstack/agents/*.agent.md ~/.copilot/agents/
 
 Confirm with `copilot skill list`. The pstack skills appear under `Custom skills:`, which means every repo you open sees them. `~/.copilot/agents/` needs no registration; agents there are discovered from any working directory.
 The copied agents invoke registered skills by name. Skills remain under the separate pstack checkout.
-After updating pstack, repeat the agent copy and rerun `node ~/.copilot/pstack/scripts/install-always-on.mjs` with any flags you used during setup, such as `--skip-trust`, `--skip-shell`, or `--hooks remove`, so your installed instructions, context hooks, and Double runtime extension stay current.
+After updating pstack, rerun `node ~/.copilot/pstack/scripts/install-always-on.mjs` with any flags you used during setup, such as `--skip-trust`, `--skip-shell`, or `--hooks remove`, so your installed instructions, managed agents, context hooks, and Double runtime extension stay current. If you skipped the always-on installer, repeat the manual agent copy instead.
 
 Then turn the mode on by default **and** grant path trust for playbooks:
 
@@ -27,12 +27,13 @@ Then turn the mode on by default **and** grant path trust for playbooks:
 node ~/.copilot/pstack/scripts/install-always-on.mjs
 ```
 
-That one command does four things:
+That one command does five things:
 
 1. Splices a short block into `~/.copilot/copilot-instructions.md`, which Copilot loads into the system prompt of every session in every directory. From then on you describe the task and the mode is already on.
-2. Adds the absolute `~/.copilot` path to `trustedFolders` in `~/.copilot/config.json`, preserving any folders you already trusted.
-3. Installs a `pstack` CLI wrapper (`~/.copilot/bin/` shims plus a marked block in your PowerShell profile or shell rc) that runs `copilot --add-dir ~/.copilot ...`, so headless runs can read playbooks and `pstack-models.md`.
-4. Installs direct-exec Node hooks for [context routing](../../skills/context-routing/SKILL.md) and the [Double](../../skills/double/SKILL.md) runtime extension (`~/.copilot/extensions/double/extension.mjs`). Pstack-managed delegates use a resolved tier, and active supervised sessions wake an idle Double child automatically. Ordinary delegates remain unchanged.
+2. Installs and refreshes the five pstack agents under `~/.copilot/agents/`, preserving any unrelated custom agents you keep there.
+3. Adds the absolute `~/.copilot` path to `trustedFolders` in `~/.copilot/config.json`, preserving any folders you already trusted.
+4. Installs a `pstack` CLI wrapper (`~/.copilot/bin/` shims plus a marked block in your PowerShell profile or shell rc) that runs `copilot --add-dir ~/.copilot ...`, so headless runs can read playbooks and `pstack-models.md`.
+5. Installs direct-exec Node hooks for [context routing](../../skills/context-routing/SKILL.md) and the [Double](../../skills/double/SKILL.md) runtime extension (`~/.copilot/extensions/double/extension.mjs`). Pstack-managed delegates use a resolved tier, and active supervised sessions wake an idle Double child automatically. Ordinary delegates remain unchanged.
 
 The block is user-scoped, so a repo you clone next month is covered without any per-repo setup. `--uninstall` removes the managed changes and leaves unrelated content and personal policy untouched. `--skip-shell` leaves profiles and shims alone. `--dry-run` prints what would change.
 
